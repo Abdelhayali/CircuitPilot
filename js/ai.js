@@ -271,7 +271,8 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   const currentModel = () => { const ms = allModels(); return ms.find(m => m.id === settings.model) || ms.find(m => m.model === settings.model) || NO_MODEL; };
 
   // ---------- context window, usage estimate, compression ----------
-  const ctxCache = {};
+  // detected context sizes, remembered in this browser so each model is probed once
+  const ctxCache = (() => { try { return JSON.parse(localStorage.getItem('cp.ctx') || '{}'); } catch (e) { return {}; } })();
   function contextWindow(model = currentModel()) {
     if (+settings.contextWindow > 0) return +settings.contextWindow;
     if (ctxCache[model.id]) return ctxCache[model.id];
@@ -286,7 +287,12 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   }
   // Ask the server for its real context size (llama.cpp /props, LM Studio, OpenRouter-style model lists).
   async function probeContext(model = currentModel()) {
-    if (model.provider === 'anthropic' || ctxCache[model.id]) return contextWindow(model);
+    if (model.provider === 'anthropic' || model.provider === 'none' || ctxCache[model.id]) return contextWindow(model);
+    const n = await probeContextRaw(model);
+    if (ctxCache[model.id]) { try { localStorage.setItem('cp.ctx', JSON.stringify(ctxCache)); } catch (e) { } }
+    return n;
+  }
+  async function probeContextRaw(model) {
     try {
       const base = await resolveBase(model.base), root = base.replace(/\/v1$/, '');
       const headers = model.key ? { authorization: 'Bearer ' + model.key } : {};
@@ -308,6 +314,17 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         const num = /num_ctx\s+(\d+)/.exec(show.parameters || ''), key = Object.keys(show.model_info || {}).find(k => k.endsWith('.context_length'));
         const v = num ? +num[1] : key ? +show.model_info[key] : 0;
         if (v > 0) return (ctxCache[model.id] = v);
+      }
+      // Last resort: ask for an impossibly long answer. OpenAI-compatible servers (vLLM, NVIDIA NIM, OpenAI…) refuse it
+      // before generating anything, and the refusal states the real limit ("maximum context length is 131072 tokens").
+      if (model.key || !/^https:/.test(model.base)) {
+        const r = await llmFetch(model.base, '/chat/completions', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json' }, headers),
+          body: JSON.stringify({ model: model.model || model.id, messages: [{ role: 'user', content: 'hi' }], max_tokens: 50000000 }), signal: AbortSignal.timeout(12000) }).catch(() => null);
+        if (r && !r.ok) {
+          const t = await r.text().catch(() => '');
+          const mm = /(?:maximum context length|context length|context window|context size|max_model_len|max_seq_len|context_length)[^\d]{0,60}(\d{4,8})/i.exec(t);
+          if (mm && +mm[1] >= 2048) return (ctxCache[model.id] = +mm[1]);
+        }
       }
     } catch (e) { }
     return contextWindow(model);

@@ -55,6 +55,13 @@ async function relay(req, url) {
     if (+(r.headers.get('content-length') || 0) > MAX_BYTES) throw new Error('Document larger than 15 MB');
     const out = new Response(r.body, r); out.headers.set('x-final-url', r.url); return out;
   }
+  if ((m = /^\/llm\/([A-Za-z0-9_-]+)(\/.*)?$/.exec(p))) {
+    // any OpenAI-compatible provider that refuses browser requests (no CORS): base URL as base64url in the path
+    let base; try { base = atob(m[1].replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - m[1].length % 4) % 4)).replace(/\/+$/, ''); } catch (e) { throw new Error('Bad provider URL'); }
+    const u = publicUrl(base); if (u.protocol !== 'https:') throw new Error('Only https:// provider URLs can be forwarded');
+    const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer();
+    return fetch(base + (m[2] || '/') + url.search, { method: req.method, body, headers: { 'content-type': req.headers.get('content-type') || 'application/json', 'authorization': req.headers.get('authorization') || '', 'accept': req.headers.get('accept') || '*/*', 'user-agent': 'CircuitPilot' } });
+  }
   if (p.startsWith('/ollama/')) {
     const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer();
     return fetch('https://ollama.com/' + p.slice('/ollama/'.length) + url.search, { method: req.method, body, headers: { 'content-type': req.headers.get('content-type') || 'application/json', 'authorization': req.headers.get('authorization') || '', 'accept': req.headers.get('accept') || '*/*' } });

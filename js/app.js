@@ -807,7 +807,9 @@ const App = (() => {
   function renderModels() {
     const ms = AI.allModels(), cur = AI.settings.model;
     const grp = (p, label) => { const xs = ms.filter(m => m.provider === p); return xs.length ? `<optgroup label="${label}">` + xs.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + '</optgroup>' : ''; };
-    const html = grp('anthropic', 'Anthropic') + grp('openai', 'OpenAI-compatible · ' + (AI.settings.oaiBase || '').replace(/^https?:\/\//, '').split('/')[0]);
+    // one group per saved provider, so models from several providers can be picked from one menu
+    const byProv = AI.settings.providers.map(p => { const xs = ms.filter(m => m.pid === p.id); return xs.length ? `<optgroup label="${esc(p.name)}">` + xs.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + '</optgroup>' : ''; }).join('');
+    const html = grp('anthropic', 'Anthropic') + byProv;
     $('#modelSel').innerHTML = html || '<option value="">No AI model yet</option>';
     if (html && !AI.modelReady()) $('#modelSel').insertAdjacentHTML('afterbegin', '<option value="" selected>Choose a model…</option>');
     const ready = AI.modelReady();
@@ -820,7 +822,10 @@ const App = (() => {
     base = String(base || '');
     if (/generativelanguage\.googleapis\.com/.test(base)) return ids.find(id => id === 'gemini-flash-lite-latest') || ids.find(id => /flash-lite/.test(id) && !/preview|exp/.test(id)) || ids.find(id => /flash/.test(id)) || ids[0];
     if (/(^|\/\/|\.)ollama\.com/.test(base)) return ids.find(id => id === 'gpt-oss:120b') || ids.find(id => /gpt-oss/.test(id)) || ids[0];
-    return ids[0];
+    // other providers: skip models that cannot chat (embeddings, rerankers, safety / reward models, speech)
+    const chat = ids.filter(id => !/embed|rerank|retriev|safety|guard|reward|tts|whisper|parakeet|canary|ocr|deplot|clip|kosmos/i.test(id)), pool = chat.length ? chat : ids;
+    if (/integrate\.api\.nvidia\.com/.test(base)) return ['nvidia/nemotron-3-super-120b-a12b', 'moonshotai/kimi-k3', 'deepseek-ai/deepseek-v4.1-flash', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'].find(id => pool.includes(id)) || pool[0];
+    return pool[0];
   }
 
   // ---------- first run: connect an AI model (free Gemini / Ollama Cloud guides) ----------
@@ -851,25 +856,25 @@ const App = (() => {
         'Copy the key. It starts with <code>sk-ant-</code>. Paste it below.'],
       note: 'Paid per use. Claude gives the most reliable results on large designs.',
     },
-    other: {
-      steps: ['OpenAI, OpenRouter, xAI Grok, or a model running on your own computer (Ollama, LM Studio, llama.cpp) can be set up in ⚙ Settings.'],
-      note: '',
+    custom: {
+      steps: ['Any service with an <b>OpenAI-compatible</b> API works: OpenAI, OpenRouter, Groq, Together, DeepSeek, Mistral, xAI, or your own server (vLLM, LM Studio, llama.cpp, Ollama).',
+        'Enter its base URL (usually ending in <code>/v1</code>) and your key, then Connect. The models are loaded automatically.'],
+      note: 'You can save several providers and switch between their models in the menu above the chat; manage them in ⚙ Settings. Some providers (NVIDIA, for example) do not accept requests straight from web pages; CircuitPilot then sends them through its relay (or your own server.py on the desktop version), which passes them on and stores nothing.',
     },
   };
   let setupTab = 'gemini';
   function setupRender() {
     const g = SETUP[setupTab];
     $$('#aiSetup .as-tabs button').forEach(b => b.classList.toggle('on', b.dataset.p === setupTab));
-    $('#asGuide').innerHTML = `<ol>${g.steps.map(s => `<li>${s}</li>`).join('')}</ol>${g.note ? `<p class="muted small">${g.note}</p>` : ''}` +
-      (setupTab === 'other' ? '<div class="row"><button id="asOpenSettings" class="primary">Open ⚙ Settings</button></div>' : '');
-    $('#asForm').classList.toggle('hidden', setupTab === 'other');
+    $('#asGuide').innerHTML = `<ol>${g.steps.map(s => `<li>${s}</li>`).join('')}</ol>${g.note ? `<p class="muted small">${g.note}</p>` : ''}`;
+    $('#asCustom').classList.toggle('hidden', setupTab !== 'custom');
     $('#asStatus').textContent = ''; $('#asStatus').className = 'muted';
     if ($('#asOpenSettings')) $('#asOpenSettings').onclick = () => { $('#aiSetup').classList.add('hidden'); openSettings(); };
   }
   function openSetup(tab) { if (tab) setupTab = tab; $('#asKey').value = ''; setupRender(); $('#aiSetup').classList.remove('hidden'); setTimeout(() => $('#asKey').focus(), 50); }
   async function setupConnect() {
     const key = $('#asKey').value.trim(), st = $('#asStatus'), g = SETUP[setupTab];
-    if (!key) { st.className = 'bad'; st.textContent = 'Paste your API key first'; return; }
+    if (!key && setupTab !== 'custom') { st.className = 'bad'; st.textContent = 'Paste your API key first'; return; }   // custom servers may need no key
     st.className = 'muted'; st.textContent = 'Checking the key…'; $('#asConnect').disabled = true;
     try {
       let model;
@@ -878,6 +883,11 @@ const App = (() => {
         if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(AI.friendlyError(r.status, j.error && j.error.message)); }
         model = AI.MODELS.find(m => /sonnet/.test(m.id)) || AI.MODELS[0];
         AI.saveSettings({ anthropicKey: key, model: model.id }); model = model.label;
+      } else if (setupTab === 'custom') {
+        const base = $('#asBase').value.trim().replace(/\/+$/, ''), name = $('#asName').value.trim();
+        if (!/^https?:\/\/\S+/.test(base)) throw new Error('Enter the base URL, e.g. https://api.example.com/v1');
+        const ids = await AI.fetchModels(base, key), pid = AI.saveProvider({ name, base, key, models: ids });
+        model = preferredModel(base, ids); AI.saveSettings({ model: pid + '::' + model });
       } else {
         const ids = await AI.fetchModels(g.base, key), p = g.pick(ids);
         if (setupTab === 'ollama') {   // Ollama lists models without a key, so check the key with a one-token request
@@ -885,7 +895,8 @@ const App = (() => {
           const r = await fetch(base + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model: p.model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 }), signal: AbortSignal.timeout(30000) });
           if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(AI.friendlyError(r.status, j.error && (j.error.message || j.error))); }
         }
-        AI.saveSettings({ oaiBase: g.base, oaiKey: key, oaiModels: p.list.join(', '), model: p.model }); model = p.model;
+        const pid = AI.saveProvider({ base: g.base, key, models: p.list });
+        AI.saveSettings({ model: pid + '::' + p.model }); model = p.model;
       }
       renderModels(); renderChat(); AI.probeContext().then(updateCtx);
       st.className = 'good'; st.textContent = `✓ Connected · using ${model}. You can switch models in the menu above the chat.`;
@@ -896,9 +907,31 @@ const App = (() => {
   }
 
   // ---------- settings ----------
+  // ---------- saved providers (⚙ Settings) ----------
+  let provEditing = null;
+  function provRender() {
+    const ps = AI.settings.providers;
+    $('#provList').innerHTML = ps.length ? ps.map(p => { const n = String(p.models || '').split(',').filter(x => x.trim()).length;
+      return `<div class="prov${p.id === provEditing ? ' editing' : ''}"><div class="pinfo"><b>${esc(p.name)}</b><span class="muted small">${esc(p.base)} · ${n} model${n === 1 ? '' : 's'}${p.key ? ' · key saved' : ''}</span></div><button data-pedit="${esc(p.id)}">Edit</button><button data-pdel="${esc(p.id)}" class="danger" title="Remove this provider">✕</button></div>`; }).join('')
+      : '<div class="muted small">No providers saved yet. Pick a preset below or enter any OpenAI-compatible URL.</div>';
+    $('#provFormTitle').textContent = provEditing ? 'Edit provider' : 'Add a provider';
+  }
+  function provFill(p) {
+    provEditing = p ? p.id : null;
+    $('#sPName').value = p ? p.name : ''; $('#sBase').value = p ? p.base : ''; $('#sOKey').value = p ? p.key : ''; $('#sOModels').value = p ? p.models : '';
+    $('#sFetchStatus').textContent = ''; provRender();
+  }
+  function provSaveForm(quiet) {
+    const base = $('#sBase').value.trim(); if (!base) { if (!quiet) toast('Enter the base URL of the provider'); return null; }
+    const models = $('#sOModels').value.split(',').map(x => x.trim()).filter(Boolean);
+    const pid = AI.saveProvider({ id: provEditing, name: $('#sPName').value, base, key: $('#sOKey').value, models });
+    if (models.length && !AI.modelReady()) AI.saveSettings({ model: pid + '::' + preferredModel(base, models) });
+    provFill(null); renderModels(); if (!quiet) toast('Provider saved');
+    return pid;
+  }
   function openSettings() {
     const s = AI.settings;
-    $('#sAnth').value = s.anthropicKey; $('#sBase').value = s.oaiBase; $('#sOKey').value = s.oaiKey; $('#sOModels').value = s.oaiModels;
+    $('#sAnth').value = s.anthropicKey; provFill(null);
     $('#sMax').value = s.maxTokens; $('#sCtxWin').value = +s.contextWindow > 0 ? s.contextWindow : ''; $('#sCtx').checked = !!s.includeContext; $('#sWeb').checked = s.webAccess !== false; $('#sBrave').value = s.braveKey || ''; $('#sRelay').value = s.relayUrl || '';
     $('#presets').innerHTML = Object.entries(AI.PRESETS).map(([n, u]) => `<button data-u="${esc(u)}">${esc(n)}</button>`).join('');
     $('#modal').classList.remove('hidden');
@@ -918,19 +951,20 @@ const App = (() => {
       st.className = 'bad'; st.textContent = '✗ ' + (e.name === 'TimeoutError' ? 'Timed out' : e.message);
     }
   }
-  async function autoFetchModels() { // on startup, refresh the list from the configured server
-    const s = AI.settings; if (!s.oaiBase) return;
-    try {
-      const ids = await AI.fetchModels(s.oaiBase, s.oaiKey);
-      const upd = { oaiModels: ids.join(', ') };
-      if (!AI.allModels().some(m => m.id === s.model) || (!s.anthropicKey && !ids.includes(s.model))) upd.model = preferredModel(s.oaiBase, ids);
-      AI.saveSettings(upd); renderModels();
-    } catch (e) { }
+  async function autoFetchModels() { // on startup, refresh each saved provider's model list (quietly)
+    for (const p of AI.settings.providers.slice()) {
+      try {
+        const ids = await AI.fetchModels(p.base, p.key);
+        AI.saveProvider(Object.assign({}, p, { models: ids }));
+        if (String(AI.settings.model).startsWith(p.id + '::') && !ids.includes(AI.settings.model.slice(p.id.length + 2))) AI.saveSettings({ model: p.id + '::' + preferredModel(p.base, ids) });
+      } catch (e) { }
+    }
+    if (!AI.modelReady()) { const m = AI.allModels()[0]; if (m) AI.saveSettings({ model: m.id }); }
+    renderModels();
   }
   function saveSettings() {
-    const ids = $('#sOModels').value.split(',').map(x => x.trim()).filter(Boolean);
-    if (ids.length && !$('#sAnth').value.trim() && !ids.includes(AI.settings.model)) AI.saveSettings({ model: preferredModel($('#sBase').value.trim(), ids) });
-    AI.saveSettings({ anthropicKey: $('#sAnth').value.trim(), oaiBase: $('#sBase').value.trim() || ($('#sOKey').value.trim() ? 'https://api.openai.com/v1' : ''), oaiKey: $('#sOKey').value.trim(), oaiModels: $('#sOModels').value, maxTokens: +$('#sMax').value || 8192, contextWindow: +$('#sCtxWin').value || 0, includeContext: $('#sCtx').checked, webAccess: $('#sWeb').checked, braveKey: $('#sBrave').value.trim(), relayUrl: $('#sRelay').value.trim() });
+    if ($('#sBase').value.trim()) provSaveForm(true);   // a provider typed in the form but not saved yet
+    AI.saveSettings({ anthropicKey: $('#sAnth').value.trim(), maxTokens: +$('#sMax').value || 8192, contextWindow: +$('#sCtxWin').value || 0, includeContext: $('#sCtx').checked, webAccess: $('#sWeb').checked, braveKey: $('#sBrave').value.trim(), relayUrl: $('#sRelay').value.trim() });
     $('#modal').classList.add('hidden'); renderModels(); AI.probeContext().then(updateCtx); toast('Settings saved (stored only in this browser)');
   }
 
@@ -1148,7 +1182,14 @@ const App = (() => {
     $('#btnSettings').onclick = openSettings;
     $('#sCancel').onclick = () => $('#modal').classList.add('hidden');
     $('#sSave').onclick = saveSettings;
-    $('#presets').onclick = e => { const b = e.target.closest('button'); if (b) { $('#sBase').value = b.dataset.u; fetchModelsUI(); } };
+    $('#presets').onclick = e => { const b = e.target.closest('button'); if (b) { const p = AI.settings.providers.find(x => x.base === b.dataset.u); if (p) provFill(p); else { provEditing = null; $('#sPName').value = b.textContent.trim(); $('#sBase').value = b.dataset.u; $('#sOKey').value = ''; $('#sOModels').value = ''; provRender(); } fetchModelsUI(); } };
+    $('#provSave').onclick = () => provSaveForm(false);
+    $('#provNew').onclick = () => provFill(null);
+    $('#provList').onclick = e => {
+      const ed = e.target.closest('[data-pedit]'), del = e.target.closest('[data-pdel]');
+      if (ed) provFill(AI.settings.providers.find(p => p.id === ed.dataset.pedit));
+      if (del) { const p = AI.settings.providers.find(x => x.id === del.dataset.pdel); if (p && confirm(`Remove ${p.name}? Its key is deleted from this browser.`)) { AI.removeProvider(p.id); if (provEditing === p.id) provFill(null); provRender(); renderModels(); } }
+    };
     $('#sFetch').onclick = fetchModelsUI;
     let ft; $('#sBase').oninput = $('#sOKey').oninput = () => { clearTimeout(ft); ft = setTimeout(fetchModelsUI, 600); };
     autoFetchModels();

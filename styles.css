@@ -445,3 +445,10 @@ body:not(.static-web) #modal .webonly { display: none; }
 /* screenshot the AI looked at (view_design) */
 .msg img.shot { display: block; max-width: 100%; max-height: 260px; margin: 4px 0 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: zoom-in; }
 .msg img.shot.big { max-height: none; cursor: zoom-out; }
+/* saved AI providers (Settings) */
+.prov-list { display: grid; gap: 6px; margin-bottom: 10px; }
+.prov { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.prov.editing { border-color: var(--accent); }
+.prov .pinfo { flex: 1; min-width: 0; display: grid; }
+.prov .pinfo span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prov-form { border-top: 1px dashed var(--line); padding-top: 8px; }

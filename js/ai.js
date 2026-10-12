@@ -22,6 +22,30 @@ const AI = (() => {
   let settings = Object.assign({}, defaults);
   try { Object.assign(settings, JSON.parse(localStorage.getItem('cp.settings') || '{}')); } catch (e) { }
   const saveSettings = s => { settings = Object.assign(settings, s); try { localStorage.setItem('cp.settings', JSON.stringify(settings)); } catch (e) { } };
+  // Several OpenAI-compatible providers can be saved at once, each with its own URL, key and models:
+  // settings.providers = [{ id, name, base, key, models: 'a, b' }]; a model is chosen as "<provider id>::<model id>".
+  const hostName = base => { try { const h = new URL(base).hostname.replace(/^www\./, ''); return { 'generativelanguage.googleapis.com': 'Google Gemini', 'ollama.com': 'Ollama Cloud', 'api.openai.com': 'OpenAI', 'openrouter.ai': 'OpenRouter', 'api.x.ai': 'xAI Grok', localhost: 'Local server', '127.0.0.1': 'Local server' }[h] || h; } catch (e) { return 'Custom'; } };
+  if (!Array.isArray(settings.providers)) {   // older single-provider settings → the first entry of the list
+    settings.providers = [];
+    if (settings.oaiBase) {
+      settings.providers.push({ id: 'p1', name: hostName(settings.oaiBase), base: settings.oaiBase, key: settings.oaiKey || '', models: settings.oaiModels || '' });
+      if (settings.model && (settings.oaiModels || '').split(',').map(s => s.trim()).includes(settings.model)) settings.model = 'p1::' + settings.model;
+    }
+    saveSettings({});
+  }
+  // add or update a provider (same base URL = same provider); returns its id
+  function saveProvider(p) {
+    const list = settings.providers.slice(), base = String(p.base || '').trim().replace(/\/+$/, '');
+    if (!base) throw new Error('Enter the base URL of the provider (e.g. https://api.example.com/v1)');
+    let cur = list.find(x => (p.id && x.id === p.id) || x.base === base);
+    if (!cur) { let n = list.length + 1; while (list.some(x => x.id === 'p' + n)) n++; cur = { id: 'p' + n }; list.push(cur); }
+    Object.assign(cur, { name: String(p.name || '').trim() || hostName(base), base, key: String(p.key || '').trim(), models: Array.isArray(p.models) ? p.models.join(', ') : String(p.models || '') });
+    saveSettings({ providers: list });
+    return cur.id;
+  }
+  function removeProvider(id) {
+    saveSettings({ providers: settings.providers.filter(p => p.id !== id), model: String(settings.model).startsWith(id + '::') ? '' : settings.model });
+  }
   // Local model servers (localhost / this PC) are reached through server.py's /llm-proxy/<port>/,
   // which works from phones on the LAN and sidesteps missing CORS headers.
   let proxyOk = null;
@@ -29,6 +53,25 @@ const AI = (() => {
     if (proxyOk !== null) return proxyOk;
     try { const r = await fetch('/llm-proxy/_ping'); proxyOk = r.ok && (await r.json()).ok === true; } catch (e) { proxyOk = false; }
     return proxyOk;
+  }
+  // Providers whose API refuses requests from web pages (no CORS headers, e.g. NVIDIA) are reached through
+  // /llm-ext/<base64url of the base URL>: server.py on the desktop, the CircuitPilot relay on the web version.
+  // Remembered per host after the first refused request.
+  const viaProxy = new Set((() => { try { return JSON.parse(localStorage.getItem('cp.corsHosts') || '[]'); } catch (e) { return []; } })());
+  const b64url = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const extBase = base => `${location.origin}/llm-ext/${b64url(String(base).trim().replace(/\/+$/, ''))}`;
+  async function llmFetch(base, path, opts = {}) {
+    base = String(base || '').trim().replace(/\/+$/, '');
+    const resolved = await resolveBase(base);
+    let host = ''; try { host = new URL(base).host; } catch (e) { }
+    const direct = resolved === base && /^https:/.test(base);   // local servers and Ollama Cloud already have their own route
+    if (direct && viaProxy.has(host)) return fetch(extBase(base) + path, opts);
+    try { return await fetch(resolved + path, opts); }
+    catch (e) {
+      if (!direct || e.name === 'AbortError' || e.name === 'TimeoutError' || (opts.signal && opts.signal.aborted)) throw e;
+      viaProxy.add(host); try { localStorage.setItem('cp.corsHosts', JSON.stringify([...viaProxy])); } catch (x) { }
+      return fetch(extBase(base) + path, opts);
+    }
   }
   async function resolveBase(base) {
     base = String(base || '').trim().replace(/\/+$/, '');
@@ -41,7 +84,7 @@ const AI = (() => {
   }
   async function fetchModels(base, key) {
     const headers = {}; if (key) headers.authorization = 'Bearer ' + key;
-    const res = await fetch(await resolveBase(base) + '/models', { headers, signal: AbortSignal.timeout(8000) });
+    const res = await llmFetch(base, '/models', { headers, signal: AbortSignal.timeout(15000) });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(friendlyError(res.status, (Array.isArray(j) ? j[0] : j)?.error?.message || res.statusText));
     const ids = (j.data || j.models || []).map(m => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
@@ -59,7 +102,8 @@ const AI = (() => {
       : '';
     return `API ${status}: ${msg}${hint ? ' — ' + hint : ''}`;
   }
-  const allModels = () => [...(settings.anthropicKey ? MODELS : []), ...settings.oaiModels.split(',').map(s => s.trim()).filter(Boolean).map(id => ({ id, label: id, provider: 'openai' }))];
+  const allModels = () => [...(settings.anthropicKey ? MODELS : []), ...settings.providers.flatMap(p => String(p.models || '').split(',').map(s => s.trim()).filter(Boolean)
+    .map(id => ({ id: p.id + '::' + id, model: id, label: id, provider: 'openai', pid: p.id, pname: p.name, base: p.base, key: p.key })))];
 
   // Tools live in engine.js (shared with the MCP server / REST API).
   const TOOLS = Engine.TOOLS, execTool = Engine.exec;
@@ -141,7 +185,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     }
     return out;
   }
-  function toOpenAI(hist, system, vision = true) {
+  function toOpenAI(hist, system, vision = true, base = '') {
     const out = [{ role: 'system', content: system }], live = liveShots(hist);
     for (const m of hist) {
       if (m.role === 'user') out.push({ role: 'user', content: openaiUser(m) });
@@ -149,7 +193,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         const o = { role: 'assistant', content: m.text || '' };
         // Gemini "thinking" models require each tool call's thought_signature to be sent back unchanged.
         // Calls recorded before this fix (or from another provider) get Google's documented bypass value.
-        const gem = /generativelanguage\.googleapis\.com/.test(settings.oaiBase);
+        const gem = /generativelanguage\.googleapis\.com/.test(base);
         // In a parallel batch Gemini signs only the first call — replay exactly what it sent; batches recorded with no
         // signature at all (older history) get the bypass value on their first call.
         const signed = (m.toolCalls || []).some(t => t.extra);
@@ -192,12 +236,11 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         usage: j.usage ? { in: j.usage.input_tokens, out: j.usage.output_tokens } : null
       };
     }
-    const base = await resolveBase(settings.oaiBase);
     const headers = { 'content-type': 'application/json' };
-    if (settings.oaiKey) headers.authorization = 'Bearer ' + settings.oaiKey;
-    const res = await fetch(base + '/chat/completions', {
+    if (model.key) headers.authorization = 'Bearer ' + model.key;
+    const res = await llmFetch(model.base, '/chat/completions', {
       method: 'POST', signal, headers,
-      body: JSON.stringify(Object.assign({ model: model.id, messages: toOpenAI(hist, system, vision) }, extra.body || {}, tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}))
+      body: JSON.stringify(Object.assign({ model: model.model || model.id, messages: toOpenAI(hist, system, vision, model.base) }, extra.body || {}, tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}))
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(friendlyError(res.status, (Array.isArray(j) ? j[0] : j)?.error?.message || JSON.stringify(j).slice(0, 300) || res.statusText));
@@ -225,14 +268,14 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     try { localStorage.setItem('cp.chat', JSON.stringify(strip(0).map(m => m.checkpoint ? Object.assign({}, m, { checkpoint: undefined }) : m))); } catch (e) { }
   };
   const NO_MODEL = { id: '', label: 'No model', provider: 'none' };
-  const currentModel = () => allModels().find(m => m.id === settings.model) || NO_MODEL;
+  const currentModel = () => { const ms = allModels(); return ms.find(m => m.id === settings.model) || ms.find(m => m.model === settings.model) || NO_MODEL; };
 
   // ---------- context window, usage estimate, compression ----------
   const ctxCache = {};
   function contextWindow(model = currentModel()) {
     if (+settings.contextWindow > 0) return +settings.contextWindow;
     if (ctxCache[model.id]) return ctxCache[model.id];
-    const id = model.id.toLowerCase();
+    const id = String(model.model || model.id).toLowerCase();
     if (model.provider === 'anthropic') return 200000;
     if (/gemini/.test(id)) return 1000000;
     if (/gpt-4\.1/.test(id)) return 1000000;
@@ -245,14 +288,14 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   async function probeContext(model = currentModel()) {
     if (model.provider === 'anthropic' || ctxCache[model.id]) return contextWindow(model);
     try {
-      const base = await resolveBase(settings.oaiBase), root = base.replace(/\/v1$/, '');
-      const headers = settings.oaiKey ? { authorization: 'Bearer ' + settings.oaiKey } : {};
+      const base = await resolveBase(model.base), root = base.replace(/\/v1$/, '');
+      const headers = model.key ? { authorization: 'Bearer ' + model.key } : {};
       const get = async u => { const r = await fetch(u, { headers, signal: AbortSignal.timeout(4000) }); return r.ok ? r.json() : null; };
       const props = await get(root + '/props').catch(() => null);
       const n = props && (props.default_generation_settings?.n_ctx || props.n_ctx);
       if (n > 0) return (ctxCache[model.id] = n);
-      const list = await get(base + '/models').catch(() => null);
-      const m = list && (list.data || list.models || []).find(x => (x.id || x.name) === model.id);
+      const list = await llmFetch(model.base, '/models', { headers, signal: AbortSignal.timeout(6000) }).then(r => r.ok ? r.json() : null).catch(() => null);
+      const m = list && (list.data || list.models || []).find(x => (x.id || x.name) === (model.model || model.id));
       // vLLM / ExLlama / TabbyAPI report max_model_len or max_seq_len, LM Studio max_context_length, OpenRouter context_length
       const c = m && (m.max_model_len || m.max_seq_len || m.context_length || m.max_context_length || m.loaded_context_length || m.context_window || m.top_provider?.context_length || m.meta?.n_ctx || m.meta?.n_ctx_train);
       if (c > 0) return (ctxCache[model.id] = c);
@@ -260,7 +303,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
       const ct = tabby && (tabby.parameters?.max_seq_len || tabby.max_seq_len);
       if (ct > 0) return (ctxCache[model.id] = ct);
       // Ollama (local or cloud): /api/show → num_ctx if the model sets it, else the model's context length
-      const show = await fetch(root + '/api/show', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json' }, headers), body: JSON.stringify({ model: model.id }), signal: AbortSignal.timeout(6000) }).then(r => r.ok ? r.json() : null).catch(() => null);
+      const show = await fetch(root + '/api/show', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json' }, headers), body: JSON.stringify({ model: model.model || model.id }), signal: AbortSignal.timeout(6000) }).then(r => r.ok ? r.json() : null).catch(() => null);
       if (show) {
         const num = /num_ctx\s+(\d+)/.exec(show.parameters || ''), key = Object.keys(show.model_info || {}).find(k => k.endsWith('.context_length'));
         const v = num ? +num[1] : key ? +show.model_info[key] : 0;
@@ -393,8 +436,8 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   const reset = () => { history = []; lastIn = null; persist(); };
   // a message from an app feature (e.g. AI place) shown in the chat
   const note = (text, model) => { history.push({ role: 'assistant', text, model: model || currentModel().label, mode: 'agent' }); persist(); };
-  const modelReady = () => { const m = currentModel(); if (m.provider === 'none') return false; return m.provider === 'anthropic' ? !!settings.anthropicKey : !!(settings.oaiBase && settings.oaiModels.split(',').map(s => s.trim()).includes(m.id)); };
+  const modelReady = () => { const m = currentModel(); if (m.provider === 'none') return false; return m.provider === 'anthropic' ? !!settings.anthropicKey : !!m.base; };
 
   const partsApi = Engine.partsApi, loadPart = Engine.loadPart;
-  return { MODELS, PRESETS, friendlyError, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, stop, busy, reset, get history() { return history; }, execTool, TOOLS, contextInfo, probeContext, compress };
+  return { MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, stop, busy, reset, get history() { return history; }, execTool, TOOLS, contextInfo, probeContext, compress };
 })();

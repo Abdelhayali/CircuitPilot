@@ -37,6 +37,8 @@ HOP_HEADERS = {"host", "origin", "referer", "connection", "content-length", "acc
 ALLOWED_PORTS = {8080}
 # Cloud model APIs without browser CORS support, reached through /llm-cloud/<name>/... (fixed destinations only)
 CLOUD_RE = re.compile(r"^/llm-cloud/([a-z]+)(/.*)?$")
+# Any other OpenAI-compatible provider whose API refuses browser requests (no CORS): /llm-ext/<base64url of base>/<path>
+EXT_RE = re.compile(r"^/llm-ext/([A-Za-z0-9_-]+)(/.*)?$")
 CLOUD_HOSTS = {"ollama": "https://ollama.com"}
 PASSWORD = None
 LOGIN_PAGE = b"""<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
@@ -164,6 +166,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._proxy()
         if CLOUD_RE.match(path):
             return self._cloud()
+        if EXT_RE.match(path):
+            return self._ext()
         if path == "/api/version":  # changes whenever the app files change → open tabs offer a reload
             files = ["index.html", "styles.css"] + ["js/" + f for f in os.listdir("js") if f.endswith(".js")]
             v = max(os.path.getmtime(f) for f in files if os.path.exists(f))
@@ -209,6 +213,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._proxy()
         if CLOUD_RE.match(path):
             return self._cloud()
+        if EXT_RE.match(path):
+            return self._ext()
         if path.startswith(("/api/projects", "/api/library")):
             return self._store(path)
         if path in ("/api/render/request", "/api/render/result") and self.command == "POST":
@@ -334,6 +340,33 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send(e.code, e.read(), e.headers.get("Content-Type", "application/json"))
         except Exception as e:
             self._send(502, json.dumps({"error": {"message": f"Could not reach {host}: {e}"}}).encode(), "application/json")
+
+    def _ext(self):
+        """Forward to a public https LLM API given as base64url in the path (key and body passed through, nothing kept)."""
+        import base64
+        path, _, query = self.path.partition("?")
+        enc, rest = EXT_RE.match(path).groups()
+        try:
+            base = base64.urlsafe_b64decode(enc + "=" * (-len(enc) % 4)).decode("utf-8").rstrip("/")
+            u = urllib.parse.urlparse(base)
+            if u.scheme != "https" or not u.hostname:
+                raise ValueError("only https:// provider URLs can be forwarded")
+            webtools._public(u.hostname)   # never into the local network
+        except Exception as e:
+            return self._send(400, json.dumps({"error": {"message": f"Bad provider URL: {e}"}}).encode(), "application/json")
+        url = base + (rest or "/") + (f"?{query}" if query else "")
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length else None
+        headers = {k: v for k, v in self.headers.items() if k.lower() in ("authorization", "content-type", "accept")}
+        headers["User-Agent"] = "CircuitPilot"
+        req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
+        try:
+            with urllib.request.urlopen(req, timeout=900) as r:
+                self._send(r.status, r.read(), r.headers.get("Content-Type", "application/json"))
+        except urllib.error.HTTPError as e:
+            self._send(e.code, e.read(), e.headers.get("Content-Type", "application/json"))
+        except Exception as e:
+            self._send(502, json.dumps({"error": {"message": f"Could not reach {u.hostname}: {e}"}}).encode(), "application/json")
 
     def _proxy(self):
         path, _, query = self.path.partition("?")

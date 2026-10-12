@@ -322,6 +322,9 @@
       const target = needRelay() + '/ollama' + p.slice('/llm-cloud/ollama'.length) + url.search;
       return realFetch(target, { method, headers: (req && req.headers) || (init && init.headers), body: method === 'GET' || method === 'HEAD' ? undefined : await bodyBuf(), signal: (init && init.signal) || (req && req.signal) });
     }
+    if (p.startsWith('/llm-ext/')) {   // OpenAI-compatible providers that refuse browser requests, through the relay
+      return realFetch(needRelay() + '/llm/' + p.slice('/llm-ext/'.length) + url.search, { method, headers: (req && req.headers) || (init && init.headers), body: method === 'GET' || method === 'HEAD' ? undefined : await bodyBuf(), signal: (init && init.signal) || (req && req.signal) });
+    }
     if (p.startsWith('/llm-proxy/')) return json({ error: 'Local model servers are reached directly in the web version' }, 404);
     const seg = p.split('/').filter(Boolean).slice(1).map(decodeURIComponent);   // ['projects', id, 'meta'] …
     if (seg[0] === 'projects') return json(await projects(method, seg.slice(1), method === 'PUT' || method === 'POST' ? await bodyJson() : null));
@@ -340,7 +343,7 @@
   window.fetch = async function (input, init) {
     const req = typeof Request !== 'undefined' && input instanceof Request ? input : null;
     let url; try { url = new URL(req ? req.url : String(input), location.href); } catch (e) { return realFetch(input, init); }
-    if (url.origin !== location.origin || !/^\/(api|llm-cloud|llm-proxy)\//.test(url.pathname)) return realFetch(input, init);
+    if (url.origin !== location.origin || !/^\/(api|llm-cloud|llm-proxy|llm-ext)\//.test(url.pathname)) return realFetch(input, init);
     if ((await detect()) === 'server') return realFetch(input, init);
     const method = String((init && init.method) || (req && req.method) || 'GET').toUpperCase();
     try { return await handle(method, url, init, req); }

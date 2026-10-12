@@ -18,6 +18,8 @@ import json
 import os
 import re
 import sys
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,6 +49,64 @@ style="padding:9px;border-radius:8px;border:1px solid #2a313b;background:#161a20
 
 def token():
     return hashlib.sha256(("circuitpilot:" + PASSWORD).encode()).hexdigest()
+
+
+# ---------------------------------------------------------------- screenshots for MCP clients
+# Claude Code's MCP server runs outside the browser, so it cannot draw the schematic, PCB, 3D board or enclosure.
+# It posts a request here; the CircuitPilot tab that has that project open long-polls /api/render/next, renders
+# the view and posts the image back to /api/render/result, which answers the waiting request.
+_rlock = threading.Condition()
+_rjobs = {}   # id -> {"project", "args", "claimed", "result"}
+_rtabs = {}   # project id -> last time a browser tab with it open asked for work
+
+
+def render_next(project, wait=25.0):
+    end = time.time() + wait
+    with _rlock:
+        while True:
+            _rtabs[project] = time.time()
+            for jid, j in _rjobs.items():
+                # a job claimed by a tab that went away (reloaded, closed) is offered again after 15 s
+                stale = j["claimed"] and time.time() - j["claimed"] > 15
+                if (not j["claimed"] or stale) and j["result"] is None and j["project"] == project:
+                    j["claimed"] = time.time()
+                    return {"id": jid, "args": j["args"]}
+            left = end - time.time()
+            if left <= 0:
+                return None
+            _rlock.wait(min(left, 5))
+
+
+def render_result(jid, result):
+    with _rlock:
+        if jid in _rjobs:
+            _rjobs[jid]["result"] = result
+            _rlock.notify_all()
+
+
+def render_request(project, args, timeout=60.0):
+    now = time.time()
+    with _rlock:
+        live = {p: t for p, t in _rtabs.items() if now - t < 40}
+        if project not in live:
+            msg = ("Screenshots are drawn by the CircuitPilot app in the browser. Open http://localhost:5173 and open this "
+                   "project there (it is not open in any browser tab right now)." if not live else
+                   "The browser has a different project open. Open this project in the CircuitPilot tab to take screenshots.")
+            return {"error": msg}, 409
+        jid = os.urandom(6).hex()
+        _rjobs[jid] = {"project": project, "args": args, "claimed": 0, "result": None}
+        _rlock.notify_all()
+        end = time.time() + timeout
+        while _rjobs[jid]["result"] is None and time.time() < end:
+            _rlock.wait(min(5, end - time.time()))
+            _rlock.notify_all()   # let waiting tabs re-check for a job whose claimer went away
+        job = _rjobs.pop(jid)
+    r = job["result"]
+    if r is None:
+        return {"error": "The browser did not answer in time (is the CircuitPilot tab still open?)"}, 504
+    if r.get("error"):
+        return {"error": r["error"]}, 400
+    return {k: r.get(k) for k in ("mime", "data", "w", "h")}, 200
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -116,6 +176,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._knowledge(path)
         if path.startswith("/api/web/"):
             return self._web(path)
+        if path == "/api/render/next":
+            q = urllib.parse.parse_qs(self.path.partition("?")[2])
+            job = render_next((q.get("project") or [""])[0])
+            return self._send(200, json.dumps(job).encode(), "application/json") if job else self._send(204, b"", "application/json")
         if not STATIC_RE.match(path):  # never serve parts.db, *.py, password file, .git ...
             return self._send(404, b"not found", "text/plain")
         super().do_GET()
@@ -147,6 +211,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._cloud()
         if path.startswith(("/api/projects", "/api/library")):
             return self._store(path)
+        if path in ("/api/render/request", "/api/render/result") and self.command == "POST":
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 30_000_000:
+                return self._send(413, b'{"error":"too large"}', "application/json")
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except ValueError:
+                return self._send(400, b'{"error":"body must be JSON"}', "application/json")
+            if path == "/api/render/result":
+                render_result(str(body.get("id", "")), body)
+                return self._send(200, b'{"ok":true}', "application/json")
+            out, status = render_request(str(body.get("project") or ""), body.get("args") or {})
+            return self._send(status, json.dumps(out).encode(), "application/json")
         if path == "/api/extract" and self.command == "POST":  # text of a file attached in the chat
             n = int(self.headers.get("Content-Length") or 0)
             if n > 40_000_000:

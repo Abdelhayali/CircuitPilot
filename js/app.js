@@ -227,6 +227,25 @@ const App = (() => {
     toast(`EasyEDA schematic saved — ${S.components.length - noCode.length - failed.length}/${S.components.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Standard: File → Open → EasyEDA Source · Pro: File → Import → EasyEDA (Standard)`, 15000);
   }
 
+  // ---------- screenshots for the AI (view_design): schematic, 2D PCB, 3D board, enclosure ----------
+  // Longest side at most 1400 px (enough for a model to read labels, without wasting context); 3D views as JPEG.
+  async function toAIImage(r, jpeg) {
+    const img = new Image(); await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('could not draw the image')); img.src = r.url; });
+    const s = Math.min(1, 1400 / Math.max(r.w, r.h)), c = document.createElement('canvas');
+    c.width = Math.round(r.w * s); c.height = Math.round(r.h * s);
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+    const url = jpeg ? c.toDataURL('image/jpeg', 0.85) : c.toDataURL('image/png');
+    return { mime: jpeg ? 'image/jpeg' : 'image/png', data: url.slice(url.indexOf(',') + 1), w: c.width, h: c.height };
+  }
+  async function renderForAI(a = {}) {
+    const v = a.view;
+    if (v === 'schematic') { const i = Math.max(0, Math.min(Sch.sheets().length - 1, (+a.sheet || 1) - 1)); return toAIImage(await DocView.svgToPng(Sch.exportSVG(i), 2000)); }
+    if (v === 'pcb') { Pcb.render(); return toAIImage(await DocView.svgToPng(Pcb.exportSVG(), 2000, '#000')); }
+    if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', 1400, 940); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, true); }
+    if (v === 'enclosure') { const r = await EncView.snapshot({ w: 1400, h: 940, explode: !!a.exploded }); if (!r) throw new Error('No enclosure yet: set one up first (set_enclosure or set_enclosure_script)'); return toAIImage(r, true); }
+    throw new Error('Unknown view ' + v);
+  }
+
   // ---------- cross-probing: what is selected in the schematic is selected on the PCB, and the other way round ----------
   function syncFromSch() {
     const P = PcbView.ui, refs = Sch.selected().filter(r => { const c = Model.comp(r); return c && c.pcb; });
@@ -679,7 +698,7 @@ const App = (() => {
         if (m.text) h += `<div class="md">${md(m.text)}</div>`;
         for (const t of m.toolCalls || []) {
           const r = results[t.id];
-          h += `<details class="tool ${r ? (r.error ? 'err' : 'ok') : 'run'}"><summary><span class="dot"></span>${esc(t.name)} <span class="muted">${esc(toolHint(t))}</span></summary><pre>${esc(JSON.stringify(t.input, null, 1))}</pre>${r ? `<pre class="res">${esc(r.content.slice(0, 4000))}</pre>` : ''}</details>`;
+          h += `<details class="tool ${r ? (r.error ? 'err' : 'ok') : 'run'}"><summary><span class="dot"></span>${esc(t.name)} <span class="muted">${esc(toolHint(t))}</span></summary><pre>${esc(JSON.stringify(t.input, null, 1))}</pre>${r ? `<pre class="res">${esc(r.content.slice(0, 4000))}</pre>` : ''}</details>` + (r && r.image ? `<img class="shot" alt="Screenshot the AI looked at" src="data:${r.image.mime};base64,${r.image.data}">` : '');
         }
         const next = H[i + 1];
         if (m.mode === 'plan' && !(m.toolCalls || []).length && (!next || next.role === 'user') && !running) h += '<button class="exec">▶ Execute plan</button>';
@@ -973,6 +992,7 @@ const App = (() => {
     Engine.env.route = runRouter;
     Engine.env.shape = code => EncView.runScript(code);
     Engine.env.searchKey = () => AI.settings.braveKey;
+    Engine.env.render = renderForAI;
     Engine.env.ui = what => { if (what === 'fit-sch') Sch.fit(); if (what === 'show-pcb') { showView('pcb'); Pcb.fit(); } if (what === 'show-enc') { showView('enc'); EncView.rebuild(); } if (what === 'show-doc') showView('doc'); };
     EncView.init(); Pcb3D.init(); DocView.init();
     $('#btn3d').onclick = () => { const on = !Pcb3D.ui.on; PcbView.setVisible(!on); Pcb3D.setOn(on); };
@@ -1139,6 +1159,7 @@ const App = (() => {
     $('#asConnect').onclick = setupConnect;
     $('#asKey').onkeydown = e => { if (e.key === 'Enter') setupConnect(); };
     $('#chat').addEventListener('click', e => { if (e.target.closest('[data-connect]')) openSetup(); });
+    $('#chat').addEventListener('click', e => { const i = e.target.closest('img.shot'); if (i) i.classList.toggle('big'); });
     if (!AI.modelReady()) setTimeout(() => { if (!AI.modelReady()) openSetup(); }, 600);
 
     document.addEventListener('keydown', e => {

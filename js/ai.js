@@ -80,6 +80,7 @@ DESIGN MODEL
 - PCB WORKFLOW: generate_pcb (connectors go on the board edge automatically; placement is annealed for short connections; the router rips up and re-routes for up to the routeTime budget) → if anything is unrouted, call optimize_pcb (moves parts and re-routes; shrink: true also makes the board as small as it still routes) → optionally add_copper_pour GND on both layers (frees routing space and replaces long GND traces) → run_drc and fix errors. Don't just repeat route_pcb on the same placement. Use set_board_shape for rounded / round / custom outlines. When the board already exists and the user edits the schematic (adds/removes parts, rewires, changes footprints), call update_pcb_from_schematic instead of generate_pcb — it keeps the layout and tracks and only places/routes what changed.
 - PCB PLACEMENT (when asked to place / auto-place, or when routing struggles): read get_pcb_layout (part sizes, pins with their nets and positions), then decide a floor plan like an experienced layout engineer: connectors on the board edges facing out; the main IC central with room (1–2 mm) around fine-pitch sides for fan-out; each decoupling capacitor within ~1–2 mm of the power pin it serves, on the same side; crystal and its caps right next to the MCU clock pins; regulator and bulk caps near the power input; USB / differential pairs short and straight from connector to IC; group parts by function along the signal flow; avoid placing parts where they block the straight path between an IC and its connector. Apply it in ONE place_footprints call (all parts), then route_pcb; if nets stay unrouted, move the parts around them (another place_footprints) or call optimize_pcb.
 - CUSTOM 3D DESIGNS: for anything beyond a plain box — wearables (wristband / watch pods like Whoop, rings, clips), ECG / EEG / EMG patches with electrode holes, curved, rounded or organic housings, mounts, brackets — call enclosure_script_help (it lists 35 tested templates — 10 wrist, 10 chest/ECG, 7 body-worn, 8 boxes; fetch the closest with template: id and adapt it rather than starting from zero), then write the 3D script with set_enclosure_script (rounded boxes, hulls, extrude/revolve, booleans; coordinates relative to the PCB). Read the fit report: fix every collision with the PCB/components and any script error, and call set_enclosure_script again until it is clean. Ask about key dimensions you cannot infer (wrist size, strap width, electrode type/spacing) only if they matter; otherwise use sensible defaults and say which you chose.
+- LOOK AT YOUR WORK: view_design returns a screenshot of the schematic, the 2D PCB, the 3D board or the enclosure. After building or changing something, look at it (e.g. crowded or overlapping symbols, parts far apart, odd placement, a connector not on the edge, a part sticking out of the case) and fix what you see. Ask only for the view you need; each image uses context.
 - DOCUMENTATION: the Documentation tab makes a product datasheet PDF. Read it with get_documentation and write the text with set_documentation (title, tagline, description, features, applications, notes; title/company/version also fill the schematic title block). Base every claim on the design. Specs, images and BOM are automatic.
 - ENCLOSURE: the Enclosure tab builds a 3D-printable case fitted to the PCB (STL + OpenSCAD). Use add_mounting_holes for screw standoffs (then route_pcb), set_enclosure for wall/lid/heights/vents, add_enclosure_cutout for extra openings (switches, cables, displays), get_enclosure to check sizes. Connector openings and LED/button lid holes are automatic.
 - INTERNET: you can use web_search and web_fetch for anything you need — datasheets (pinouts, absolute maximum ratings, reference/application circuits, recommended layouts), application notes, part availability and prices, calculations or standards. Read the relevant datasheet before choosing values for unfamiliar chips. Cite the URLs you relied on.
@@ -118,8 +119,16 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     if (!imgs.length) return text;
     return [{ type: 'text', text: text || '(see image)' }, ...imgs.map(f => ({ type: 'image_url', image_url: { url: `data:${f.mime};base64,${f.data}` } }))];
   }
-  function toAnthropic(hist) {
-    const out = [];
+  // Screenshots from view_design: only the two most recent are sent to the model (older ones would just re-cost
+  // context on every request); models that refuse images get a short note instead (noVision).
+  const noVision = new Set();
+  function liveShots(hist) {
+    const ids = []; for (const m of hist) if (m.role === 'tool') for (const r of m.results || []) if (r.image && r.image.data) ids.push(r.id);
+    return new Set(ids.slice(-2));
+  }
+  const shotNote = (r, live, vision) => !r.image ? '' : !vision ? '\n(The screenshot was not sent: this model cannot read images.)' : !live.has(r.id) ? '\n(Earlier screenshot omitted; call view_design again to look at the current design.)' : '';
+  function toAnthropic(hist, vision = true) {
+    const out = [], live = liveShots(hist);
     const push = (role, blocks) => { const last = out[out.length - 1]; if (last && last.role === role) last.content.push(...blocks); else out.push({ role, content: blocks }); };
     for (const m of hist) {
       if (m.role === 'user') push('user', anthropicUser(m));
@@ -127,12 +136,13 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         const b = []; if (m.text) b.push({ type: 'text', text: m.text });
         for (const t of m.toolCalls || []) b.push({ type: 'tool_use', id: t.id, name: t.name, input: t.input || {} });
         if (b.length) push('assistant', b);
-      } else if (m.role === 'tool') push('user', m.results.map(r => ({ type: 'tool_result', tool_use_id: r.id, content: r.content, is_error: !!r.error })));
+      } else if (m.role === 'tool') push('user', m.results.map(r => ({ type: 'tool_result', tool_use_id: r.id, is_error: !!r.error,
+        content: vision && live.has(r.id) ? [{ type: 'text', text: r.content }, { type: 'image', source: { type: 'base64', media_type: r.image.mime, data: r.image.data } }] : r.content + shotNote(r, live, vision) })));
     }
     return out;
   }
-  function toOpenAI(hist, system) {
-    const out = [{ role: 'system', content: system }];
+  function toOpenAI(hist, system, vision = true) {
+    const out = [{ role: 'system', content: system }], live = liveShots(hist);
     for (const m of hist) {
       if (m.role === 'user') out.push({ role: 'user', content: openaiUser(m) });
       else if (m.role === 'assistant') {
@@ -146,18 +156,33 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         if (m.toolCalls && m.toolCalls.length) o.tool_calls = m.toolCalls.map((t, k) => Object.assign({ id: t.id, type: 'function', function: { name: t.name, arguments: JSON.stringify(t.input || {}) } },
           t.extra ? { extra_content: t.extra } : (gem && !signed && k === 0) ? { extra_content: { google: { thought_signature: 'skip_thought_signature_validator' } } } : {}));
         out.push(o);
-      } else if (m.role === 'tool') for (const r of m.results) out.push({ role: 'tool', tool_call_id: r.id, content: r.content });
+      } else if (m.role === 'tool') {
+        // tool messages are text-only for OpenAI-compatible APIs: the screenshot follows as a user message
+        for (const r of m.results) out.push({ role: 'tool', tool_call_id: r.id, content: r.content + shotNote(r, live, vision) });
+        const shots = vision ? m.results.filter(r => live.has(r.id)) : [];
+        if (shots.length) out.push({ role: 'user', content: [{ type: 'text', text: 'Screenshot' + (shots.length > 1 ? 's' : '') + ' from view_design:' }, ...shots.map(r => ({ type: 'image_url', image_url: { url: `data:${r.image.mime};base64,${r.image.data}` } }))] });
+      }
     }
     return out;
   }
+  // a model that rejects image input is retried once without screenshots (and remembered for this session)
   async function callModel(model, system, hist, tools, signal, extra = {}) {
+    const shots = hist.some(m => m.role === 'tool' && (m.results || []).some(r => r.image && r.image.data));
+    try { return await callModelOnce(model, system, hist, tools, signal, extra, !noVision.has(model.id)); }
+    catch (e) {
+      if (!shots || noVision.has(model.id) || signal && signal.aborted || !/image|vision|multimodal|modalit|content.?part|content.?type|unsupported|invalid.*(content|message)/i.test(e.message)) throw e;
+      noVision.add(model.id);
+      return callModelOnce(model, system, hist, tools, signal, extra, false);
+    }
+  }
+  async function callModelOnce(model, system, hist, tools, signal, extra = {}, vision = true) {
     if (model.provider === 'none') throw new Error('No AI model is connected yet. Click 🔑 Connect AI above the chat: a free Google Gemini or Ollama Cloud key takes about a minute.');
     if (model.provider === 'anthropic') {
       if (!settings.anthropicKey) throw new Error('No Anthropic API key — open ⚙ Settings to add one.');
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST', signal,
         headers: { 'content-type': 'application/json', 'x-api-key': settings.anthropicKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify(Object.assign({ model: model.id, max_tokens: extra.maxTokens || +settings.maxTokens || 8192, system, messages: toAnthropic(hist) }, tools.length ? { tools: tools.map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema })) } : {}))
+        body: JSON.stringify(Object.assign({ model: model.id, max_tokens: extra.maxTokens || +settings.maxTokens || 8192, system, messages: toAnthropic(hist, vision) }, tools.length ? { tools: tools.map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema })) } : {}))
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${j.error?.message || res.statusText}`);
@@ -172,7 +197,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     if (settings.oaiKey) headers.authorization = 'Bearer ' + settings.oaiKey;
     const res = await fetch(base + '/chat/completions', {
       method: 'POST', signal, headers,
-      body: JSON.stringify(Object.assign({ model: model.id, messages: toOpenAI(hist, system) }, extra.body || {}, tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}))
+      body: JSON.stringify(Object.assign({ model: model.id, messages: toOpenAI(hist, system, vision) }, extra.body || {}, tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}))
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(friendlyError(res.status, (Array.isArray(j) ? j[0] : j)?.error?.message || JSON.stringify(j).slice(0, 300) || res.statusText));
@@ -192,8 +217,10 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   try { history = JSON.parse(localStorage.getItem('cp.chat') || '[]'); } catch (e) { }
   // Attachment bytes are big: browser storage keeps them for the latest messages only (the text is always kept).
   const persist = () => {
-    const keep = history.slice(-200), withData = keep.map((m, i) => (m.files || []).some(f => f.data) ? i : -1).filter(i => i >= 0);
-    const strip = n => keep.map((m, i) => m.files && withData.indexOf(i) < withData.length - n ? Object.assign({}, m, { files: m.files.map(f => Object.assign({}, f, { data: undefined })) }) : m);
+    const keep = history.slice(-200), withData = keep.map((m, i) => (m.files || []).some(f => f.data) || (m.results || []).some(r => r.image) ? i : -1).filter(i => i >= 0);
+    const strip = n => keep.map((m, i) => withData.indexOf(i) >= 0 && withData.indexOf(i) < withData.length - n ? Object.assign({}, m,
+      m.files ? { files: m.files.map(f => Object.assign({}, f, { data: undefined })) } : {},
+      m.results ? { results: m.results.map(r => r.image ? Object.assign({}, r, { image: undefined }) : r) } : {}) : m);
     for (const n of [3, 1, 0]) { try { localStorage.setItem('cp.chat', JSON.stringify(strip(n))); return; } catch (e) { } }
     try { localStorage.setItem('cp.chat', JSON.stringify(strip(0).map(m => m.checkpoint ? Object.assign({}, m, { checkpoint: undefined }) : m))); } catch (e) { }
   };
@@ -249,7 +276,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     for (const m of msgs) {
       chars += (m.text || '').length;
       for (const t of m.toolCalls || []) chars += t.name.length + JSON.stringify(t.input || {}).length + 20;
-      for (const r of m.results || []) chars += (r.content || '').length + 20;
+      for (const r of m.results || []) { chars += (r.content || '').length + 20; if (r.image && r.image.data) extra += 1600; }
       for (const f of m.files || []) { if (f.kind === 'image' && f.data) extra += 1600; else if (f.kind === 'pdf' && f.data) extra += (f.pages || 5) * 2000; else chars += (f.text || '').length + 60; }
     }
     return Math.round(chars / 3.5) + extra;
@@ -329,13 +356,14 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         if (!r.toolCalls.length) break;
         const results = [];
         for (const tc of r.toolCalls) {
-          let content, error = false;
+          let content, error = false, image = null;
           try {
             if (tc.input && tc.input.__parse_error) throw new Error('Could not parse tool arguments as JSON');
             const out = await execTool(tc.name, tc.input, mode);
-            content = typeof out === 'string' ? out : JSON.stringify(out);
+            if (out && typeof out === 'object' && out.__image) { image = out.__image; const rest = Object.assign({}, out); delete rest.__image; content = JSON.stringify(rest); }
+            else content = typeof out === 'string' ? out : JSON.stringify(out);
           } catch (e) { content = 'Error: ' + e.message; error = true; }
-          results.push({ id: tc.id, name: tc.name, content, error });
+          results.push(Object.assign({ id: tc.id, name: tc.name, content, error }, image ? { image } : {}));
           hooks.onTool(tc, content, error);
           if (controller.signal.aborted) break;
         }

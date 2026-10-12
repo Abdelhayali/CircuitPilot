@@ -240,5 +240,5 @@ const DocView = (() => {
   }
   function show() { active = true; render(); }
   function hide() { active = false; }
-  return { init, show, hide, props, pdf, render, collect, mechSVG };
+  return { init, show, hide, props, pdf, render, collect, mechSVG, svgToPng };
 })();

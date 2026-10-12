@@ -76,6 +76,7 @@ The result, a fully routed board with a BOM and the design calculations, from a 
 - **Project knowledge** — point a project at a folder of docs, guides and datasheets (md/txt/pdf/docx) the AI follows.
 - **Checkpoints** — every Agent message snapshots the design; restore with one click. Full undo/redo.
 - **Schematic editor** — built-in parts plus database/custom parts, power symbols, click pin-to-pin wiring, drag, rotate (R), auto-layout.
+- **The AI can see its work** — `view_design` gives the copilot (and Claude Code) a screenshot of the schematic, the 2D PCB, the 3D board or the enclosure, so it can spot crowded symbols, odd placement or a part sticking out of the case and fix it. Screenshots appear in the chat; only the latest two are sent with each request, and text-only models are handled automatically. With Claude Code, the screenshots are drawn by the CircuitPilot tab open in your browser.
 - **Cross-probing** — select a part or a net in the schematic and it is selected on the PCB, and the other way round (clicking a track highlights its whole net in the schematic). Switching tabs scrolls to the selection and opens the right schematic sheet.
 - **Select, move, copy, paste** — in the schematic and on the PCB: drag a box on empty space to select several parts (Shift+click adds or removes), drag any of them to move the group, **Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D / Ctrl+A**, **R** rotates and **Del** deletes the selection. Right-click a part (or the selection) for a menu: Cut, Copy, Paste, Duplicate, Rotate, Delete, Properties, Edit symbol & footprint — plus Flip side and Lock position on the PCB. Pasted groups keep their power nets (GND, +3V3…) and their own wiring on new nets. Right- or middle-drag pans.
 - **Professional schematic sheets** — an A-series drawing frame with zone markers and a title block (title, company/author, document, sheet *n of m*, date, revision, size) filled from the Documentation fields; toggle it with the *frame* checkbox. **Multi-page schematics**: add sheets with ＋ in the sheet bar (double-click a tab to rename it), move parts between sheets from Properties, and nets that continue on another sheet are drawn as net labels and connected by name. The copilot can use sheets too (`add_sheet`, `move_to_sheet`, `sheet` in `add_components`).
@@ -194,7 +195,7 @@ Only document-type files inside the chosen folder are read (no `..` escapes, hid
 
 ## Control from Claude Code (MCP) and other tools
 
-`mcp/circuitpilot-mcp.mjs` exposes all 56 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
+`mcp/circuitpilot-mcp.mjs` exposes all 57 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
 
 **Claude Code** — this repo ships a `.mcp.json`, so just open the folder in Claude Code (with `server.py` running) and approve the `circuitpilot` server. Or add it globally:
 

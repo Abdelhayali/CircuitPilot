@@ -10,7 +10,7 @@ const KiCad = (() => {
   function index() {
     if (names) return Promise.resolve(names);
     if (!loading) loading = fetch('data/kicad-footprints.txt').then(r => { if (!r.ok) throw new Error('KiCad footprint list not found (' + r.status + ')'); return r.text(); })
-      .then(t => (names = t.split('\n').filter(Boolean))).finally(() => { loading = null; });
+      .then(t => (names = t.split(/\r?\n/).filter(Boolean))).finally(() => { loading = null; });
     return loading;
   }
   // every word must match the library or footprint name ("soic 8" finds Package_SO.pretty/SOIC-8_3.9x4.9mm_P1.27mm)

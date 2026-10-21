@@ -22,6 +22,7 @@ const PcbView = (() => {
     { id: 'via', key: 'V', name: 'Via', icon: '<circle cx="12" cy="12" r="7" fill="none" stroke-width="2.6"/><circle cx="12" cy="12" r="2.4"/>' },
     { id: 'arc', key: 'A', name: 'Arc track', icon: '<path d="M4 19A15 15 0 0 1 20 5" fill="none" stroke-width="2.4"/>' },
     { id: 'pour', key: 'E', name: 'Copper area (pour)', icon: '<path d="M4 6l7-3 9 4-2 12-12 1z" stroke-width="1.6" opacity="0.85"/>' },
+    { id: 'text', key: 'T', name: 'Text on the silkscreen (click to place on the active side)', icon: '<path d="M5 5h14M12 5v14M9 19h6" fill="none" stroke-width="2.4"/>' },
     { id: 'measure', key: 'M', name: 'Measure', icon: '<path d="M3 16l13-13 5 5-13 13z" fill="none" stroke-width="1.8"/><path d="M7 12l2 2M10 9l2 2M13 6l2 2" stroke-width="1.6"/>' },
   ];
   const GRIDS = [0.05, 0.1, 0.127, 0.254, 0.5, 1.27];
@@ -316,6 +317,11 @@ const PcbView = (() => {
       else P.push([sp.x, sp.y]);
       renderLive(); return;
     }
+    if (ui.tool === 'text') {
+      const t = prompt('Text on the ' + (ui.active === 'B' ? 'bottom' : 'top') + ' silkscreen', ''); if (t === null || !t.trim()) return;
+      const r = Model.mutate(() => Pcb.addText({ text: t.trim(), x: +snapG(pt.x).toFixed(3), y: +snapG(pt.y).toFixed(3), side: ui.active === 'B' ? 'bottom' : 'top' }));
+      setTool('select'); ui.sel = null; ui.item = { k: 'txt', i: r.index }; ui.onSelect(null); render(); return;
+    }
     if (ui.tool === 'via') {
       const sp = snapPoint(pt, null), R0 = Pcb.rules();
       if (Pcb.rules().layers === 1) { App.toast('Single-layer rules: vias are disabled'); return; }
@@ -341,6 +347,12 @@ const PcbView = (() => {
     if (el && el.dataset.k === 'pour') { ui.sel = null; ui.item = { k: 'pour', i: +el.dataset.i }; ui.hlNet = (Model.S.pcb.pours[+el.dataset.i] || {}).net; ui.onSelect(null); render(); pan = { x: e.clientX, y: e.clientY }; return; }
     if (el && el.dataset.k === 'h') { const h = Model.S.pcb.holes[+el.dataset.i]; ui.sel = null; ui.item = { k: 'h', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); drag = { kind: 'hole', i: +el.dataset.i, ox: pt.x - h.x, oy: pt.y - h.y, moved: false }; render(); return; }
     if (el && el.dataset.k === 'v') { const v = Model.S.pcb.vias[+el.dataset.i]; selectItem({ k: 'v', i: +el.dataset.i }); drag = { kind: 'via', i: +el.dataset.i, ox: pt.x - v.x, oy: pt.y - v.y, moved: false }; return; }
+    if (el && el.dataset.k === 'lbl') {
+      const lk = el.dataset.lk, cx = +el.dataset.cx, cy = +el.dataset.cy;
+      if (lk === 'part') { const c = Model.comp(el.dataset.lref); ui.item = null; ui.multi = new Set([c.ref]); ui.sel = c.ref; ui.hlNet = null; ui.onSelect(c.ref); }
+      else { ui.sel = null; ui.multi = new Set(); ui.hlNet = null; ui.item = lk === 'board' ? { k: 'blbl' } : { k: 'txt', i: +el.dataset.i }; ui.onSelect(null); }
+      drag = { kind: 'label', lk, ref: el.dataset.lref, i: +el.dataset.i, ox: pt.x - cx, oy: pt.y - cy, moved: false }; render(); return;
+    }
     const ref = el && (el.dataset.ref || el.dataset.pref);
     if (ref) {
       const c = Model.comp(ref); ui.item = null;
@@ -397,6 +409,11 @@ const PcbView = (() => {
       } else if (drag.kind === 'hole') {
         const h = Model.S.pcb.holes[drag.i], nx = +snapG(pt.x - drag.ox).toFixed(3), ny = +snapG(pt.y - drag.oy).toFixed(3);
         if (nx !== h.x || ny !== h.y) { if (!drag.moved) { Model.begin(); drag.moved = true; } h.x = nx; h.y = ny; h.auto = false; Model.emit('move'); }
+      } else if (drag.kind === 'label') {
+        const nx = +snapG(pt.x - drag.ox).toFixed(3), ny = +snapG(pt.y - drag.oy).toFixed(3);
+        if (!drag.moved) { Model.begin(); drag.moved = true; }
+        if (drag.lk === 'part') Pcb.setSilkLabel(drag.ref, { x: nx, y: ny }); else if (drag.lk === 'board') Pcb.setSilkLabel('board', { x: nx, y: ny }); else Pcb.updateText(drag.i, { x: nx, y: ny });
+        Model.emit('move');
       } else if (drag.kind === 'via') {
         const v = Model.S.pcb.vias[drag.i], nx = +snapG(pt.x - drag.ox).toFixed(4), ny = +snapG(pt.y - drag.oy).toFixed(4);
         if (nx !== v.x || ny !== v.y) { if (!drag.moved) { Model.begin(); drag.moved = true; } v.x = nx; v.y = ny; Model.emit('move'); }
@@ -439,6 +456,7 @@ const PcbView = (() => {
     if (k === 'w') { setTool('track'); return true; }
     if (k === 'v') { if (ui.route) switchLayer(); else setTool('via'); return true; }
     if (k === 'm') { setTool('measure'); return true; }
+    if (k === 't' && !e.ctrlKey && !e.metaKey) { setTool('text'); return true; }
     if (k === 'a') { setTool('arc'); return true; }
     if (k === 'e') { setTool('pour'); return true; }
     if (k === 'Enter' && ui.poly) { closePoly(); return true; }
@@ -469,6 +487,8 @@ const PcbView = (() => {
       if (it.k === 'v') S.pcb.vias.splice(it.i, 1);
       else if (it.k === 'pour') S.pcb.pours.splice(it.i, 1);
       else if (it.k === 'h') S.pcb.holes.splice(it.i, 1);
+      else if (it.k === 'txt') Pcb.removeText(it.i);
+      else if (it.k === 'blbl') Pcb.setSilkLabel('board', { hidden: true });
       else if (it.k === 'T') S.pcb.traces.splice(it.i, 1);
       else if (it.k === 't') {
         const t = S.pcb.traces[it.i], a = t.pts.slice(0, it.s), b = t.pts.slice(it.s);
@@ -537,7 +557,15 @@ const PcbView = (() => {
       const sl = Pcb.isBottom(c) ? 'BS' : 'FS'; if (!vis(sl)) continue;
       const b = Pcb.fpBox(c);
       out.push(`<rect x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="${col(sl)}" stroke-width="0.15" pointer-events="none"/>`);
-      out.push(`<text x="${(b[0] + b[2]) / 2}" y="${b[1] - 0.35}" text-anchor="middle" fill="${col(sl)}" style="font-size:1.1px;font-weight:700" pointer-events="none"${sl === 'BS' ? ` transform="translate(${(b[0] + b[2])} 0) scale(-1 1)"` : ''}>${esc(c.ref)}</text>`);
+    }
+    // silkscreen text exactly as exported (part labels, board name, free text); drag to move, red = covers pads
+    for (const [side, sl] of [['F', 'FS'], ['B', 'BS']]) {
+      if (!vis(sl)) continue;
+      for (const l of Pcb.silkLabels(side)) {
+        const r = l.rect, [cx, cy] = Pcb.labelCentre(l), on = (l.kind === 'part' && ui.sel === l.ref && !ui.item) || (ui.item && ((ui.item.k === 'txt' && l.kind === 'text' && ui.item.i === l.i) || (ui.item.k === 'blbl' && l.kind === 'board')));
+        out.push(`<path d="${l.lines.map(pl => 'M' + pl.map(q => q.join(' ')).join('L')).join('')}" fill="none" stroke="${col(sl)}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>`);
+        out.push(`<rect class="lblhit${on ? ' on' : ''}${l.overPads ? ' bad' : ''}" data-k="lbl" data-lk="${l.kind}" data-lref="${esc(l.ref || '')}" data-i="${l.i != null ? l.i : ''}" data-cx="${cx}" data-cy="${cy}" x="${r[0]}" y="${r[1]}" width="${r[2] - r[0]}" height="${r[3] - r[1]}"><title>${esc(l.kind === 'part' ? l.ref + ' label' : l.kind === 'board' ? 'Board name' : 'Text')}${l.overPads ? ' — covers pads, move it' : ''} · drag to move</title></rect>`);
+      }
     }
     if (vis('OL')) out.push(`<path d="${bpath}" fill="none" stroke="${col('OL')}" stroke-width="0.15" pointer-events="none"/>`);
     if (vis('RA')) for (const r of Pcb.ratsnest()) out.push(`<line x1="${r.a.x}" y1="${r.a.y}" x2="${r.b.x}" y2="${r.b.y}" stroke="${col('RA')}" stroke-width="0.08" pointer-events="none"><title>${esc(r.net)}</title></line>`);
@@ -610,6 +638,34 @@ const PcbView = (() => {
     const it = ui.item; if (!it) return false;
     const S = Model.S, nets = Object.keys(S.nets).sort();
     const netSel = cur => `<select id="ppNet"><option value="">(no net)</option>${nets.map(n => `<option ${n === cur ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
+    if (it.k === 'txt') {
+      const t = (S.pcb.texts || [])[it.i]; if (!t) return false;
+      el.innerHTML = `<div class="ph">Silkscreen text</div>
+        <label>Text<input id="ptT" value="${esc(t.text)}"></label>
+        <label>Size (mm)<input id="ptH" type="number" step="0.1" min="0.6" value="${t.h}"></label>
+        <label>Side<select id="ptS"><option value="F" ${t.side !== 'B' ? 'selected' : ''}>Top</option><option value="B" ${t.side === 'B' ? 'selected' : ''}>Bottom (mirrored)</option></select></label>
+        <label>X (mm)<input id="ptX" type="number" step="${ui.grid}" value="${t.x}"></label><label>Y (mm)<input id="ptY" type="number" step="${ui.grid}" value="${t.y}"></label>
+        <div class="muted small">Drag the text on the board to move it. 1 mm is the smallest size JLCPCB prints clearly.</div>
+        <div class="row"><button id="ppDel" class="danger">Delete text (Del)</button></div>`;
+      const upd = o => Model.mutate(() => Pcb.updateText(it.i, o));
+      $('#ptT').onchange = e => upd({ text: e.target.value }); $('#ptH').onchange = e => upd({ size: +e.target.value }); $('#ptS').onchange = e => upd({ side: e.target.value });
+      $('#ptX').onchange = e => upd({ x: +e.target.value }); $('#ptY').onchange = e => upd({ y: +e.target.value });
+      $('#ppDel').onclick = deleteItem;
+      return true;
+    }
+    if (it.k === 'blbl') {
+      const L = S.pcb.boardLabel || {};
+      el.innerHTML = `<div class="ph">Board name on the silkscreen</div>
+        <label>Text<input id="pbT" value="${esc(L.text != null ? L.text : '')}" placeholder="${esc(S.name || '')}"></label>
+        <label>Size (mm)<input id="pbH" type="number" step="0.1" min="0.6" value="${L.h || ''}" placeholder="1.2"></label>
+        <label class="chk"><input type="checkbox" id="pbHide" ${L.hide ? 'checked' : ''}> Hide</label>
+        <div class="row"><button id="pbAuto">Automatic position</button></div>
+        <div class="muted small">Empty text = the project name. Drag it on the board to move it.</div>`;
+      const upd = o => Model.mutate(() => Pcb.setSilkLabel('board', o));
+      $('#pbT').onchange = e => upd({ text: e.target.value }); $('#pbH').onchange = e => upd({ size: +e.target.value || 1.2 }); $('#pbHide').onchange = e => upd({ hidden: e.target.checked });
+      $('#pbAuto').onclick = () => upd({ auto: true });
+      return true;
+    }
     if (it.k === 'h') {
       const h = S.pcb.holes && S.pcb.holes[it.i]; if (!h) return false;
       el.innerHTML = `<div class="ph">Mounting hole</div>

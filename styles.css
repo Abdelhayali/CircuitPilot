@@ -497,3 +497,8 @@ body:not(.static-web) #modal .webonly { display: none; }
 .folderstate:hover { text-decoration: underline; }
 .fdlist { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow: auto; min-width: 320px; }
 .fdlist button { text-align: left; }
+
+/* PCB silkscreen labels: grab areas (shown on hover / when selected; red when the text covers pads) */
+#pcbSvg .lblhit { fill: transparent; stroke: none; cursor: move; }
+#pcbSvg .lblhit:hover, #pcbSvg .lblhit.on { stroke: #7fb0ff; stroke-width: 0.06; stroke-dasharray: 0.25 0.15; }
+#pcbSvg .lblhit.bad { stroke: #ff5d5d; stroke-width: 0.08; fill: #ff5d5d22; }

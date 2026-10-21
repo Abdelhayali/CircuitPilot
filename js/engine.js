@@ -77,6 +77,10 @@ const Engine = (() => {
     { name: 'enclosure_script_help', ro: true, description: 'Docs for custom 3D enclosures: the 3D script API and the enclosure kit (envelope, outlines, soft solids, wrist curve, strap lugs, electrodes, clips, loops, lid with lip…), coordinates relative to the PCB, the PCB context, and a catalogue of 35 tested templates (10 wrist, 10 chest/ECG, 7 other body-worn, 8 boxes). Pass template: <id> to get that script. Call this before writing set_enclosure_script.', input_schema: { type: 'object', properties: { template: { type: 'string', description: 'template id from the catalogue, e.g. wrist-whoop, chest-ecg3' } } } },
     { name: 'set_enclosure_script', description: 'Design a free-form 3D-printable enclosure / housing / wearable (wristband pod, chest patch, clip, curved or organic case …) as a JavaScript 3D script (see enclosure_script_help). Saves the script in the project, switches the Enclosure tab to custom mode, builds it and returns each part (size, volume, watertightness) plus a fit report: collisions of the printed parts with the PCB or components (fix all of them) and script errors with line numbers. Exports: one STL per part + OpenSCAD source.', input_schema: { type: 'object', required: ['code'], properties: { code: { type: 'string', description: 'the full 3D script' } } } },
     { name: 'add_mounting_holes', description: 'Add non-plated mounting holes to the PCB (default 4 × M3 Ø3.2 mm at the corners, nudged clear of parts) — the enclosure then gets screw standoffs. Re-run route_pcb afterwards.', input_schema: { type: 'object', properties: { diameter: { type: 'number' }, inset: { type: 'number' }, points: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'explicit [[x,y],...] in board mm' } } } },
+    { name: 'set_silk_label', description: 'Change the silkscreen label of a part (default: its reference, placed automatically next to the part where it covers no pad, part or other label), or of the board name (ref "board"). Give x / y (label centre, board mm) to place it by hand — it then moves with the part; auto:true puts it back to automatic placement. Labels must not cover pads: check covers_pads in get_pcb_layout.silk_labels or run_drc.', input_schema: { type: 'object', required: ['ref'], properties: { ref: { type: 'string', description: 'part reference, or "board" for the board name' }, text: { type: 'string', description: 'label text (empty = the reference / project name)' }, size: { type: 'number', description: 'text height in mm (default 1.0; 1 mm is the smallest JLCPCB prints clearly)' }, hidden: { type: 'boolean' }, x: { type: 'number' }, y: { type: 'number' }, auto: { type: 'boolean' } } } },
+    { name: 'add_pcb_text', description: 'Add free text to the PCB silkscreen (e.g. version, author, "5V IN", pin names next to a header, polarity marks). Drawn as strokes in the Gerber silkscreen and the 3D view; bottom-side text is mirrored. Keep it off pads.', input_schema: { type: 'object', required: ['text'], properties: { text: { type: 'string' }, x: { type: 'number', description: 'centre, board mm (default: board centre)' }, y: { type: 'number' }, size: { type: 'number', description: 'height in mm, default 1.2' }, side: { type: 'string', enum: ['top', 'bottom'] } } } },
+    { name: 'update_pcb_text', description: 'Change or move a free PCB text (index from get_pcb_layout.silk_labels / add_pcb_text).', input_schema: { type: 'object', required: ['index'], properties: { index: { type: 'number' }, text: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, size: { type: 'number' }, side: { type: 'string', enum: ['top', 'bottom'] } } } },
+    { name: 'remove_pcb_text', description: 'Delete a free PCB text by index.', input_schema: { type: 'object', required: ['index'], properties: { index: { type: 'number' } } } },
     { name: 'get_pcb_layout', ro: true, description: 'PCB layout for reasoning about placement: board size/shape, every footprint (ref, x, y, rotation, side, bounding box, edge lock, nets), unrouted nets with the pads that still need connecting, copper pours.', input_schema: { type: 'object', properties: {} } },
     { name: 'optimize_pcb', description: 'Placement optimiser: re-arranges parts (annealing on wire length with room around the parts of failing nets, plus fresh global arrangements) and re-routes with rip-up until every net is connected, keeping the best result. With shrink it then makes the board smaller step by step while everything still routes. Connectors on edges and locked parts stay put. Use when route_pcb leaves nets unrouted, or to make the PCB small.', input_schema: { type: 'object', properties: { time_limit_s: { type: 'number', description: 'default 120' }, shrink: { type: 'boolean', description: 'also shrink the board as far as it still routes (default false)' }, allow_grow: { type: 'boolean', description: 'may enlarge the board if it cannot be routed (default false)' }, allow_bottom: { type: 'boolean', description: 'may move parts to the bottom side (default false)' } } } },
     { name: 'place_footprints', description: 'Place many footprints in one call (your floor plan): [{ref, x, y, rot, side, edge}] in board mm (origin top-left, y down). Overlaps are resolved, connectors kept on their edges, and (refine, default true) a short local polish shortens connections without changing your arrangement. Clears tracks; pass route: true to route right away.', input_schema: { type: 'object', required: ['placements'], properties: { placements: { type: 'array', items: { type: 'object', required: ['ref'], properties: { ref: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, rot: { type: 'number', enum: [0, 90, 180, 270] }, side: { type: 'string', enum: ['top', 'bottom'] }, edge: { type: 'string', enum: ['left', 'right', 'top', 'bottom'] } } } }, refine: { type: 'boolean' }, route: { type: 'boolean' } } } },
@@ -198,6 +202,10 @@ const Engine = (() => {
       case 'list_my_parts': return env.myLib().map(partSummary);
       case 'run_erc': { const r = Model.erc(); return r.length ? r : 'ERC passed: no issues'; }
       case 'pcb_status': return Pcb.status();
+      case 'set_silk_label': return Model.mutate(() => { Pcb.setSilkLabel(input.ref, input); const i = Pcb.silkInfo().find(l => /^board$/i.test(input.ref) ? l.kind === 'board' : l.kind === 'part' && l.ref === input.ref); return i || { ref: input.ref, hidden: true }; });
+      case 'add_pcb_text': return Model.mutate(() => { const t = Pcb.addText(input); const i = Pcb.silkInfo().find(l => l.kind === 'text' && l.index === t.index); return Object.assign({ index: t.index }, i || t); });
+      case 'update_pcb_text': return Model.mutate(() => Pcb.updateText(+input.index, input));
+      case 'remove_pcb_text': return Model.mutate(() => Pcb.removeText(+input.index));
       case 'add_components': {
         const list = Array.isArray(input.components) ? input.components : [input];
         const libs = {};
@@ -272,6 +280,8 @@ const Engine = (() => {
           }),
           unrouted: Object.entries(conn).filter(([, v]) => !v.complete).map(([net, v]) => ({ net, islands: v.groups.map(g => g.map(p => `${p.key}@(${p.x.toFixed(1)},${p.y.toFixed(1)})`)) })),
           pours: (S.pcb.pours || []).map((p, i) => ({ index: i, net: p.net, layer: p.layer, whole: !!p.whole })),
+          // silkscreen: part labels, board name, free texts — with their centre and whether they cover pads
+          silk_labels: Pcb.silkInfo(),
           status: Pcb.status(conn),
         };
       }
@@ -370,7 +380,11 @@ const Engine = (() => {
         const u = Object.assign({}, input); if (u.net_widths) { u.netWidths = u.net_widths; delete u.net_widths; }
         return Model.mutate(() => Pcb.setRules(u));
       }
-      case 'run_drc': { const d = Pcb.drc(); return { summary: d.summary, errors: d.errors, warnings: d.warnings, violations: d.violations.slice(0, 60) }; }
+      case 'run_drc': {
+        const d = Pcb.drc(), by = {}; for (const v of d.violations) by[v.type] = (by[v.type] || 0) + 1;
+        const v = d.violations.slice().sort((a, b) => (a.severity === 'error' ? 0 : 1) - (b.severity === 'error' ? 0 : 1));
+        return { summary: d.summary, errors: d.errors, warnings: d.warnings, by_type: by, violations: v.slice(0, 60) };
+      }
       case 'create_part':
       case 'update_part': {
         const old = name === 'update_part' ? (Model.S.lib[input.key] || env.myLib().find(p => p.key === input.key)) : null;

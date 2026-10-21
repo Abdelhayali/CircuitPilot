@@ -1292,6 +1292,11 @@ const Pcb = (() => {
     }
     const st = status();
     for (const n of st.unrouted) out.push({ type: 'unrouted', severity: 'error', msg: `Net ${n} is not routed (connection error — the board would not work)` });
+    // silkscreen text over pads: the fab removes silkscreen from exposed copper, so the text would be cut
+    for (const side of ['F', 'B']) for (const l of silkLabels(side)) if (l.overPads) {
+      const [x, y] = labelCentre(l), what = l.kind === 'part' ? `label of ${l.ref}` : l.kind === 'board' ? 'board name' : `text "${l.text}"`;
+      add('silk', `Silkscreen ${what} covers pads (${side === 'F' ? 'top' : 'bottom'}) — move it (drag it, or set_silk_label / update_pcb_text)`, x, y, 'warning');
+    }
     const errors = out.filter(v => v.severity === 'error').length, warnings = out.length - errors;
     return { violations: out, errors, warnings, summary: errors ? `${errors} errors, ${warnings} warnings` : warnings ? `0 errors, ${warnings} warnings` : 'DRC passed' };
   }
@@ -1405,31 +1410,111 @@ const Pcb = (() => {
   // the silkscreen labels of one side (also drawn by the 3D view): each part's reference above its outline (below it
   // when there is no room at the board edge), mirrored on the bottom side, and the board name in the bottom-right corner
   const SILK_H = 1.0, SILK_W = 0.15;   // JLCPCB minimum text: 1 mm high, 0.15 mm line
+  // Silkscreen text of one side (Gerber, 2D and 3D all draw this list):
+  //  - each part's label (default: its reference) — placed automatically next to the part where it covers no pad,
+  //    no other part and no other label, or where the user / AI put it (c.pcb.silk = { dx, dy, h, text, hide },
+  //    dx / dy = label centre relative to the part, so it moves with the part)
+  //  - the board name (S.pcb.boardLabel = { x, y, h, text, hide }) in a free corner of the top side
+  //  - free text items (S.pcb.texts = [{ text, x, y, h, side }]) where they were put
+  // Each entry: { kind: 'part' | 'board' | 'text', ref / i, text, x, y (baseline), h, w, anchor, mirror, auto, overPads, rect, lines }
+  function padRects(side) {
+    const out = [], idx = null;
+    for (const c of placed()) for (const p of padsOf(c, idx)) if (p.drill || (p.layer || 'F') === side) out.push([p.x - p.w / 2 - 0.15, p.y - p.h / 2 - 0.15, p.x + p.w / 2 + 0.15, p.y + p.h / 2 + 0.15]);
+    return out;
+  }
+  const overlap = (r, b) => r[0] < b[2] && r[2] > b[0] && r[1] < b[3] && r[3] > b[1];
+  // label rectangle for an anchor point (x, baseline y), with a small gap around the text
+  const labelRect = (x, y, tw, h, anchor) => { const x0 = anchor === 'middle' ? x - tw / 2 : anchor === 'end' ? x - tw : x; return [x0 - 0.1, y - h - 0.1, x0 + tw + 0.1, y + 0.1]; };
+  // the 2D view redraws often: keep the result until something that affects the labels changes
+  const silkCache = {};
   function silkLabels(side) {
+    const S = Model.S, key = JSON.stringify([S.board.w, S.board.h, S.name, S.pcb.boardLabel, S.pcb.texts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side, c.pcb.silk])]);
+    if (silkCache[side] && silkCache[side].key === key) return silkCache[side].out;
+    const out = silkLabelsRaw(side);
+    silkCache[side] = { key, out };
+    return out;
+  }
+  function silkLabelsRaw(side) {
     const S = Model.S, W = S.board.w, H = S.board.h, out = [], cs = placed().filter(c => (isBottom(c) ? 'B' : 'F') === side);
-    const boxes = cs.map(c => fpBox(c)), taken = [];   // part outlines + labels already placed
-    const hit = (r, skip) => r[0] < 0.2 || r[1] < 0.2 || r[2] > W - 0.2 || r[3] > H - 0.2 ||
-      boxes.some((b, i) => i !== skip && r[0] < b[2] && r[2] > b[0] && r[1] < b[3] && r[3] > b[1]) || taken.some(b => r[0] < b[2] && r[2] > b[0] && r[1] < b[3] && r[3] > b[1]);
-    // label rectangle for an anchor point (x, baseline y), with a small gap around the text
-    const rect = (x, y, tw, h, anchor) => { const x0 = anchor === 'middle' ? x - tw / 2 : anchor === 'end' ? x - tw : x; return [x0 - 0.1, y - h - 0.1, x0 + tw + 0.1, y + 0.1]; };
+    const boxes = cs.map(c => fpBox(c)), pads = padRects(side), taken = [];
+    const offBoard = r => r[0] < 0.2 || r[1] < 0.2 || r[2] > W - 0.2 || r[3] > H - 0.2;
+    const onPads = r => pads.some(b => overlap(r, b));
+    const hit = (r, skip) => offBoard(r) || onPads(r) || boxes.some((b, i) => i !== skip && overlap(r, b)) || taken.some(b => overlap(r, b));
+    const add = (o) => { o.rect = labelRect(o.x, o.y, textWidth(o.text, o.h), o.h, o.anchor); o.overPads = onPads(o.rect); taken.push(o.rect); out.push(o); };
+    // free text first: fixed positions the automatic labels must avoid
+    (S.pcb.texts || []).forEach((t, i) => { if ((t.side || 'F') !== side || !String(t.text || '').trim()) return; const h = +t.h || 1.2; add({ kind: 'text', i, text: String(t.text), x: +t.x, y: +t.y + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: side === 'B', auto: false }); });
+    // labels the user / AI placed by hand
+    const manual = cs.filter(c => c.pcb.silk && c.pcb.silk.dx != null && !c.pcb.silk.hide);
+    for (const c of manual) { const L = c.pcb.silk, h = +L.h || SILK_H; add({ kind: 'part', ref: c.ref, text: String(L.text || c.ref), x: c.pcb.x + L.dx, y: c.pcb.y + L.dy + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: side === 'B', auto: false }); }
     cs.forEach((c, i) => {
-      const b = boxes[i], h = SILK_H, tw = textWidth(c.ref, h), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
-      const tries = [[cx, b[1] - 0.35, 'middle'], [cx, b[3] + 0.35 + h, 'middle'], [b[0] - 0.35, cy + h / 2, 'end'], [b[2] + 0.35, cy + h / 2, 'start']];
-      let pick = tries.find(([x, y, a]) => !hit(rect(x, y, tw, h, a), i));
-      // big part with no free spot around it: inside its outline
-      if (!pick && b[2] - b[0] > tw + 0.6 && b[3] - b[1] > h + 0.6) pick = [cx, cy + h / 2, 'middle'];
-      if (!pick) pick = tries.find(([x, y, a]) => { const r = rect(x, y, tw, h, a); return r[0] >= 0.2 && r[1] >= 0.2 && r[2] <= W - 0.2 && r[3] <= H - 0.2; }) || tries[0];
+      const L = c.pcb.silk || {}; if (L.hide || L.dx != null) return;
+      const b = boxes[i], h = +L.h || SILK_H, text = String(L.text || c.ref), tw = textWidth(text, h), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+      const tries = [[cx, b[1] - 0.35, 'middle'], [cx, b[3] + 0.35 + h, 'middle'], [b[0] - 0.35, cy + h / 2, 'end'], [b[2] + 0.35, cy + h / 2, 'start'],
+        [cx, b[1] - 1.2, 'middle'], [cx, b[3] + 1.2 + h, 'middle']];   // a little further out when the near spots are taken
+      let pick = tries.find(([x, y, a]) => !hit(labelRect(x, y, tw, h, a), i));
+      // big part with no free spot around it: inside its outline, where there are no pads
+      if (!pick && b[2] - b[0] > tw + 0.6 && b[3] - b[1] > h + 0.6) { const r = labelRect(cx, cy + h / 2, tw, h, 'middle'); if (!onPads(r)) pick = [cx, cy + h / 2, 'middle']; }
+      // otherwise search rings around the part (up to 4 mm out): first a spot clear of everything, then one that only
+      // crosses part outlines — never pads
+      if (!pick) {
+        const ring = [];
+        for (let d = 0.6; d <= 4.01; d += 0.4) for (let k = 0; k < 16; k++) { const a = k / 16 * 2 * Math.PI, rx = (b[2] - b[0]) / 2 + d + tw / 2, ry = (b[3] - b[1]) / 2 + d + h / 2; ring.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry + h / 2, 'middle']); }
+        pick = ring.find(([x, y, a]) => !hit(labelRect(x, y, tw, h, a), i)) ||
+          ring.find(([x, y, a]) => { const r = labelRect(x, y, tw, h, a); return !offBoard(r) && !onPads(r) && !taken.some(t => overlap(r, t)); });
+      }
+      // last resort: the first spot on the board that is clear of pads (labels may touch), else the first on the board
+      if (!pick) pick = tries.find(([x, y, a]) => { const r = labelRect(x, y, tw, h, a); return !offBoard(r) && !onPads(r); }) || tries.find(([x, y, a]) => !offBoard(labelRect(x, y, tw, h, a))) || tries[0];
       const [x, y, anchor] = pick;
-      taken.push(rect(x, y, tw, h, anchor));
-      out.push({ text: c.ref, x, y, h, w: SILK_W, anchor, mirror: side === 'B' });
+      add({ kind: 'part', ref: c.ref, text, x, y, h, w: SILK_W, anchor, mirror: side === 'B', auto: true });
     });
-    if (side === 'F' && S.name) {
-      let h = 1.2; const room = W - 2.4; if (textWidth(S.name, h) > room) h = Math.max(0.8, h * room / textWidth(S.name, h));
-      const tw = textWidth(S.name, h), corners = [[W - 1.2, H - 1.2, 'end'], [1.2, H - 1.2, 'start'], [W - 1.2, 1.2 + h, 'end'], [1.2, 1.2 + h, 'start']];
-      const [x, y, anchor] = corners.find(([x, y, a]) => !hit(rect(x, y, tw, h, a), -1)) || corners[0];
-      out.push({ text: S.name, x, y, h, w: Math.max(SILK_W, h * 0.13), anchor, mirror: false });
+    const BL = S.pcb.boardLabel || {}, name = String(BL.text != null && BL.text !== '' ? BL.text : S.name || '');
+    if (side === 'F' && name && !BL.hide) {
+      let h = +BL.h || 1.2;
+      if (BL.x != null) add({ kind: 'board', text: name, x: +BL.x, y: +BL.y + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: false, auto: false });
+      else {
+        const room = W - 2.4; if (!BL.h && textWidth(name, h) > room) h = Math.max(0.8, h * room / textWidth(name, h));
+        const tw = textWidth(name, h), corners = [[W - 1.2, H - 1.2, 'end'], [1.2, H - 1.2, 'start'], [W - 1.2, 1.2 + h, 'end'], [1.2, 1.2 + h, 'start']];
+        const [x, y, anchor] = corners.find(([x, y, a]) => !hit(labelRect(x, y, tw, h, a), -1)) || corners.find(([x, y, a]) => !onPads(labelRect(x, y, tw, h, a))) || corners[0];
+        add({ kind: 'board', text: name, x, y, h, w: Math.max(SILK_W, h * 0.13), anchor, mirror: false, auto: true });
+      }
     }
     return out.map(l => Object.assign(l, { lines: strokeText(l.text, l.x, l.y, l.h, l.anchor, l.mirror) }));
+  }
+  // centre of a label (what the user drags / the AI sets)
+  const labelCentre = l => [+(((l.rect[0] + l.rect[2]) / 2)).toFixed(3), +(((l.rect[1] + l.rect[3]) / 2)).toFixed(3)];
+  // Change a part's silkscreen label, the board name label ('board') — inside Model.mutate.
+  // o: { text, size, hidden, x, y (label centre, board mm), auto: true = back to automatic placement }
+  function setSilkLabel(ref, o = {}) {
+    const S = Model.S;
+    if (/^(board|#board)$/i.test(ref)) {
+      const L = Object.assign({}, S.pcb.boardLabel || {});
+      if (o.text != null) L.text = String(o.text); if (o.size != null) L.h = Math.max(0.6, Math.min(10, +o.size)); if (o.hidden != null) L.hide = !!o.hidden;
+      if (o.auto) { delete L.x; delete L.y; } else if (o.x != null && o.y != null) { L.x = +(+o.x).toFixed(3); L.y = +(+o.y).toFixed(3); }
+      S.pcb.boardLabel = L; return L;
+    }
+    const c = Model.comp(ref); if (!c || !c.pcb) throw new Error(`${ref} is not on the PCB`);
+    const L = Object.assign({}, c.pcb.silk || {});
+    if (o.text != null) { if (String(o.text).trim() && String(o.text) !== c.ref) L.text = String(o.text); else delete L.text; }
+    if (o.size != null) L.h = Math.max(0.6, Math.min(10, +o.size)); if (o.hidden != null) { if (o.hidden) L.hide = true; else delete L.hide; }
+    if (o.auto) { delete L.dx; delete L.dy; } else if (o.x != null && o.y != null) { L.dx = +(+o.x - c.pcb.x).toFixed(3); L.dy = +(+o.y - c.pcb.y).toFixed(3); }
+    if (Object.keys(L).length) c.pcb.silk = L; else delete c.pcb.silk;
+    return L;
+  }
+  // free silkscreen text: { text, x, y (centre, board mm), size (mm, default 1.2), side 'top' | 'bottom' }
+  function addText(o) {
+    const S = Model.S, t = { text: String(o.text || 'TEXT'), x: +(+(o.x != null ? o.x : S.board.w / 2)).toFixed(3), y: +(+(o.y != null ? o.y : S.board.h / 2)).toFixed(3), h: Math.max(0.6, Math.min(10, +o.size || 1.2)), side: /^b/i.test(o.side || '') ? 'B' : 'F' };
+    S.pcb.texts = (S.pcb.texts || []).concat([t]); return { index: S.pcb.texts.length - 1, ...t };
+  }
+  function updateText(i, o) {
+    const t = (Model.S.pcb.texts || [])[i]; if (!t) throw new Error('No PCB text #' + i);
+    if (o.text != null) t.text = String(o.text); if (o.x != null) t.x = +(+o.x).toFixed(3); if (o.y != null) t.y = +(+o.y).toFixed(3);
+    if (o.size != null) t.h = Math.max(0.6, Math.min(10, +o.size)); if (o.side != null) t.side = /^b/i.test(o.side) ? 'B' : 'F';
+    return { index: i, ...t };
+  }
+  function removeText(i) { const a = Model.S.pcb.texts || []; if (!a[i]) throw new Error('No PCB text #' + i); a.splice(i, 1); return { removed: i }; }
+  // every label with its position, for the AI and the properties panel
+  function silkInfo() {
+    return ['F', 'B'].flatMap(side => silkLabels(side).map(l => { const [x, y] = labelCentre(l); return Object.assign({ kind: l.kind, side: side === 'F' ? 'top' : 'bottom', text: l.text, x, y, size: l.h, auto: l.auto }, l.kind === 'part' ? { ref: l.ref } : {}, l.kind === 'text' ? { index: l.i } : {}, l.overPads ? { covers_pads: true } : {}); }));
   }
   function gerbers() {
     const S = Model.S, idx = Model.pinIndex(), cs = placed(), Hb = S.board.h;
@@ -1798,7 +1883,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: S.board, seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { silkLabels, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

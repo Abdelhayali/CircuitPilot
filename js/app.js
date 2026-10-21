@@ -103,13 +103,14 @@ const App = (() => {
   }
   function renderDb() {
     if (!db.q && !db.loading) return '';
-    let h = `<div class="pcat">Database · JLCPCB / LCSC${db.loading ? ' <span class="spin"></span>' : ''}</div>`;
+    let h = `<div class="pcat">Database · JLCPCB + EasyEDA library${db.loading ? ' <span class="spin"></span>' : ''}</div>`;
     if (db.error) h += `<div class="dberr">${esc(db.error)}</div>`;
-    if (!db.loading && !db.results.length && !db.error) h += '<div class="muted small">No parts found</div>';
-    h += db.results.map(r => `<button class="dbpart" data-lcsc="${esc(r.lcsc)}" title="${esc(r.description || '')}">
-      <div class="dbt"><b>${esc(r.mfr_part || r.lcsc)}</b>${r.basic ? '<span class="badge basic">Basic</span>' : ''}</div>
-      <div class="dbs">${esc(r.package || '')} · ${esc(r.brand || '')}</div>
-      <div class="dbs">${esc(r.lcsc)} · <span class="${r.stock > 0 ? 'good' : 'bad'}">${(r.stock || 0).toLocaleString()} in stock</span>${r.price != null ? ' · $' + (+r.price).toFixed(r.price < 0.1 ? 4 : 2) : ''}</div></button>`).join('');
+    if (!db.loading && !db.results.length && !db.error) h += '<div class="muted small">No parts with a footprint found</div>';
+    const lib = r => r.sources && !r.sources.includes('jlcpcb');   // found only in the EasyEDA library (no JLCPCB stock data)
+    h += db.results.map(r => `<button class="dbpart" data-lcsc="${esc(r.lcsc)}" title="${esc([r.description, r.footprint && 'Footprint: ' + r.footprint, r.note].filter(Boolean).join('\n'))}">
+      <div class="dbt"><b>${esc(r.mfr_part || r.lcsc)}</b>${r.basic ? '<span class="badge basic">Basic</span>' : ''}${lib(r) ? '<span class="badge">EasyEDA lib</span>' : ''}</div>
+      <div class="dbs">${esc(r.package || '')}${r.brand ? ' · ' + esc(r.brand) : ''}</div>
+      <div class="dbs">${esc(r.lcsc)} · ${lib(r) ? `<span class="muted">${/^C99/.test(r.lcsc) ? 'not sold by LCSC' : 'stock: check LCSC'}</span>` : `<span class="${r.stock > 0 ? 'good' : 'bad'}">${(r.stock || 0).toLocaleString()} in stock</span>`}${r.price != null ? ' · $' + (+r.price).toFixed(r.price < 0.1 ? 4 : 2) : ''}</div></button>`).join('');
     return h;
   }
   function renderParts() {

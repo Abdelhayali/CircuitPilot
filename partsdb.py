@@ -1,4 +1,8 @@
-"""Component database: JLCPCB/LCSC catalogue search + part symbols/footprints, cached in SQLite.
+"""Component database: JLCPCB/LCSC catalogue + EasyEDA (LCSC) library search, part symbols/footprints, cached in SQLite.
+
+Search asks two databases at once: the JLCPCB parts catalogue (stock, price, Basic/Extended) and the EasyEDA
+official library (about 1.6 million LCSC parts with symbol + footprint, including modules JLCPCB does not stock).
+Parts without a footprint are left out of the results (checked in one batch request, remembered in parts.db).
 
 Search results and every part model that is fetched are stored in parts.db, so the local
 database grows as you use it and keeps working offline for parts seen before.
@@ -12,7 +16,9 @@ import re
 import sqlite3
 import threading
 import time
+import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts.db")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CircuitPilot"
@@ -27,15 +33,20 @@ def _db():
         lcsc TEXT PRIMARY KEY, mfr_part TEXT, brand TEXT, package TEXT, category TEXT,
         description TEXT, stock INTEGER, basic INTEGER, price REAL, datasheet TEXT, updated REAL)""")
     con.execute("CREATE TABLE IF NOT EXISTS models(lcsc TEXT PRIMARY KEY, json TEXT, updated REAL)")
+    # footprint per part number ('' = the EasyEDA library has none for it)
+    con.execute("CREATE TABLE IF NOT EXISTS footprints(lcsc TEXT PRIMARY KEY, footprint TEXT, updated REAL)")
     return con
 
 
-def _http(url, body=None):
+def _http(url, body=None, form=None):
     headers = {"User-Agent": UA, "Accept": "application/json"}
     data = None
     if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
+    elif form is not None:
+        data = urllib.parse.urlencode(form).encode()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
     req = urllib.request.Request(url, data=data, headers=headers, method="POST" if data else "GET")
     with urllib.request.urlopen(req, timeout=20) as r:
         return json.loads(r.read().decode("utf-8"))
@@ -53,30 +64,137 @@ def _row(x):
     }
 
 
+JLC_SEARCH = "https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/selectSmtComponentList"
+EE_SEARCH = "https://pro.easyeda.com/api/devices/search"
+EE_CODES = "https://pro.easyeda.com/api/devices/searchByCodes"
+NO_FP_TTL = 7 * 86400  # re-check parts without a footprint after a week (the library keeps growing)
+COLS = "lcsc,mfr_part,brand,package,category,description,stock,basic,price,datasheet"
+
+
+def _brand(s):
+    return re.sub(r"\([^)]*[\u4e00-\u9fff][^)]*\)", "", s or "").strip()  # "Bosch(博世)" -> "Bosch"
+
+
+def _ee_row(x):
+    a = x.get("attributes") or {}
+    code = (a.get("Supplier Part") or x.get("product_code") or "").strip().upper()
+    fp = (x.get("footprint") or {}).get("display_title") or a.get("Supplier Footprint") or "footprint"
+    return {
+        "lcsc": code, "mfr_part": a.get("Manufacturer Part") or x.get("display_title"), "brand": _brand(a.get("Manufacturer")),
+        "package": a.get("Supplier Footprint") or fp, "category": "", "description": (a.get("LCSC Part Name") or x.get("description") or "")[:300],
+        "stock": None, "basic": 1 if a.get("JLCPCB Part Class") == "Basic Part" else 0, "price": None, "datasheet": a.get("Datasheet"),
+        "footprint": fp if a.get("Footprint") else "",
+    }
+
+
+def _search_jlc(q, limit):
+    j = _http(JLC_SEARCH, {"keyword": q, "currentPage": 1, "pageSize": limit})
+    rows = [_row(x) for x in (j.get("data") or {}).get("componentPageInfo", {}).get("list", []) or []]
+    return [r for r in rows if r["lcsc"]]
+
+
+def _search_ee(q, limit):
+    j = _http(EE_SEARCH, form={"wd": q, "page": 1, "pageSize": limit})
+    lst = ((j.get("result") or {}).get("lists") or {}).get("lcsc") or []
+    return [r for r in map(_ee_row, lst) if re.fullmatch(r"C\d{1,12}", r["lcsc"])]
+
+
+def footprints(codes):
+    """{code: footprint name, '' when the library has none, None when it could not be checked (offline)}"""
+    codes = [c for c in dict.fromkeys(codes) if c]
+    out, now = {}, time.time()
+    with _lock, _db() as con:
+        for c in codes:
+            r = con.execute("SELECT footprint, updated FROM footprints WHERE lcsc=?", (c,)).fetchone()
+            if r and (r[0] or now - r[1] < NO_FP_TTL):
+                out[c] = r[0]
+    todo = [c for c in codes if c not in out]
+    for i in range(0, len(todo), 50):
+        part = todo[i:i + 50]
+        try:
+            j = _http(EE_CODES, form=[("codes[]", c) for c in part])
+        except Exception:
+            for c in part:
+                out[c] = None
+            continue
+        found = {}
+        for x in j.get("result") or []:
+            r = _ee_row(x)
+            if r["footprint"]:
+                found[r["lcsc"]] = r["footprint"]
+        with _lock, _db() as con:
+            for c in part:
+                out[c] = found.get(c, "")
+                con.execute("INSERT OR REPLACE INTO footprints VALUES(?,?,?)", (c, out[c], now))
+    return out
+
+
 def search(q, limit=20):
+    """JLCPCB catalogue + EasyEDA library, merged by LCSC number; parts without a footprint are left out.
+    JLCPCB parts (stock, price, assembly) come first, then parts found only in the EasyEDA library."""
     q = (q or "").strip()
     if not q:
         return {"source": "none", "results": []}
     limit = max(1, min(int(limit or 20), 50))
-    try:
-        j = _http("https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/selectSmtComponentList",
-                  {"keyword": q, "currentPage": 1, "pageSize": limit})
-        rows = [_row(x) for x in (j.get("data") or {}).get("componentPageInfo", {}).get("list", []) or []]
-        rows = [r for r in rows if r["lcsc"]]
-        with _lock, _db() as con:
-            con.executemany("""INSERT OR REPLACE INTO parts VALUES(:lcsc,:mfr_part,:brand,:package,:category,
-                :description,:stock,:basic,:price,:datasheet,%f)""" % time.time(), rows)
-        return {"source": "jlcpcb", "results": rows}
-    except Exception as e:  # offline / blocked -> local cache
-        return {"source": "local", "error": str(e), "results": search_local(q, limit)}
+    jlc, ee, errors = [], [], []
+    with ThreadPoolExecutor(2) as ex:
+        fj, fe = ex.submit(_search_jlc, q, limit), ex.submit(_search_ee, q, limit)
+        try:
+            jlc = fj.result()
+        except Exception as e:
+            errors.append(f"JLCPCB: {e}")
+        try:
+            ee = fe.result()
+        except Exception as e:
+            errors.append(f"EasyEDA: {e}")
+    if not jlc and not ee and errors:  # offline / blocked -> local cache
+        return {"source": "local", "error": "; ".join(errors), "results": search_local(q, limit)}
+    in_ee = {r["lcsc"]: r["footprint"] for r in ee}
+    fp = dict(in_ee)
+    fp.update(footprints([r["lcsc"] for r in jlc if r["lcsc"] not in in_ee]))
+    keep, dropped = [], 0
+    for r in jlc:
+        f = fp.get(r["lcsc"])
+        if f == "":
+            dropped += 1
+            continue
+        keep.append(dict(r, footprint=f, sources=["jlcpcb", "easyeda"] if r["lcsc"] in in_ee else ["jlcpcb"]))
+    seen = {r["lcsc"] for r in jlc}
+    norm = lambda t: re.sub(r"[^0-9a-z.]+", "", (t or "").lower())
+    words = [norm(w) for w in q.split() if norm(w)]
+    extra = []
+    for r in ee:
+        if r["lcsc"] in seen:
+            continue
+        text = norm(" ".join(str(r.get(k) or "") for k in ("lcsc", "mfr_part", "brand", "package", "description", "footprint")))
+        if not all(w in text for w in words):  # the library search is loose; library-only extras must contain every word
+            continue
+        if not r["footprint"]:
+            dropped += 1
+            continue
+        extra.append(dict(r, sources=["easyeda"], note="EasyEDA library part, not in the JLCPCB results: "
+                          + ("placeholder code, not sold by LCSC" if r["lcsc"].startswith("C99") else "check LCSC / JLCPCB stock")))
+    n_extra = min(len(extra), max(limit - len(keep), limit // 3))  # library-only parts get at least a third of the list
+    rows = keep[:limit - n_extra] + extra[:n_extra]
+    now = time.time()
+    with _lock, _db() as con:
+        con.executemany("INSERT OR REPLACE INTO footprints VALUES(?,?,?)", [(r["lcsc"], r["footprint"], now) for r in ee])
+        sql = f"INTO parts({COLS},updated) VALUES(:{',:'.join(COLS.split(','))},{now})"
+        con.executemany("INSERT OR REPLACE " + sql, [r for r in jlc if fp.get(r["lcsc"]) != ""])
+        con.executemany("INSERT OR IGNORE " + sql, [dict(r, stock=0) for r in extra])
+    out = {"source": "+".join(n for n, l in (("jlcpcb", jlc), ("easyeda", ee)) if l), "results": rows, "removed_without_footprint": dropped}
+    if errors:
+        out["error"] = "; ".join(errors)
+    return out
 
 
 def search_local(q, limit=50):
     like = "%" + "%".join((q or "").split()) + "%"
     with _lock, _db() as con:
         con.row_factory = sqlite3.Row
-        cur = con.execute("""SELECT * FROM parts WHERE lcsc LIKE ? OR mfr_part LIKE ? OR description LIKE ?
-                             OR package LIKE ? OR category LIKE ? ORDER BY stock DESC LIMIT ?""",
+        cur = con.execute("""SELECT * FROM parts WHERE (lcsc LIKE ? OR mfr_part LIKE ? OR description LIKE ?
+                             OR package LIKE ? OR category LIKE ?)
+                             AND lcsc NOT IN (SELECT lcsc FROM footprints WHERE footprint='') ORDER BY stock DESC LIMIT ?""",
                           (like, like, like, like, like, limit))
         return [dict(r) for r in cur.fetchall()]
 

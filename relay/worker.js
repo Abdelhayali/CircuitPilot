@@ -7,6 +7,8 @@
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 CircuitPilot';
 const JLC_SEARCH = 'https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/selectSmtComponentList';
+const EE_SEARCH = 'https://pro.easyeda.com/api/devices/search';
+const EE_CODES = 'https://pro.easyeda.com/api/devices/searchByCodes';
 const MAX_BYTES = 15_000_000;
 const DEFAULT_ORIGINS = 'https://pcbgo.site,https://www.pcbgo.site,https://bodynet.net,https://www.bodynet.net,https://abdelhayali.github.io,http://localhost:5173,http://127.0.0.1:5173';
 
@@ -36,6 +38,9 @@ async function relay(req, url) {
   let m;
   if (p === '/jlcpcb/search' && req.method === 'POST')
     return fetch(JLC_SEARCH, { method: 'POST', headers: { 'content-type': 'application/json', 'accept': 'application/json', 'user-agent': UA }, body: await req.text() });
+  // EasyEDA library: keyword search and the batch footprint check (form-encoded POST bodies, forwarded as they are)
+  if ((p === '/easyeda/search' || p === '/easyeda/codes') && req.method === 'POST')
+    return fetch(p === '/easyeda/search' ? EE_SEARCH : EE_CODES, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'user-agent': UA }, body: await req.text() });
   if ((m = /^\/easyeda\/components\/(C\d{1,10})$/.exec(p)))
     return fetch(`https://easyeda.com/api/products/${m[1]}/components`, { headers: { 'accept': 'application/json', 'user-agent': UA } });
   if (p === '/ddg') {

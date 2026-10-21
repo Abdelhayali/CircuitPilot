@@ -953,6 +953,7 @@ const App = (() => {
     const s = AI.settings;
     $('#sAnth').value = s.anthropicKey; provFill(null);
     $('#sMax').value = s.maxTokens; $('#sCtxWin').value = +s.contextWindow > 0 ? s.contextWindow : ''; $('#sCtx').checked = !!s.includeContext; $('#sWeb').checked = s.webAccess !== false; $('#sBrave').value = s.braveKey || ''; $('#sRelay').value = s.relayUrl || '';
+    const jk = s.jlcApi || {}; $('#sJlcApp').value = jk.app_id || ''; $('#sJlcAk').value = jk.access_key || ''; $('#sJlcSk').value = jk.secret_key || '';
     $('#presets').innerHTML = Object.entries(AI.PRESETS).map(([n, u]) => `<button data-u="${esc(u)}">${esc(n)}</button>`).join('');
     $('#modal').classList.remove('hidden');
   }
@@ -984,7 +985,8 @@ const App = (() => {
   }
   function saveSettings() {
     if ($('#sBase').value.trim()) provSaveForm(true);   // a provider typed in the form but not saved yet
-    AI.saveSettings({ anthropicKey: $('#sAnth').value.trim(), maxTokens: +$('#sMax').value || 8192, contextWindow: +$('#sCtxWin').value || 0, includeContext: $('#sCtx').checked, webAccess: $('#sWeb').checked, braveKey: $('#sBrave').value.trim(), relayUrl: $('#sRelay').value.trim() });
+    AI.saveSettings({ anthropicKey: $('#sAnth').value.trim(), maxTokens: +$('#sMax').value || 8192, contextWindow: +$('#sCtxWin').value || 0, includeContext: $('#sCtx').checked, webAccess: $('#sWeb').checked, braveKey: $('#sBrave').value.trim(), relayUrl: $('#sRelay').value.trim(),
+      jlcApi: $('#sJlcApp').value.trim() && $('#sJlcAk').value.trim() && $('#sJlcSk').value.trim() ? { app_id: $('#sJlcApp').value.trim(), access_key: $('#sJlcAk').value.trim(), secret_key: $('#sJlcSk').value.trim() } : null });
     $('#modal').classList.add('hidden'); renderModels(); AI.probeContext().then(updateCtx); toast('Settings saved (stored only in this browser)');
   }
 

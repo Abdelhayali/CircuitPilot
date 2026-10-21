@@ -21,6 +21,8 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
+import jlcapi
+
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts.db")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CircuitPilot"
 U = 0.254  # library unit (10 mil) in mm
@@ -220,6 +222,17 @@ def search(q, limit=20):
             community.append(dict(r, sources=["community"], note="EasyEDA community part by " + (r["author"] or "a user")
                                   + ": placed as a custom part (check the footprint against the datasheet)"))
     # official-library parts get at least a third of the list, community parts at least a fifth
+    # official JLCPCB Components API (your own app keys, desktop only): real stock and price for library-only parts
+    try:
+        det = _pool.submit(jlcapi.component_details, [r["lcsc"] for r in extra]).result(timeout=max(0.5, SLOW_SOURCE + 2 - (time.time() - t0)))
+    except Exception:
+        det = {}
+    for r in extra:
+        d = det.get(r["lcsc"])
+        if d:
+            r.update({k: v for k, v in (("stock", d["stock"]), ("price", d["price"]), ("basic", d["basic"])) if v is not None})
+            r["sources"] = ["easyeda", "jlcapi"]
+            r["note"] = "EasyEDA library part; stock and price from the JLCPCB API"
     n_com = min(len(community), max(limit - len(keep) - len(extra), limit // 5))
     n_extra = min(len(extra), max(limit - len(keep) - n_com, limit // 3))
     rows = keep[:limit - n_extra - n_com] + extra[:n_extra] + community[:n_com]

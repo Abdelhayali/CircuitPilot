@@ -6,3 +6,6 @@ __pycache__/
 projects.db
 .wrangler/
 relay/.wrangler/
+
+# JLCPCB Open Platform keys (never commit)
+jlcapi-keys.json

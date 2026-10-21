@@ -141,6 +141,37 @@
     }
     return out;
   }
+  // JLCPCB Open Platform (optional, the user's own app keys from ⚙ Settings): official stock and price by C-number.
+  // Signed here with WebCrypto (HMAC-SHA256, docs: API Request Signature); the relay only forwards the request.
+  let jlcDenied = 0;
+  async function jlcDetails(codes) {
+    const k = typeof AI !== 'undefined' && AI.settings && AI.settings.jlcApi;
+    codes = [...new Set(codes.filter(c => /^C\d+$/.test(c || '')))];
+    if (!k || !codes.length || Date.now() < jlcDenied) return {};
+    const path = '/overseas/openapi/component/getComponentDetailByCode', out = {};
+    const nonceChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', rnd = crypto.getRandomValues(new Uint8Array(32));
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(k.secret_key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const num = v => { const n = parseFloat(v); return isFinite(n) ? n : null; };
+    for (let i = 0; i < codes.length; i += 50) {
+      const body = JSON.stringify({ componentCodes: codes.slice(i, i + 50) }), ts = String(Math.floor(Date.now() / 1000));
+      const nonce = [...crypto.getRandomValues(new Uint8Array(32))].map(b => nonceChars[b % nonceChars.length]).join('');
+      const sig = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`POST\n${path}\n${ts}\n${nonce}\n${body}\n`)))));
+      let j;
+      try {
+        const r = await realFetch(needRelay() + '/jlcapi' + path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `JOP appid="${k.app_id}",accesskey="${k.access_key}",nonce="${nonce}",timestamp="${ts}",signature="${sig}"` }, body });
+        j = await r.json();
+      } catch (e) { jlcDenied = Date.now() + 600000; return out; }
+      if (!(j && (j.success || j.code === 200))) { jlcDenied = Date.now() + 600000; return out; }   // e.g. API not authorised yet: retry in 10 min
+      let data = j.data; if (data && !Array.isArray(data)) data = data.componentDetailResponseVOList || data.list || [];
+      for (const d of data || []) {
+        const code = String(d.componentCode || '').toUpperCase(); if (!code) continue;
+        const pr = (d.priceRanges || d.prices || []).slice().sort((a, b) => (num(a.startQuantity ?? a.startNumber) || 0) - (num(b.startQuantity ?? b.startNumber) || 0));
+        const lib = String(d.componentLibraryType || d.libraryType || '').toLowerCase();
+        out[code] = { stock: Math.round(num(d.stockCount) || 0), price: pr.length ? num(pr[0].unitPrice ?? pr[0].productPrice) : null, basic: lib ? (lib === 'base' || lib === 'basic' ? 1 : 0) : null };
+      }
+    }
+    return out;
+  }
   // EasyEDA community library: parts drawn by EasyEDA users (keys EE-<uuid>); only ones with a footprint attached
   async function searchCommunity(q, limit) {
     const j = await postForm('/easyeda/community', [['type', 3], ['doctype[]', 2], ['returnListStyle', 'classifyarr'], ['wd', q], ['uid', 'user'], ['page', 1]]);
@@ -197,6 +228,8 @@
       if (!r.footprint) { dropped++; continue; }
       extra.push(Object.assign({}, r, { sources: ['easyeda'], note: 'EasyEDA library part, not in the JLCPCB results: ' + (r.lcsc.startsWith('C99') ? 'placeholder code, not sold by LCSC' : 'check LCSC / JLCPCB stock') }));
     }
+    const det = await Promise.race([jlcDetails(extra.map(r => r.lcsc)).catch(() => ({})), new Promise(res => setTimeout(() => res({}), 3000))]);
+    for (const r of extra) { const d = det[r.lcsc]; if (!d) continue; for (const k of ['stock', 'price', 'basic']) if (d[k] != null) r[k] = d[k]; r.sources = ['easyeda', 'jlcapi']; r.note = 'EasyEDA library part; stock and price from the JLCPCB API'; }
     const community = com.filter(r => { const t = norm([r.mfr_part, r.brand, r.package, r.description].join(' ')); return words.every(w => t.includes(w)); })
       .map(r => Object.assign({}, r, { sources: ['community'], note: 'EasyEDA community part by ' + (r.author || 'a user') + ': placed as a custom part (check the footprint against the datasheet)' }));
     // official-library parts get at least a third of the list, community parts at least a fifth

@@ -141,29 +141,51 @@
     }
     return out;
   }
+  // EasyEDA community library: parts drawn by EasyEDA users (keys EE-<uuid>); only ones with a footprint attached
+  async function searchCommunity(q, limit) {
+    const j = await postForm('/easyeda/community', [['type', 3], ['doctype[]', 2], ['returnListStyle', 'classifyarr'], ['wd', q], ['uid', 'user'], ['page', 1]]);
+    const out = [];
+    for (const x of ((((j || {}).result || {}).lists || {}).user) || []) {
+      const head = ((x.dataStr || {}).head) || {}, para = head.c_para || {};
+      if (!head.puuid || !/^[0-9a-f]{32}$/.test(x.uuid || '')) continue;
+      const sup = para['Supplier Part'] || '';
+      out.push({ lcsc: 'EE-' + x.uuid.toUpperCase(), mfr_part: para['Manufacturer Part'] || x.title, brand: brand(para.Manufacturer), package: para.package || '', category: '',
+        description: String(x.description || x.title || '').slice(0, 300), stock: null, basic: 0, price: null, datasheet: para.link, footprint: para.package || 'footprint',
+        author: (x.owner || {}).username || '', supplier_part: /^C\d+$/.test(sup) ? sup : '' });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
   async function searchLocal(q, limit = 50) {
     const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
     const all = await dbAll('parts'), none = new Set((await dbAll('footprints').catch(() => [])).filter(f => f.footprint === '').map(f => f.lcsc));
     return all.filter(p => { if (none.has(p.lcsc)) return false; const t = [p.lcsc, p.mfr_part, p.description, p.package, p.category].join(' ').toLowerCase(); return words.every(w => t.includes(w)); })
       .sort((a, b) => (b.stock || 0) - (a.stock || 0)).slice(0, limit);
   }
-  // JLCPCB catalogue + EasyEDA library, merged by LCSC number; parts without a footprint are left out
+  // JLCPCB catalogue + EasyEDA library + community, merged by LCSC number; parts without a footprint are left out
+  const SLOW_SOURCE = 3500, recent = new Map();   // a database that has not answered in 3.5 s is skipped; repeats come from memory for 10 min
   async function partsSearch(q, limit) {
     q = String(q || '').trim(); if (!q) return { source: 'none', results: [] };
     limit = Math.max(1, Math.min(+limit || 20, 50));
     needRelay();
-    const errors = [];
-    const [jlc, ee] = await Promise.all([
-      realFetch(needRelay() + '/jlcpcb/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keyword: q, currentPage: 1, pageSize: limit }) })
-        .then(async r => { if (!r.ok) throw new Error('JLCPCB search failed (' + r.status + ')'); const j = await r.json(); return ((((j || {}).data || {}).componentPageInfo || {}).list || []).map(row).filter(x => x.lcsc); })
-        .catch(e => { errors.push('JLCPCB: ' + e.message); return []; }),
-      postForm('/easyeda/search', [['wd', q], ['page', 1], ['pageSize', limit]])
-        .then(j => ((((j || {}).result || {}).lists || {}).lcsc || []).map(eeRow).filter(r => /^C\d{1,12}$/.test(r.lcsc)))
-        .catch(e => { errors.push('EasyEDA: ' + e.message); return []; }),
-    ]);
-    if (!jlc.length && !ee.length && errors.length) return { source: 'local', error: errors.join('; '), results: await searchLocal(q, limit) };
+    const ck = q.toLowerCase() + '|' + limit, hit = recent.get(ck);
+    if (hit && Date.now() - hit.t < 600000) return hit.out;
+    const errors = [], t0 = Date.now();
+    const within = (p, name, extra = 0) => new Promise(res => {
+      const timer = setTimeout(() => { errors.push(`${name}: no answer within ${SLOW_SOURCE / 1000} s, skipped`); res([]); }, Math.max(300, SLOW_SOURCE + extra - (Date.now() - t0)));
+      p.then(v => { clearTimeout(timer); res(v); }, e => { clearTimeout(timer); errors.push(name + ': ' + e.message); res([]); });
+    });
+    const pj = realFetch(needRelay() + '/jlcpcb/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keyword: q, currentPage: 1, pageSize: limit }) })
+      .then(async r => { if (!r.ok) throw new Error('JLCPCB search failed (' + r.status + ')'); const j = await r.json(); return ((((j || {}).data || {}).componentPageInfo || {}).list || []).map(row).filter(x => x.lcsc); });
+    const pe = postForm('/easyeda/search', [['wd', q], ['page', 1], ['pageSize', limit]])
+      .then(j => ((((j || {}).result || {}).lists || {}).lcsc || []).map(eeRow).filter(r => /^C\d{1,12}$/.test(r.lcsc)));
+    const pc = searchCommunity(q, limit);
+    // the footprint check of the JLCPCB results starts as soon as they arrive, while the libraries are still answering
+    const jlcP = within(pj, 'JLCPCB', 4000), fpP = jlcP.then(rows => footprints(rows.map(r => r.lcsc)));
+    const [jlc, ee, com] = await Promise.all([jlcP, within(pe, 'EasyEDA'), within(pc, 'EasyEDA community')]);
+    if (!jlc.length && !ee.length && !com.length && errors.length) return { source: 'local', error: errors.join('; '), results: await searchLocal(q, limit) };
     const inEe = new Map(ee.map(r => [r.lcsc, r.footprint]));
-    const fp = Object.assign(await footprints(jlc.filter(r => !inEe.has(r.lcsc)).map(r => r.lcsc)), Object.fromEntries(inEe));
+    const fp = Object.assign(await fpP, Object.fromEntries(inEe));
     let dropped = 0;
     const keep = [];
     for (const r of jlc) { const f = fp[r.lcsc]; if (f === '') { dropped++; continue; } keep.push(Object.assign({}, r, { footprint: f, sources: inEe.has(r.lcsc) ? ['jlcpcb', 'easyeda'] : ['jlcpcb'] })); }
@@ -175,12 +197,17 @@
       if (!r.footprint) { dropped++; continue; }
       extra.push(Object.assign({}, r, { sources: ['easyeda'], note: 'EasyEDA library part, not in the JLCPCB results: ' + (r.lcsc.startsWith('C99') ? 'placeholder code, not sold by LCSC' : 'check LCSC / JLCPCB stock') }));
     }
-    const nExtra = Math.min(extra.length, Math.max(limit - keep.length, Math.floor(limit / 3)));
-    const rows = keep.slice(0, limit - nExtra).concat(extra.slice(0, nExtra)), now = Date.now() / 1000;
+    const community = com.filter(r => { const t = norm([r.mfr_part, r.brand, r.package, r.description].join(' ')); return words.every(w => t.includes(w)); })
+      .map(r => Object.assign({}, r, { sources: ['community'], note: 'EasyEDA community part by ' + (r.author || 'a user') + ': placed as a custom part (check the footprint against the datasheet)' }));
+    // official-library parts get at least a third of the list, community parts at least a fifth
+    const nCom = Math.min(community.length, Math.max(limit - keep.length - extra.length, Math.floor(limit / 5)));
+    const nExtra = Math.min(extra.length, Math.max(limit - keep.length - nCom, Math.floor(limit / 3)));
+    const rows = keep.slice(0, limit - nExtra - nCom).concat(extra.slice(0, nExtra), community.slice(0, nCom)), now = Date.now() / 1000;
     dbPutMany('footprints', ee.map(r => ({ lcsc: r.lcsc, footprint: r.footprint, updated: now }))).catch(() => { });
     dbPutMany('parts', keep.map(x => Object.assign({ updated: now }, x))).catch(() => { });
-    const out = { source: [jlc.length && 'jlcpcb', ee.length && 'easyeda'].filter(Boolean).join('+'), results: rows, removed_without_footprint: dropped };
+    const out = { source: [jlc.length && 'jlcpcb', ee.length && 'easyeda', com.length && 'community'].filter(Boolean).join('+'), results: rows, removed_without_footprint: dropped };
     if (errors.length) out.error = errors.join('; ');
+    else { recent.set(ck, { t: Date.now(), out }); if (recent.size > 200) recent.delete(recent.keys().next().value); }
     return out;
   }
   function parsePins(shapes, cx, cy) {
@@ -224,10 +251,39 @@
     const bx = silk.map(q => (q[0] - ox) * U).concat(xs.map(v => (v - ox) * U)), by = silk.map(q => (q[1] - oy) * U).concat(ys.map(v => (v - oy) * U));
     return { name: pkg.title || 'footprint', pads: out, body: [r4(Math.min(...bx), 3), r4(Math.min(...by), 3), r4(Math.max(...bx), 3), r4(Math.max(...by), 3)] };
   }
+  function symbolPins(ds, fp) {
+    const head = ds.head || {};
+    const pins = parsePins(ds.shapes, num(head.x), num(head.y)), order = { L: 0, T: 1, R: 2, B: 3 }, seen = new Set(), uniq = [];
+    pins.sort((a, b) => (order[a.side] - order[b.side]) || ((a.side === 'T' || a.side === 'B' ? a.x - b.x : a.y - b.y)) || (a.y - b.y));
+    for (const p of pins) if (!seen.has(p.num)) { seen.add(p.num); uniq.push({ num: p.num, name: p.name, side: p.side }); }
+    if (!uniq.length && fp) [...new Set(fp.pads.map(p => p.num))].forEach((n, i) => uniq.push({ num: n, name: n, side: i % 2 ? 'R' : 'L' }));   // symbol without readable pins
+    return uniq;
+  }
+  // EasyEDA community part: symbol document + its footprint document (same EasyEDA Standard format as LCSC parts)
+  async function getCommunity(key) {
+    const get = async u => { const r = await realFetch(needRelay() + '/easyeda/doc/' + u); const j = await r.json().catch(() => ({})); return j && j.success ? j.result : null; };
+    const r = await get(key.slice(3).toLowerCase());
+    if (!r) throw httpError(404, `EasyEDA community part ${key} not found`);
+    const ds = r.dataStr || {}, head = ds.head || {}, para = head.c_para || {};
+    if (!head.puuid) throw httpError(404, `EasyEDA community part ${key} has no footprint`);
+    const fp = parseFootprint((await get(head.puuid)) || {});
+    if (!fp) throw httpError(404, `The footprint of EasyEDA community part ${key} has no pads`);
+    let shapes = (ds.shape || []).slice();
+    for (const sp of r.subparts || []) shapes = shapes.concat(((sp.dataStr || {}).shape) || []);
+    const sup = /^C\d+$/.test(para['Supplier Part'] || '') ? para['Supplier Part'] : '', owner = (r.owner || {}).username || '';
+    const model = { key, lcsc: sup, custom: !sup, name: para.name || r.title, mfr_part: para['Manufacturer Part'], manufacturer: para.Manufacturer, package: para.package,
+      prefix: String(para.pre || 'U?').replace(/\?+$/, '') || 'U', value: para.Value || para['Manufacturer Part'] || r.title,
+      pins: symbolPins({ head, shapes }, fp), footprint: fp, datasheet: para.link,
+      source: 'EasyEDA community library' + (owner ? ` (by ${owner})` : '') + ' — check the footprint against the datasheet', no_uuid: true };
+    dbPut('models', { lcsc: key, data: model, updated: Date.now() / 1000 }).catch(() => { });
+    return model;
+  }
   async function getPart(code) {
     const lcsc = String(code || '').trim().toUpperCase();
-    if (!/^C\d{1,10}$/.test(lcsc)) throw httpError(400, `"${lcsc}" is not an LCSC part number (e.g. C2838502)`);
+    const community = /^EE-[0-9A-F]{32}$/.test(lcsc);
+    if (!community && !/^C\d{1,10}$/.test(lcsc)) throw httpError(400, `"${lcsc}" is not an LCSC part number (e.g. C2838502) or an EasyEDA community key (EE-…)`);
     const cached = await dbGet('models', lcsc).catch(() => null);
+    if (community) { if (cached) return cached.data; return getCommunity(lcsc); }
     if (cached && cached.data && (cached.data.uuid || cached.data.no_uuid)) return cached.data;
     const res = await realFetch(needRelay() + '/easyeda/components/' + lcsc);
     const j = await res.json().catch(() => ({}));

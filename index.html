@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610212100">
+<link rel="stylesheet" href="styles.css?v=202610212230">
 </head>
 <body>
 <header id="top">
@@ -23,7 +23,9 @@
         <button data-exp="bom">Bill of materials (.csv)</button>
         <button data-exp="net">Netlist (.net)</button>
         <button data-exp="svg">Schematic (.svg)</button>
+        <button data-exp="easyedaproj" title="Schematic + PCB for EasyEDA Pro (File → Import → EasyEDA (Standard)) or EasyEDA Standard">EasyEDA project: schematic + PCB (.zip)</button>
         <button data-exp="easyeda">Schematic for EasyEDA (.json)</button>
+        <button data-exp="easyedapcb">PCB for EasyEDA (.json)</button>
         <button data-exp="pcbsvg">PCB image (.svg)</button>
       </div>
     </div>
@@ -240,7 +242,8 @@
       </section>
       <section class="edcol">
         <div class="row-h"><b>Footprint</b><span id="edFpName" class="muted small"></span></div>
-        <div class="row"><select id="edGen"></select><input id="edGenN" type="number" min="1" value="8" title="n" style="width:56px"><button id="edGenBtn" title="Replace the pads with the footprint chosen on the left">Update</button><button id="edAddPad">＋ Pad</button><button id="edFit">Fit</button></div>
+        <div class="row"><select id="edGen"></select><input id="edGenN" type="number" min="1" value="8" title="n" style="width:56px"><button id="edGenBtn" title="Replace the pads with the footprint chosen on the left">Update</button><button id="edAddPad">＋ Pad</button><button id="edFit">Fit</button><button id="edKicad" title="Pick a footprint from the official KiCad library (15 000+ footprints)">KiCad library…</button></div>
+        <div id="edKicadBox" class="edkicad hidden"><input id="edKicadQ" placeholder="Search KiCad footprints, e.g. SOIC-8, QFN-32 5x5, USB_C GCT, PinHeader 1x04" autocomplete="off"><div id="edKicadList" class="edkicad-list"></div></div>
         <svg id="edFp" class="edfp"></svg>
         <div id="edPad" class="edpad"></div>
       </section>
@@ -324,26 +327,27 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610212100"></script>
-<script src="js/static-backend.js?v=202610212100"></script>
-<script src="js/lib.js?v=202610212100"></script>
-<script src="js/view.js?v=202610212100"></script>
-<script src="js/model.js?v=202610212100"></script>
-<script src="js/schematic.js?v=202610212100"></script>
-<script src="js/pcb.js?v=202610212100"></script>
-<script src="js/pcbview.js?v=202610212100"></script>
-<script src="js/enclosure.js?v=202610212100"></script>
-<script src="js/shape3d.js?v=202610212100"></script>
-<script src="js/easyeda.js?v=202610212100"></script>
-<script src="js/easyedapro.js?v=202610212100"></script>
-<script src="js/encview.js?v=202610212100"></script>
-<script src="js/docview.js?v=202610212100"></script>
-<script src="js/pcb3d.js?v=202610212100"></script>
-<script src="js/engine.js?v=202610212100"></script>
-<script src="js/ai.js?v=202610212100"></script>
-<script src="js/projects.js?v=202610212100"></script>
-<script src="js/editor.js?v=202610212100"></script>
-<script src="js/app.js?v=202610212100"></script>
+<script src="js/config.js?v=202610212230"></script>
+<script src="js/static-backend.js?v=202610212230"></script>
+<script src="js/lib.js?v=202610212230"></script>
+<script src="js/view.js?v=202610212230"></script>
+<script src="js/model.js?v=202610212230"></script>
+<script src="js/schematic.js?v=202610212230"></script>
+<script src="js/pcb.js?v=202610212230"></script>
+<script src="js/pcbview.js?v=202610212230"></script>
+<script src="js/enclosure.js?v=202610212230"></script>
+<script src="js/shape3d.js?v=202610212230"></script>
+<script src="js/easyeda.js?v=202610212230"></script>
+<script src="js/kicad.js?v=202610212230"></script>
+<script src="js/easyedapro.js?v=202610212230"></script>
+<script src="js/encview.js?v=202610212230"></script>
+<script src="js/docview.js?v=202610212230"></script>
+<script src="js/pcb3d.js?v=202610212230"></script>
+<script src="js/engine.js?v=202610212230"></script>
+<script src="js/ai.js?v=202610212230"></script>
+<script src="js/projects.js?v=202610212230"></script>
+<script src="js/editor.js?v=202610212230"></script>
+<script src="js/app.js?v=202610212230"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

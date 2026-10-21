@@ -1,6 +1,8 @@
 'use strict';
 // Interchange with EasyEDA (Standard edition "EasyEDA Source" JSON, also importable into EasyEDA Pro):
 //  - exportSchematic(): the current schematic as an EasyEDA schematic document (docType 1)
+//  - exportPcb():       the current PCB as an EasyEDA PCB document (docType 3): footprints with their pads, tracks, vias,
+//                       holes, copper pours and the board outline (EasyEDA Pro: File → Import → EasyEDA (Standard))
 //  - importPcb(json):   an EasyEDA PCB document (docType 3) → parts, footprints, placement, nets, tracks, vias, pours, outline
 // Format reference: EasyEDA "Document Format" documentation. 1 EasyEDA unit = 10 mil = 0.254 mm, Y points down.
 const EasyEDA = (() => {
@@ -124,6 +126,54 @@ const EasyEDA = (() => {
       shape: shapes, BBox: { x: bb[0] - 20, y: bb[1] - 20, width: bb[2] - bb[0] + 40, height: bb[3] - bb[1] + 40 }, colors: {},
     };
     return JSON.stringify(doc);
+  }
+
+  // ---------- PCB export ----------
+  // Same records the importer below reads. Footprints are written in full (pads in board coordinates), so EasyEDA needs no
+  // library lookup; net names on pads, tracks, vias and pours are the schematic's net names.
+  function exportPcb() {
+    const S = Model.S, idx = Model.pinIndex(), cs = Pcb.placed();
+    if (!cs.length || !S.board.w) throw new Error('No PCB yet: create the PCB first (PCB tab)');
+    const OX = 4000, OY = 3000, u = v => n2(v / U), X = x => n2(OX + x / U), Y = y => n2(OY + y / U);
+    let gid = 0; const id = () => 'gge' + (++gid).toString(36) + 'cp';
+    const clean = s => String(s == null ? '' : s).replace(/[~`#@$^]/g, '_');
+    const shapes = [], cuL = l => l === 'B' ? 2 : 1;
+    for (const c of cs) {
+      const lib = c.type === 'part' ? S.lib[c.lcsc] : null, bot = Pcb.isBottom(c), lcsc = Model.lcscOf(c);
+      const pkg = clean((lib && lib.footprint && lib.footprint.name) || c.footprint || 'FOOTPRINT');
+      const para = ['package', pkg, 'pre', (c.ref.replace(/\d+$/, '') || 'U') + '?', 'Contributor', 'CircuitPilot', 'Supplier', lcsc ? 'LCSC' : '', 'Supplier Part', lcsc, 'Manufacturer Part', clean((lib && lib.mfr_part) || c.value || ''), 'Manufacturer', clean((lib && lib.manufacturer) || '')];
+      const sub = [];
+      for (const p of Pcb.padsOf(c, idx)) {
+        const x = X(p.x), y = Y(p.y), w = u(p.w), h = u(p.h), layer = p.drill ? 11 : cuL(p.layer);
+        const shape = p.shape === 'round' ? 'ELLIPSE' : p.shape === 'oval' ? 'OVAL' : 'RECT';
+        const pts = shape === 'RECT' ? [[x - w / 2, y - h / 2], [x + w / 2, y - h / 2], [x + w / 2, y + h / 2], [x - w / 2, y + h / 2]].map(q => n2(q[0]) + ' ' + n2(q[1])).join(' ') : '';
+        sub.push(`PAD~${shape}~${x}~${y}~${w}~${h}~${layer}~${clean(p.net || '')}~${clean(p.num)}~${p.drill ? u(p.drill / 2) : 0}~${pts}~0~${id()}~0~~Y~0~0~0.2~${x},${y}`);
+      }
+      const b = Pcb.fpBox(c), silk = bot ? 4 : 3;
+      sub.push(`TRACK~0.6~${silk}~~${X(b[0])} ${Y(b[1])} ${X(b[2])} ${Y(b[1])} ${X(b[2])} ${Y(b[3])} ${X(b[0])} ${Y(b[3])} ${X(b[0])} ${Y(b[1])}~${id()}~0`);
+      sub.push(`TEXT~P~${X(b[0])}~${n2(Y(b[1]) - 2)}~0.6~0~${bot ? 1 : 0}~${silk}~~4~${clean(c.ref)}~~~${id()}~0~pinpart`);
+      sub.push(`TEXT~N~${X(b[0])}~${n2(Y(b[3]) + 6)}~0.6~0~${bot ? 1 : 0}~${bot ? 14 : 13}~~4~${clean(c.value || '')}~~none~${id()}~0~pinpart`);
+      // LIB: x ~ y ~ attributes ~ rotation ~ importFlag ~ id ~ layer (1 top, 2 bottom)
+      shapes.push([`LIB~${X(c.pcb.x)}~${Y(c.pcb.y)}~${para.join('`')}\`~${c.pcb.rot || 0}~0~${id()}~${bot ? 2 : 1}`, ...sub].join('#@$'));
+    }
+    for (const t of S.pcb.traces || []) if (t.pts && t.pts.length >= 2) shapes.push(`TRACK~${u(t.w)}~${cuL(t.layer)}~${clean(t.net)}~${t.pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
+    for (const v of S.pcb.vias || []) shapes.push(`VIA~${X(v.x)}~${Y(v.y)}~${u(v.d)}~${clean(v.net)}~${u((v.drill || 0.3) / 2)}~${id()}~0`);
+    for (const h of S.pcb.holes || []) shapes.push(`HOLE~${X(h.x)}~${Y(h.y)}~${u(h.d / 2)}~${id()}~0`);
+    for (const p of S.pcb.pours || []) {
+      const pts = (p.pts && p.pts.length >= 3) ? p.pts : Pcb.boardPoly();
+      shapes.push(`COPPERAREA~1~${cuL(p.layer)}~${clean(p.net)}~M ${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' L ')} Z~${u(p.clearance || Pcb.rules().clearance || 0.2)}~solid~${id()}~spoke~none~~0~~2~1~1~1~yes`);
+    }
+    const poly = Pcb.boardPoly(), loop = poly.concat([poly[0]]);
+    shapes.push(`TRACK~1~10~~${loop.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
+    const layers = ['1~TopLayer~#FF0000~true~true~true~', '2~BottomLayer~#0000FF~true~false~true~', '3~TopSilkLayer~#FFCC00~true~false~true~', '4~BottomSilkLayer~#66CC33~true~false~true~',
+      '5~TopPasteMaskLayer~#808080~true~false~true~', '6~BottomPasteMaskLayer~#800000~true~false~true~', '7~TopSolderMaskLayer~#800080~true~false~true~0.3', '8~BottomSolderMaskLayer~#AA00FF~true~false~true~0.3',
+      '10~BoardOutLine~#FF00FF~true~false~true~', '11~Multi-Layer~#C0C0C0~true~false~true~', '12~Document~#FFFFFF~true~false~true~', '13~TopAssembly~#33CC99~false~false~false~', '14~BottomAssembly~#5555FF~false~false~false~'];
+    const bw = u(S.board.w), bh = u(S.board.h);
+    return JSON.stringify({
+      head: { docType: '3', editorVersion: '6.5.22', newgId: true, c_para: {}, x: OX, y: OY, hasIdFlag: true, importFlag: 0, transformList: '', title: (S.name || 'PCB') + ' PCB' },
+      canvas: `CA~${n2(OX * 2)}~${n2(OY * 2)}~#000000~yes~#FFFFFF~10~1000~1000~line~0.5~mm~1~45~visible~0.5~${OX}~${OY}~0~yes`,
+      shape: shapes, layers, objects: [], BBox: { x: OX - 10, y: OY - 10, width: bw + 20, height: bh + 20 }, preference: { hideFootprints: '', hideNets: '' }, DRCRULE: {}, netColors: [],
+    });
   }
 
   // ---------- PCB import ----------
@@ -268,11 +318,13 @@ const EasyEDA = (() => {
       pours: areas.filter(a => !a.net || S.nets[netName(a.net)]).map(a => Object.assign({ net: netName(a.net) || 'GND', layer: a.layer, pts: a.pts.map(mv) }, a.clearance > 0 ? { clearance: n4(a.clearance) } : {})),
       routed: {},
     };
-    try { Model.autoLayout(); } catch (e) { log.push('schematic auto-layout: ' + e.message); }
+    // schematic: symbols where the parts sit on the board, then spread so labels don't overlap (autoLayout is far too slow for big boards)
+    for (const L of libs) if (L.c) { L.c.x = Math.round(L.c.pcb.x * 3) * 10; L.c.y = Math.round(L.c.pcb.y * 3) * 10; }
+    try { Model.spaceOut(); } catch (e) { log.push('schematic spacing: ' + e.message); }
     if (skewed) log.push(`${skewed} footprints were placed at a non-90° angle — their pads are kept in place but the footprint outline is axis-aligned`);
     return { components: libs.filter(l => l.c).length, footprints: made, nets: Object.keys(nets).length, tracks: tracks.length, vias: vias.length, pours: S.pcb.pours.length, board_mm: [bw, bh], outline: loop ? (isRect ? 'rectangle' : 'polygon') : 'none (sized to the parts)', notes: log };
   }
   const isEasyEDA = j => { try { return !!unwrap(j); } catch (e) { return /EasyEDA schematic/.test(e.message) ? 'schematic' : false; } };
-  return { exportSchematic, importPcb, isEasyEDA, pathToPolys };
+  return { exportSchematic, exportPcb, importPcb, isEasyEDA, pathToPolys };
 })();
 if (typeof module !== 'undefined') module.exports = EasyEDA;

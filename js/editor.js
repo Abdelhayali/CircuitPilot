@@ -244,6 +244,37 @@ const PartEditor = (() => {
     def.footprint = { name, pads: clone(fp.pads), body: fp.body ? clone(fp.body) : null }; selPad = -1; fitFp(); showCurrentFp();
   }
 
+  // ---------- KiCad official footprint library ----------
+  let kiTimer = null, kiSeq = 0;
+  function kicadToggle() {
+    const box = $('#edKicadBox'), open = box.classList.toggle('hidden') === false;
+    if (open) { const q = $('#edKicadQ'); if (!q.value) q.value = String(def.footprint.name || '').replace(/[<>]/g, '').replace(/^custom$/, ''); q.focus(); q.select(); kicadSearch(); }
+  }
+  function kicadSearch() {
+    clearTimeout(kiTimer);
+    kiTimer = setTimeout(async () => {
+      const seq = ++kiSeq, q = $('#edKicadQ').value.trim(), list = $('#edKicadList');
+      if (q.length < 2) { list.innerHTML = '<div class="muted small">Type at least 2 characters</div>'; return; }
+      list.innerHTML = '<div class="muted small">Searching… <span class="spin"></span></div>';
+      try {
+        const hits = await KiCad.search(q, 60); if (seq !== kiSeq) return;
+        list.innerHTML = hits.length ? hits.map(h => { const i = h.indexOf('/'); return `<button class="kifp" data-path="${esc(h)}" title="${esc(h)}"><b>${esc(h.slice(i + 1))}</b><span class="muted">${esc(h.slice(0, i).replace(/\.pretty$/, ''))}</span></button>`; }).join('')
+          : '<div class="muted small">No KiCad footprint matches. Try fewer words, e.g. "QFN-32" or "SOT-23".</div>';
+      } catch (e) { if (seq === kiSeq) list.innerHTML = `<div class="dberr">${esc(e.message)}</div>`; }
+    }, 200);
+  }
+  async function kicadPick(path) {
+    if (def.footprint.pads.length && !confirm(`Replace the ${def.footprint.pads.length} current pads with KiCad ${path.slice(path.indexOf('/') + 1)}?`)) return;
+    App.toast('Downloading ' + path + '…', 8000);
+    try {
+      const f = await KiCad.load(path);
+      def.footprint = { name: f.name, pads: f.pads, body: f.body };
+      selPad = -1; fitFp(); showCurrentFp(); $('#edKicadBox').classList.add('hidden');
+      const nums = new Set(f.pads.map(p => p.num)), missing = [...nums].filter(n => !def.pins.some(p => String(p.num) === n));
+      App.toast(`KiCad footprint ${f.name}: ${f.pads.length} pads${f.skipped ? ` (${f.skipped} mechanical / paste-only pads left out)` : ''}${missing.length ? ` · ${missing.length} pad number${missing.length > 1 ? 's have' : ' has'} no pin yet: use “Pins from pads”` : ''}`, 9000);
+    } catch (e) { App.toast(e.message, 8000); }
+  }
+
   function key(e) {
     if ($('#edModal').classList.contains('hidden')) return false;
     if (e.key === 'Escape') { close(); return true; }
@@ -259,6 +290,8 @@ const PartEditor = (() => {
     $('#edPins').addEventListener('input', onPinInput); $('#edPins').addEventListener('click', onPinClick);
     $('#edAddPin').onclick = addPin; $('#edBulk').onclick = bulkEdit; $('#edFromPads').onclick = pinsFromPads;
     $('#edAddPad').onclick = addPad; $('#edGenBtn').onclick = generate; $('#edFit').onclick = fitFp;
+    $('#edKicad').onclick = kicadToggle; $('#edKicadQ').addEventListener('input', kicadSearch);
+    $('#edKicadList').addEventListener('click', e => { const b = e.target.closest('[data-path]'); if (b) kicadPick(b.dataset.path); });
     $('#edPad').addEventListener('input', onPadForm);
     $('#edPad').addEventListener('click', e => { if (e.target.id === 'edPadDel') { def.footprint.pads.splice(selPad, 1); selPad = -1; renderFp(); } });
     ['edName', 'edPrefix', 'edValue'].forEach(id => $('#' + id).addEventListener('input', renderSym));

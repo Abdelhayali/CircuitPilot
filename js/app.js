@@ -60,7 +60,7 @@ const App = (() => {
       try { const j = await AI.partsApi('search?q=' + encodeURIComponent(q) + '&limit=25'); if (seq !== dbSeq) return; db.results = j.results; db.source = j.source; db.error = j.source === 'local' && j.error ? 'Offline — showing cached parts' : null; }
       catch (e) { if (seq !== dbSeq) return; db.results = []; db.error = e.message; }
       db.loading = false; renderParts();
-    }, 600);
+    }, 350);
   }
   async function placeDbPart(code) {
     toast('Loading ' + code + '…', 8000);
@@ -103,14 +103,14 @@ const App = (() => {
   }
   function renderDb() {
     if (!db.q && !db.loading) return '';
-    let h = `<div class="pcat">Database · JLCPCB + EasyEDA library${db.loading ? ' <span class="spin"></span>' : ''}</div>`;
+    let h = `<div class="pcat">Database · JLCPCB + EasyEDA library + community${db.loading ? ' <span class="spin"></span>' : ''}</div>`;
     if (db.error) h += `<div class="dberr">${esc(db.error)}</div>`;
     if (!db.loading && !db.results.length && !db.error) h += '<div class="muted small">No parts with a footprint found</div>';
     const lib = r => r.sources && !r.sources.includes('jlcpcb');   // found only in the EasyEDA library (no JLCPCB stock data)
     h += db.results.map(r => `<button class="dbpart" data-lcsc="${esc(r.lcsc)}" title="${esc([r.description, r.footprint && 'Footprint: ' + r.footprint, r.note].filter(Boolean).join('\n'))}">
-      <div class="dbt"><b>${esc(r.mfr_part || r.lcsc)}</b>${r.basic ? '<span class="badge basic">Basic</span>' : ''}${lib(r) ? '<span class="badge">EasyEDA lib</span>' : ''}</div>
+      <div class="dbt"><b>${esc(r.mfr_part || r.lcsc)}</b>${r.basic ? '<span class="badge basic">Basic</span>' : ''}${lib(r) ? `<span class="badge">${r.sources.includes('community') ? 'community' : 'EasyEDA lib'}</span>` : ''}</div>
       <div class="dbs">${esc(r.package || '')}${r.brand ? ' · ' + esc(r.brand) : ''}</div>
-      <div class="dbs">${esc(r.lcsc)} · ${lib(r) ? `<span class="muted">${/^C99/.test(r.lcsc) ? 'not sold by LCSC' : 'stock: check LCSC'}</span>` : `<span class="${r.stock > 0 ? 'good' : 'bad'}">${(r.stock || 0).toLocaleString()} in stock</span>`}${r.price != null ? ' · $' + (+r.price).toFixed(r.price < 0.1 ? 4 : 2) : ''}</div></button>`).join('');
+      <div class="dbs">${r.sources && r.sources.includes('community') ? 'EasyEDA user part' : esc(r.lcsc)} · ${lib(r) ? `<span class="muted">${r.sources.includes('community') ? 'by ' + esc(r.author || 'a user') + (r.supplier_part ? ' · ' + esc(r.supplier_part) : '') : /^C99/.test(r.lcsc) ? 'not sold by LCSC' : 'stock: check LCSC'}</span>` : `<span class="${r.stock > 0 ? 'good' : 'bad'}">${(r.stock || 0).toLocaleString()} in stock</span>`}${r.price != null ? ' · $' + (+r.price).toFixed(r.price < 0.1 ? 4 : 2) : ''}</div></button>`).join('');
     return h;
   }
   function renderParts() {
@@ -211,21 +211,35 @@ const App = (() => {
   }
 
   // EasyEDA schematic: each part with an LCSC number is linked to its EasyEDA library symbol + footprint (uuid / puuid)
-  async function easyedaExport() {
+  // mode: 'sch' (schematic .json), 'pcb' (PCB .json) or 'project' (both in one .zip, for EasyEDA Pro / Standard import)
+  async function easyedaExport(mode = 'sch') {
+    if (mode === 'pcb') {
+      download(fname('-pcb.easyeda.json'), EasyEDA.exportPcb(), 'application/json');
+      toast('EasyEDA PCB saved: footprints, tracks, vias, copper pours and the board outline. EasyEDA Pro: File → Import → EasyEDA (Standard) · Standard: File → Open → EasyEDA Source', 12000);
+      return;
+    }
     const S = Model.S, codes = [...new Set(S.components.map(c => Model.lcscOf(c)).filter(Boolean))], ids = {}, failed = [];
     toast(`Linking ${codes.length} parts to the EasyEDA library…`, 20000);
     await Promise.all(codes.map(async code => {
       try { const p = await Engine.partsApi('get/' + encodeURIComponent(code)); if (p && p.puuid) ids[code] = { uuid: p.uuid, puuid: p.puuid, package: p.package || (p.footprint && p.footprint.name) }; else failed.push(code); }
       catch (e) { failed.push(code); }
     }));
-    download(fname('-schematic.easyeda.json'), EasyEDA.exportSchematic(ids), 'application/json');
+    const sch = EasyEDA.exportSchematic(ids);
+    let pcb = null;
+    if (mode === 'project') { try { pcb = EasyEDA.exportPcb(); } catch (e) { pcb = null; } }
+    if (mode === 'project') {
+      const base = (S.name || 'Project').replace(/[\\/:*?"<>|]+/g, '_');
+      const files = { [`SCH_${base}.json`]: sch }; if (pcb) files[`PCB_${base}.json`] = pcb;
+      download(fname('-easyeda.zip'), makeZip(files));
+    } else download(fname('-schematic.easyeda.json'), sch, 'application/json');
     const sz = t => (String(t || '').match(/(?:^|\D)(0201|0402|0603|0805|1206|1210|2512)(?!\d)/) || [])[1];
     const noCode = S.components.filter(c => !Model.lcscOf(c)).map(c => c.ref);
     const edited = S.components.filter(c => { const k = Model.lcscOf(c), l = c.type === 'part' ? S.lib[c.lcsc] : null, a = sz(l && l.footprint && l.footprint.name), b = sz(ids[k] && ids[k].package); return a && b && a !== b; }).map(c => c.ref);
     const notes = [noCode.length && `no LCSC part (choose the footprint in EasyEDA): ${noCode.join(', ')}`,
       failed.length && `not found in the EasyEDA library: ${failed.join(', ')}`,
       edited.length && `footprint edited here, EasyEDA uses the part's own footprint: ${edited.join(', ')}`].filter(Boolean);
-    toast(`EasyEDA schematic saved — ${S.components.length - noCode.length - failed.length}/${S.components.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Standard: File → Open → EasyEDA Source · Pro: File → Import → EasyEDA (Standard)`, 15000);
+    if (mode === 'project' && !pcb) notes.unshift('no PCB yet, so only the schematic is in the zip');
+    toast(`EasyEDA ${mode === 'project' ? 'project (schematic' + (pcb ? ' + PCB)' : ')') : 'schematic'} saved — ${S.components.length - noCode.length - failed.length}/${S.components.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Pro: File → Import → EasyEDA (Standard) and choose the file · Standard: File → Open → EasyEDA Source`, 15000);
   }
 
   // ---------- screenshots for the AI (view_design): schematic, 2D PCB, 3D board, enclosure ----------
@@ -976,9 +990,9 @@ const App = (() => {
       if (kind === 'json') download(fname('.circuit.json'), JSON.stringify(S, null, 1), 'application/json');
       if (kind === 'gerber') { gerberCheck(); return; }
       if (kind === 'svg') download(fname('-schematic.svg'), Sch.exportSVG(), 'image/svg+xml');
-      if (kind === 'easyeda') {
+      if (kind === 'easyeda' || kind === 'easyedaproj' || kind === 'easyedapcb') {
         if (!S.components.length) throw new Error('The schematic is empty');
-        easyedaExport();
+        easyedaExport(kind === 'easyedaproj' ? 'project' : kind === 'easyedapcb' ? 'pcb' : 'sch');
         return;
       }
       if (kind === 'pcbsvg') { if (!S.board.w) throw new Error('No PCB yet'); if (view !== 'pcb') Pcb.render(); download(fname('-pcb.svg'), Pcb.exportSVG(), 'image/svg+xml'); }

@@ -452,3 +452,11 @@ body:not(.static-web) #modal .webonly { display: none; }
 .prov .pinfo { flex: 1; min-width: 0; display: grid; }
 .prov .pinfo span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prov-form { border-top: 1px dashed var(--line); padding-top: 8px; }
+
+/* part editor: KiCad footprint picker */
+.edkicad { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.edkicad input { width: 100%; }
+.edkicad-list { max-height: 180px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.kifp { display: flex; justify-content: space-between; gap: 10px; text-align: left; padding: 4px 8px; font-size: 12px; }
+.kifp b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kifp span { flex: none; font-size: 11px; }

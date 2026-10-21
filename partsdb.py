@@ -1,7 +1,8 @@
 """Component database: JLCPCB/LCSC catalogue + EasyEDA (LCSC) library search, part symbols/footprints, cached in SQLite.
 
-Search asks two databases at once: the JLCPCB parts catalogue (stock, price, Basic/Extended) and the EasyEDA
-official library (about 1.6 million LCSC parts with symbol + footprint, including modules JLCPCB does not stock).
+Search asks three databases at once: the JLCPCB parts catalogue (stock, price, Basic/Extended), the EasyEDA
+official library (about 1.6 million LCSC parts with symbol + footprint, including modules JLCPCB does not stock) and
+the EasyEDA community library (parts drawn by EasyEDA users; keys "EE-<uuid>", placed as custom parts).
 Parts without a footprint are left out of the results (checked in one batch request, remembered in parts.db).
 
 Search results and every part model that is fetched are stored in parts.db, so the local
@@ -18,7 +19,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts.db")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CircuitPilot"
@@ -68,7 +69,14 @@ JLC_SEARCH = "https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/
 EE_SEARCH = "https://pro.easyeda.com/api/devices/search"
 EE_CODES = "https://pro.easyeda.com/api/devices/searchByCodes"
 NO_FP_TTL = 7 * 86400  # re-check parts without a footprint after a week (the library keeps growing)
+EE_STD_SEARCH = "https://easyeda.com/api/components/search"
+EE_COMPONENT = "https://easyeda.com/api/components/{}"
 COLS = "lcsc,mfr_part,brand,package,category,description,stock,basic,price,datasheet"
+COMMUNITY_RE = re.compile(r"EE-[0-9A-F]{32}")
+SLOW_SOURCE = 3.5     # seconds: a database that has not answered by then is skipped for this search
+CACHE_TTL = 600       # identical searches within 10 minutes are answered from memory
+_pool = ThreadPoolExecutor(8)
+_recent = {}
 
 
 def _brand(s):
@@ -97,6 +105,27 @@ def _search_ee(q, limit):
     j = _http(EE_SEARCH, form={"wd": q, "page": 1, "pageSize": limit})
     lst = ((j.get("result") or {}).get("lists") or {}).get("lcsc") or []
     return [r for r in map(_ee_row, lst) if re.fullmatch(r"C\d{1,12}", r["lcsc"])]
+
+
+def _search_community(q, limit):
+    """EasyEDA community library: only parts whose symbol has a footprint attached"""
+    j = _http(EE_STD_SEARCH, form={"type": 3, "doctype[]": 2, "returnListStyle": "classifyarr", "wd": q, "uid": "user", "page": 1})
+    out = []
+    for x in ((j.get("result") or {}).get("lists") or {}).get("user") or []:
+        head = (x.get("dataStr") or {}).get("head") or {}
+        para = head.get("c_para") or {}
+        if not head.get("puuid") or not re.fullmatch(r"[0-9a-f]{32}", x.get("uuid") or ""):
+            continue
+        sup = para.get("Supplier Part") or ""
+        out.append({
+            "lcsc": "EE-" + x["uuid"].upper(), "mfr_part": para.get("Manufacturer Part") or x.get("title"), "brand": _brand(para.get("Manufacturer")),
+            "package": para.get("package") or "", "category": "", "description": (x.get("description") or x.get("title") or "")[:300],
+            "stock": None, "basic": 0, "price": None, "datasheet": para.get("link"), "footprint": para.get("package") or "footprint",
+            "author": (x.get("owner") or {}).get("username") or "", "supplier_part": sup if re.fullmatch(r"C\d+", sup) else "",
+        })
+        if len(out) >= limit:
+            break
+    return out
 
 
 def footprints(codes):
@@ -136,22 +165,32 @@ def search(q, limit=20):
     if not q:
         return {"source": "none", "results": []}
     limit = max(1, min(int(limit or 20), 50))
-    jlc, ee, errors = [], [], []
-    with ThreadPoolExecutor(2) as ex:
-        fj, fe = ex.submit(_search_jlc, q, limit), ex.submit(_search_ee, q, limit)
+    ck = (q.lower(), limit)
+    hit = _recent.get(ck)
+    if hit and time.time() - hit[0] < CACHE_TTL:
+        return hit[1]
+    t0 = time.time()
+    jlc, ee, com, errors = [], [], [], []
+    # the three databases are asked at once; the footprint check of the JLCPCB results starts as soon as they arrive
+    fj, fe, fc = _pool.submit(_search_jlc, q, limit), _pool.submit(_search_ee, q, limit), _pool.submit(_search_community, q, limit)
+
+    def wait(f, name, extra=0):
         try:
-            jlc = fj.result()
+            return f.result(timeout=max(0.3, SLOW_SOURCE + extra - (time.time() - t0)))
+        except FutureTimeout:
+            errors.append(f"{name}: no answer within {SLOW_SOURCE:g} s, skipped")
         except Exception as e:
-            errors.append(f"JLCPCB: {e}")
-        try:
-            ee = fe.result()
-        except Exception as e:
-            errors.append(f"EasyEDA: {e}")
-    if not jlc and not ee and errors:  # offline / blocked -> local cache
+            errors.append(f"{name}: {e}")
+        return []
+    jlc = wait(fj, "JLCPCB", 4)   # the catalogue with stock and prices is worth a little longer
+    ffp = _pool.submit(footprints, [r["lcsc"] for r in jlc])
+    ee = wait(fe, "EasyEDA")
+    com = wait(fc, "EasyEDA community")
+    if not jlc and not ee and not com and errors:  # offline / blocked -> local cache
         return {"source": "local", "error": "; ".join(errors), "results": search_local(q, limit)}
     in_ee = {r["lcsc"]: r["footprint"] for r in ee}
-    fp = dict(in_ee)
-    fp.update(footprints([r["lcsc"] for r in jlc if r["lcsc"] not in in_ee]))
+    fp = ffp.result()
+    fp.update(in_ee)
     keep, dropped = [], 0
     for r in jlc:
         f = fp.get(r["lcsc"])
@@ -174,17 +213,29 @@ def search(q, limit=20):
             continue
         extra.append(dict(r, sources=["easyeda"], note="EasyEDA library part, not in the JLCPCB results: "
                           + ("placeholder code, not sold by LCSC" if r["lcsc"].startswith("C99") else "check LCSC / JLCPCB stock")))
-    n_extra = min(len(extra), max(limit - len(keep), limit // 3))  # library-only parts get at least a third of the list
-    rows = keep[:limit - n_extra] + extra[:n_extra]
+    community = []
+    for r in com:
+        text = norm(" ".join(str(r.get(k) or "") for k in ("mfr_part", "brand", "package", "description")))
+        if all(w in text for w in words):
+            community.append(dict(r, sources=["community"], note="EasyEDA community part by " + (r["author"] or "a user")
+                                  + ": placed as a custom part (check the footprint against the datasheet)"))
+    # official-library parts get at least a third of the list, community parts at least a fifth
+    n_com = min(len(community), max(limit - len(keep) - len(extra), limit // 5))
+    n_extra = min(len(extra), max(limit - len(keep) - n_com, limit // 3))
+    rows = keep[:limit - n_extra - n_com] + extra[:n_extra] + community[:n_com]
     now = time.time()
     with _lock, _db() as con:
         con.executemany("INSERT OR REPLACE INTO footprints VALUES(?,?,?)", [(r["lcsc"], r["footprint"], now) for r in ee])
         sql = f"INTO parts({COLS},updated) VALUES(:{',:'.join(COLS.split(','))},{now})"
         con.executemany("INSERT OR REPLACE " + sql, [r for r in jlc if fp.get(r["lcsc"]) != ""])
         con.executemany("INSERT OR IGNORE " + sql, [dict(r, stock=0) for r in extra])
-    out = {"source": "+".join(n for n, l in (("jlcpcb", jlc), ("easyeda", ee)) if l), "results": rows, "removed_without_footprint": dropped}
+    out = {"source": "+".join(n for n, l in (("jlcpcb", jlc), ("easyeda", ee), ("community", com)) if l), "results": rows, "removed_without_footprint": dropped}
     if errors:
         out["error"] = "; ".join(errors)
+    else:
+        _recent[ck] = (time.time(), out)
+        if len(_recent) > 200:
+            _recent.pop(next(iter(_recent)))
     return out
 
 
@@ -286,8 +337,9 @@ def _parse_footprint(pkg):
 
 def get_part(lcsc):
     lcsc = (lcsc or "").strip().upper()
-    if not re.fullmatch(r"C\d{1,10}", lcsc):
-        raise ValueError(f'"{lcsc}" is not an LCSC part number (e.g. C2838502)')
+    community = bool(COMMUNITY_RE.fullmatch(lcsc))
+    if not community and not re.fullmatch(r"C\d{1,10}", lcsc):
+        raise ValueError(f'"{lcsc}" is not an LCSC part number (e.g. C2838502) or an EasyEDA community key (EE-…)')
     with _lock, _db() as con:
         row = con.execute("SELECT json FROM models WHERE lcsc=?", (lcsc,)).fetchone()
     if row:
@@ -299,7 +351,51 @@ def get_part(lcsc):
             return _fetch_part(lcsc)
         except Exception:
             return m
-    return _fetch_part(lcsc)
+    return _fetch_community(lcsc) if community else _fetch_part(lcsc)
+
+
+def _fetch_community(key):
+    """EasyEDA community part: symbol document + its footprint document (same EasyEDA Standard format as LCSC parts)"""
+    j = _http(EE_COMPONENT.format(key[3:].lower()))
+    r = j.get("result") if j.get("success") else None
+    if not r:
+        raise LookupError(f"EasyEDA community part {key} not found")
+    ds = r.get("dataStr") or {}
+    head = ds.get("head") or {}
+    para = head.get("c_para") or {}
+    if not head.get("puuid"):
+        raise LookupError(f"EasyEDA community part {key} has no footprint")
+    pj = _http(EE_COMPONENT.format(head["puuid"]))
+    pkg = pj.get("result") if pj.get("success") else None
+    fp = _parse_footprint(pkg or {})
+    if not fp:
+        raise LookupError(f"The footprint of EasyEDA community part {key} has no pads")
+    shapes = list(ds.get("shape") or [])
+    for sp in r.get("subparts") or []:
+        shapes += (sp.get("dataStr") or {}).get("shape") or []
+    pins = _parse_pins(shapes, _num(head.get("x")), _num(head.get("y")))
+    seen, uniq = set(), []
+    order = {"L": 0, "T": 1, "R": 2, "B": 3}
+    for p in sorted(pins, key=lambda p: (order[p["side"]], p["x"] if p["side"] in "TB" else p["y"], p["y"])):
+        if p["num"] not in seen:
+            seen.add(p["num"])
+            uniq.append({"num": p["num"], "name": p["name"], "side": p["side"]})
+    if not uniq:  # symbol without readable pins: one pin per pad
+        uniq = [{"num": n, "name": n, "side": "L" if i % 2 == 0 else "R"} for i, n in enumerate(dict.fromkeys(p["num"] for p in fp["pads"]))]
+    sup = para.get("Supplier Part") or ""
+    owner = (r.get("owner") or {}).get("username") or ""
+    model = {
+        "key": key, "lcsc": sup if re.fullmatch(r"C\d+", sup) else "", "custom": not re.fullmatch(r"C\d+", sup),
+        "name": para.get("name") or r.get("title"), "mfr_part": para.get("Manufacturer Part"), "manufacturer": para.get("Manufacturer"),
+        "package": para.get("package"), "prefix": (para.get("pre") or "U?").rstrip("?") or "U",
+        "value": para.get("Value") or para.get("Manufacturer Part") or r.get("title"),
+        "pins": uniq, "footprint": fp, "datasheet": para.get("link"),
+        "source": "EasyEDA community library" + (f" (by {owner})" if owner else "") + " — check the footprint against the datasheet",
+        "no_uuid": True,
+    }
+    with _lock, _db() as con:
+        con.execute("INSERT OR REPLACE INTO models VALUES(?,?,?)", (key, json.dumps(model), time.time()))
+    return model
 
 
 def _fetch_part(lcsc):

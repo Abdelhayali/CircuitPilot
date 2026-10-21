@@ -41,6 +41,11 @@ async function relay(req, url) {
   // EasyEDA library: keyword search and the batch footprint check (form-encoded POST bodies, forwarded as they are)
   if ((p === '/easyeda/search' || p === '/easyeda/codes') && req.method === 'POST')
     return fetch(p === '/easyeda/search' ? EE_SEARCH : EE_CODES, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'user-agent': UA }, body: await req.text() });
+  // EasyEDA community library: keyword search (form POST) and one symbol / footprint document by uuid
+  if (p === '/easyeda/community' && req.method === 'POST')
+    return fetch('https://easyeda.com/api/components/search', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'user-agent': UA }, body: await req.text() });
+  if ((m = /^\/easyeda\/doc\/([0-9a-f]{32})$/.exec(p)))
+    return fetch('https://easyeda.com/api/components/' + m[1], { headers: { 'accept': 'application/json', 'user-agent': UA } });
   if ((m = /^\/easyeda\/components\/(C\d{1,10})$/.exec(p)))
     return fetch(`https://easyeda.com/api/products/${m[1]}/components`, { headers: { 'accept': 'application/json', 'user-agent': UA } });
   if (p === '/ddg') {

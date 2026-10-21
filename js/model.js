@@ -26,6 +26,8 @@ const Model = (() => {
   function load(obj, keepHistory) {
     if (keepHistory) begin(); else { undoStack.length = 0; redoStack.length = 0; }
     S = Object.assign(blank(), typeof obj === 'string' ? JSON.parse(obj) : JSON.parse(JSON.stringify(obj)));
+    // custom parts placed by older versions lost their library key (drawn as an empty box): it is still in the footprint name
+    for (const c of S.components || []) if (c.type === 'part' && !(S.lib || {})[c.lcsc]) { const m = /^(?:LCSC|LIB):(.+)$/.exec(c.footprint || ''); if (m && S.lib[m[1]]) c.lcsc = m[1]; }
     emit('load');
   }
   function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); S = JSON.parse(undoStack.pop()); emit('load'); }
@@ -162,7 +164,7 @@ const Model = (() => {
     if (comp(ref)) { if (spec.ref) throw new Error(`Ref ${ref} already exists`); ref = nextRef(prefix); }
     const c = { ref, type: spec.type, value: spec.value != null ? String(spec.value) : (lp ? lp.value || lp.name : d.value), x: 0, y: 0, rot: [0, 90, 180, 270].includes(+spec.rot) ? +spec.rot : 0 };
     if (+spec.sheet > 0) c.sheet = +spec.sheet;
-    if (lp) c.lcsc = lp.lcsc;
+    if (lp) c.lcsc = spec.lcsc;   // the library key (custom parts have no LCSC number of their own; lcscOf() finds the real one)
     if (d.generic && Array.isArray(spec.pins) && spec.pins.length) c.pins = spec.pins.map(String);
     if (d.generic && !c.pins && typeof spec.pins === 'number') c.pins = Array.from({ length: spec.pins }, (_, i) => String(i + 1));
     const fps = Lib.fpsFor(c);

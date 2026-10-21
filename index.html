@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610211757">
+<link rel="stylesheet" href="styles.css?v=202610211930">
 </head>
 <body>
 <header id="top">
@@ -35,7 +35,7 @@
   <span id="saveState"></span>
   <button id="btnTheme" title="Theme"></button>
   <button id="btnSettings">⚙ Settings</button>
-  <input type="file" id="fileIn" accept=".json" hidden>
+  <input type="file" id="fileIn" accept=".json,.epro,.epro2,.zip" hidden>
 </header>
 
 <main>
@@ -217,7 +217,7 @@
 <div id="projModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>Projects</h2><button id="projClose">✕</button></div>
-    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><button id="projNew" class="primary">＋ New project</button><button id="projImport" title="A CircuitPilot project file, or an EasyEDA PCB (File → Export → EasyEDA Source)">Import .json / EasyEDA PCB</button></div>
+    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><button id="projNew" class="primary">＋ New project</button><button id="projImport" title="A CircuitPilot project (.json), an EasyEDA Pro project (.epro / .epro2: File → Save As / Export → Project) with schematic and PCB, or an EasyEDA Standard PCB (File → Export → EasyEDA Source)">Import (.json, EasyEDA Pro / Std)</button></div>
     <div id="projList"></div>
   </div>
 </div>
@@ -324,25 +324,26 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610211757"></script>
-<script src="js/static-backend.js?v=202610211757"></script>
-<script src="js/lib.js?v=202610211757"></script>
-<script src="js/view.js?v=202610211757"></script>
-<script src="js/model.js?v=202610211757"></script>
-<script src="js/schematic.js?v=202610211757"></script>
-<script src="js/pcb.js?v=202610211757"></script>
-<script src="js/pcbview.js?v=202610211757"></script>
-<script src="js/enclosure.js?v=202610211757"></script>
-<script src="js/shape3d.js?v=202610211757"></script>
-<script src="js/easyeda.js?v=202610211757"></script>
-<script src="js/encview.js?v=202610211757"></script>
-<script src="js/docview.js?v=202610211757"></script>
-<script src="js/pcb3d.js?v=202610211757"></script>
-<script src="js/engine.js?v=202610211757"></script>
-<script src="js/ai.js?v=202610211757"></script>
-<script src="js/projects.js?v=202610211757"></script>
-<script src="js/editor.js?v=202610211757"></script>
-<script src="js/app.js?v=202610211757"></script>
+<script src="js/config.js?v=202610211930"></script>
+<script src="js/static-backend.js?v=202610211930"></script>
+<script src="js/lib.js?v=202610211930"></script>
+<script src="js/view.js?v=202610211930"></script>
+<script src="js/model.js?v=202610211930"></script>
+<script src="js/schematic.js?v=202610211930"></script>
+<script src="js/pcb.js?v=202610211930"></script>
+<script src="js/pcbview.js?v=202610211930"></script>
+<script src="js/enclosure.js?v=202610211930"></script>
+<script src="js/shape3d.js?v=202610211930"></script>
+<script src="js/easyeda.js?v=202610211930"></script>
+<script src="js/easyedapro.js?v=202610211930"></script>
+<script src="js/encview.js?v=202610211930"></script>
+<script src="js/docview.js?v=202610211930"></script>
+<script src="js/pcb3d.js?v=202610211930"></script>
+<script src="js/engine.js?v=202610211930"></script>
+<script src="js/ai.js?v=202610211930"></script>
+<script src="js/projects.js?v=202610211930"></script>
+<script src="js/editor.js?v=202610211930"></script>
+<script src="js/app.js?v=202610211930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

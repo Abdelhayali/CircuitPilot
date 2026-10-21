@@ -1125,6 +1125,22 @@ const App = (() => {
     $('#fileIn').onchange = async e => {
       const f = e.target.files[0]; if (!f) return;
       try {
+        if (EasyEDAPro.isPro(f.name)) {   // EasyEDA Pro project → new project with schematic sheets, parts, nets and the PCB
+          toast('Reading the EasyEDA Pro project…', 20000);
+          const P = await EasyEDAPro.read(await f.arrayBuffer());
+          let i = 0;
+          if (P.boards.length > 1) {
+            const list = P.boards.map((b, k) => `${k + 1}: ${b.name}${b.schematic ? ' — schematic ' + b.schematic : ''}${b.pcbName ? ' — PCB ' + b.pcbName : ''}`).join('\n');
+            const a = prompt('This project has several boards. Which one to import?\n' + list, '1'); if (a === null) { toast('Import cancelled'); e.target.value = ''; return; }
+            i = Math.min(P.boards.length, Math.max(1, parseInt(a, 10) || 1)) - 1;
+          }
+          const nd = Model.blank(); nd.name = P.boards[i].name || f.name.replace(/\.(epro2?|zip)$/i, ''); Model.load(nd);
+          const r = await EasyEDAPro.importBoard(P, i);
+          Projects.markLoaded(); await Projects.saveNow(); Projects.close();
+          if (r.tracks || r.board_mm) { showView('pcb'); Pcb.fit(); } else Sch.fit();
+          toast(`Imported ${r.format}: ${r.components} parts, ${r.nets} nets${r.sheets ? ', ' + r.sheets + ' sheet' + (r.sheets > 1 ? 's' : '') : ''}${r.board_mm ? `, PCB ${r.board_mm[0]} × ${r.board_mm[1]} mm with ${r.tracks} tracks, ${r.vias} vias` : ''}${r.notes.length ? ' — ' + r.notes.join('; ') : ''}`, 12000);
+          e.target.value = ''; return;
+        }
         const d = JSON.parse(await f.text()), name = f.name.replace(/\.circuit\.json$|\.json$/i, '');
         const ee = EasyEDA.isEasyEDA(d);
         if (ee === 'schematic') throw new Error('this is an EasyEDA schematic — export the PCB document from EasyEDA (File → Export → EasyEDA Source) and import that');

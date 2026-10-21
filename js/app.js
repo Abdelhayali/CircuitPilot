@@ -62,41 +62,46 @@ const App = (() => {
       db.loading = false; renderParts();
     }, 350);
   }
-  async function placeDbPart(code) {
+  // where a new part goes: the drop point (snapped to the 10-unit grid) or the middle of the view
+  function placePoint(at) {
+    if (at) return { x: Math.round(at.x / 10) * 10, y: Math.round(at.y / 10) * 10 };
+    const vb = Sch.vp.vb || [0, 0, 0, 0]; return { x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2 };
+  }
+  async function placeDbPart(code, at) {
     toast('Loading ' + code + '…', 8000);
     try {
       const m = await AI.loadPart(code);
       if (view !== 'sch') showView('sch');
-      const vb = Sch.vp.vb || [0, 0, 0, 0];
-      const key = m.key || m.lcsc;
-      const c = Model.mutate(() => { if (!Model.S.lib[key]) Model.setLibPart(key, m); return Model.addComponent({ part: key, x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2, sheet: Sch.ui.sheet }); });
+      const key = m.key || m.lcsc, pt = placePoint(at);
+      const c = Model.mutate(() => { if (!Model.S.lib[key]) Model.setLibPart(key, m); return Model.addComponent({ part: key, x: pt.x, y: pt.y, sheet: Sch.ui.sheet }); });
       Sch.select(c.ref); toast(`Added ${c.ref} · ${m.name} (${m.pins.length} pins, ${m.footprint ? m.footprint.pads.length + ' pads' : 'no footprint'})`);
     } catch (e) { toast('Could not load ' + code + ': ' + e.message, 6000); }
   }
   // palette parts come with the real JLCPCB part behind the symbol (falls back to a generated footprint offline)
-  async function placeBuiltin(type) {
+  async function placeBuiltin(type, at) {
     const d = Lib.dbDefault(type, null);
     let part = null;
     if (d) { try { part = await AI.loadPart(d.lcsc); } catch (e) { toast('Parts database unavailable — using a generated footprint', 4000); } }
-    const vb = Sch.vp.vb || [0, 0, 0, 0];
-    const c = Model.mutate(() => Model.addComponent({ type, x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2, dbPart: part, sheet: Sch.ui.sheet }));
+    if (view !== 'sch') showView('sch');
+    const pt = placePoint(at);
+    const c = Model.mutate(() => Model.addComponent({ type, x: pt.x, y: pt.y, dbPart: part, sheet: Sch.ui.sheet }));
     Sch.select(c.ref);
     if (c.pinMap) toast(`${c.ref}: ${part.name} · ${c.lcscPart} · ${part.footprint.name}`, 4000);
   }
-  function placeLibPart(key) {
+  function placeLibPart(key, at) {
     const m = Projects.myLib.find(p => p.key === key) || Model.S.lib[key];
     if (!m) { toast('Part not found: ' + key); return; }
     if (view !== 'sch') showView('sch');
-    const vb = Sch.vp.vb || [0, 0, 0, 0];
+    const pt = placePoint(at);
     try {
-      const c = Model.mutate(() => { if (!Model.S.lib[key]) Model.setLibPart(key, m); return Model.addComponent({ part: key, x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2, sheet: Sch.ui.sheet }); });
+      const c = Model.mutate(() => { if (!Model.S.lib[key]) Model.setLibPart(key, m); return Model.addComponent({ part: key, x: pt.x, y: pt.y, sheet: Sch.ui.sheet }); });
       Sch.select(c.ref); toast(`Added ${c.ref} · ${m.name}`);
     } catch (e) { toast(e.message); }
   }
   function renderMyLib(q) {
     const ps = Projects.myLib.filter(p => !q || `${p.name} ${p.value} ${p.key} ${p.mfr_part || ''}`.toLowerCase().includes(q));
     if (!ps.length) return q ? '' : '<div class="pcat">My Library</div><div class="muted small">No custom parts yet. Click “＋ New part”, or edit any placed part and save it.</div>';
-    return '<div class="pcat">My Library</div>' + ps.map(p => `<div class="libpart"><button class="dbpart mylib" data-key="${esc(p.key)}" title="Place ${esc(p.name)}">
+    return '<div class="pcat">My Library</div>' + ps.map(p => `<div class="libpart"><button class="dbpart mylib" draggable="true" data-key="${esc(p.key)}" title="Place ${esc(p.name)} (or drag it onto the schematic)">
       <div class="dbt"><b>${esc(p.name)}</b><span class="badge">${p.custom ? 'custom' : 'edited'}</span></div>
       <div class="dbs">${(p.pins || []).length} pins · ${esc((p.footprint && p.footprint.name) || 'no footprint')}</div></button>
       <button class="mini-btn" data-edit="${esc(p.key)}" title="Edit">✎</button><button class="mini-btn danger" data-del="${esc(p.key)}" title="Remove from My Library">✕</button></div>`).join('');
@@ -107,7 +112,7 @@ const App = (() => {
     if (db.error) h += `<div class="dberr">${esc(db.error)}</div>`;
     if (!db.loading && !db.results.length && !db.error) h += '<div class="muted small">No parts with a footprint found</div>';
     const lib = r => r.sources && !r.sources.includes('jlcpcb');   // found only in the EasyEDA library (no JLCPCB stock data)
-    h += db.results.map(r => `<button class="dbpart" data-lcsc="${esc(r.lcsc)}" title="${esc([r.description, r.footprint && 'Footprint: ' + r.footprint, r.note].filter(Boolean).join('\n'))}">
+    h += db.results.map(r => `<button class="dbpart" draggable="true" data-lcsc="${esc(r.lcsc)}" title="${esc([r.description, r.footprint && 'Footprint: ' + r.footprint, r.note].filter(Boolean).join('\n'))}">
       <div class="dbt"><b>${esc(r.mfr_part || r.lcsc)}</b>${r.basic ? '<span class="badge basic">Basic</span>' : ''}${lib(r) ? `<span class="badge">${r.sources.includes('community') ? 'community' : 'EasyEDA lib'}</span>` : ''}</div>
       <div class="dbs">${esc(r.package || '')}${r.brand ? ' · ' + esc(r.brand) : ''}</div>
       <div class="dbs">${r.sources && r.sources.includes('community') ? 'EasyEDA user part' : esc(r.lcsc)} · ${lib(r) ? `<span class="muted">${r.sources.includes('community') ? 'by ' + esc(r.author || 'a user') + (r.supplier_part ? ' · ' + esc(r.supplier_part) : '') : /^C99/.test(r.lcsc) ? 'not sold by LCSC' : 'stock: check LCSC'}</span>` : `<span class="${r.stock > 0 ? 'good' : 'bad'}">${(r.stock || 0).toLocaleString()} in stock</span>`}${r.price != null ? ' · $' + (+r.price).toFixed(r.price < 0.1 ? 4 : 2) : ''}</div></button>`).join('');
@@ -122,7 +127,7 @@ const App = (() => {
     $('#partList').innerHTML = Object.entries(cats).map(([c, ts]) => `<div class="pcat">${c}</div>` + ts.map(t => {
       const d = Lib.type(t), b = d.box({ type: t }), pad = 6;
       const db = Lib.dbDefault(t, null);
-      return `<button class="part" data-type="${t}" title="Add ${esc(d.name)}${db ? ` — JLCPCB ${db.lcsc} (${esc(db.value)}, ${esc(db.pkg)})` : ' — standard footprint'}"><svg viewBox="${b[0] - pad} ${b[1] - pad} ${b[2] - b[0] + 2 * pad} ${b[3] - b[1] + 2 * pad}"><g class="comp mini">${d.draw({ type: t })}</g></svg><span>${esc(d.name)}</span>${db ? `<i class="jlc">${db.lcsc}</i>` : ''}</button>`;
+      return `<button class="part" draggable="true" data-type="${t}" title="Add ${esc(d.name)}${db ? ` — JLCPCB ${db.lcsc} (${esc(db.value)}, ${esc(db.pkg)})` : ' — standard footprint'}"><svg viewBox="${b[0] - pad} ${b[1] - pad} ${b[2] - b[0] + 2 * pad} ${b[3] - b[1] + 2 * pad}"><g class="comp mini">${d.draw({ type: t })}</g></svg><span>${esc(d.name)}</span>${db ? `<i class="jlc">${db.lcsc}</i>` : ''}</button>`;
     }).join('')).join('') + renderMyLib(q) + renderDb();
   }
 
@@ -1053,6 +1058,12 @@ const App = (() => {
 
     $('#partSearch').oninput = () => { renderParts(); searchDb($('#partSearch').value); };
     $('#partSearch').onkeydown = e => { if (e.key === 'Enter') { clearTimeout(dbTimer); searchDb($('#partSearch').value); } };
+    $('#btnLibrary').onclick = () => LibPanel.open($('#partSearch').value.trim());
+    $('#partList').addEventListener('dragstart', e => {
+      const ml = e.target.closest('.mylib'), d = e.target.closest('.dbpart'), b = e.target.closest('.part');
+      if (ml) LibPanel.dragData(e, 'lib', ml.dataset.key); else if (d) LibPanel.dragData(e, 'db', d.dataset.lcsc); else if (b) LibPanel.dragData(e, 'type', b.dataset.type);
+    });
+    LibPanel.initDrop($('#schSvg'), (x, y) => Sch.vp.toWorld(x, y));
     $('#partList').onclick = e => {
       const ed = e.target.closest('[data-edit]'); if (ed) { const m = Projects.myLib.find(p => p.key === ed.dataset.edit); if (m) PartEditor.open(m, { key: m.key, saveLib: true, allowPlace: true }); return; }
       const dl = e.target.closest('[data-del]'); if (dl) { if (confirm('Remove this part from My Library? (Designs that use it keep their copy.)')) Projects.deletePart(dl.dataset.del).then(renderParts).catch(err => toast(err.message)); return; }
@@ -1242,6 +1253,7 @@ const App = (() => {
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? Model.redo() : Model.undo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); Model.redo(); return; }
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'f') { e.preventDefault(); LibPanel.open(); return; }   // Shift+F: library, as in EasyEDA
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); $('#btnSaveAs').click(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); $('#btnSave').click(); return; }
       if (view === 'enc') return;
@@ -1255,6 +1267,6 @@ const App = (() => {
     });
     $('#schSvg').oncontextmenu = $('#pcbSvg').oncontextmenu = e => e.preventDefault();
   }
-  return { init, toast, showView, renderAll, placeLibPart, refreshParts: () => renderParts(), download };
+  return { init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download };
 })();
 window.addEventListener('DOMContentLoaded', App.init);

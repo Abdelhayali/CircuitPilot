@@ -953,7 +953,6 @@ const App = (() => {
     const s = AI.settings;
     $('#sAnth').value = s.anthropicKey; provFill(null);
     $('#sMax').value = s.maxTokens; $('#sCtxWin').value = +s.contextWindow > 0 ? s.contextWindow : ''; $('#sCtx').checked = !!s.includeContext; $('#sWeb').checked = s.webAccess !== false; $('#sBrave').value = s.braveKey || ''; $('#sRelay').value = s.relayUrl || '';
-    const jk = s.jlcApi || {}; $('#sJlcApp').value = jk.app_id || ''; $('#sJlcAk').value = jk.access_key || ''; $('#sJlcSk').value = jk.secret_key || '';
     $('#presets').innerHTML = Object.entries(AI.PRESETS).map(([n, u]) => `<button data-u="${esc(u)}">${esc(n)}</button>`).join('');
     $('#modal').classList.remove('hidden');
   }
@@ -985,12 +984,16 @@ const App = (() => {
   }
   function saveSettings() {
     if ($('#sBase').value.trim()) provSaveForm(true);   // a provider typed in the form but not saved yet
-    AI.saveSettings({ anthropicKey: $('#sAnth').value.trim(), maxTokens: +$('#sMax').value || 8192, contextWindow: +$('#sCtxWin').value || 0, includeContext: $('#sCtx').checked, webAccess: $('#sWeb').checked, braveKey: $('#sBrave').value.trim(), relayUrl: $('#sRelay').value.trim(),
-      jlcApi: $('#sJlcApp').value.trim() && $('#sJlcAk').value.trim() && $('#sJlcSk').value.trim() ? { app_id: $('#sJlcApp').value.trim(), access_key: $('#sJlcAk').value.trim(), secret_key: $('#sJlcSk').value.trim() } : null });
+    AI.saveSettings({ anthropicKey: $('#sAnth').value.trim(), maxTokens: +$('#sMax').value || 8192, contextWindow: +$('#sCtxWin').value || 0, includeContext: $('#sCtx').checked, webAccess: $('#sWeb').checked, braveKey: $('#sBrave').value.trim(), relayUrl: $('#sRelay').value.trim() });
     $('#modal').classList.add('hidden'); renderModels(); AI.probeContext().then(updateCtx); toast('Settings saved (stored only in this browser)');
   }
 
   // ---------- exports ----------
+  // a project file's content → a new project (import, or a file opened from a PC folder)
+  async function openProjectData(d, name) {
+    delete d.id; if (!d.name) d.name = name;
+    Model.load(d); Projects.markLoaded(); await Projects.saveNow(); Projects.close(); Sch.fit();
+  }
   function exportAs(kind) {
     const S = Model.S;
     try {
@@ -1054,6 +1057,7 @@ const App = (() => {
     $('#btn3d').onclick = () => { const on = !Pcb3D.ui.on; PcbView.setVisible(!on); Pcb3D.setOn(on); };
     initKnowledge();
     Projects.init().then(renderParts);
+    Folder.init();
 
     renderParts(); renderModels(); setMode('agent'); renderChat(); renderAll(); AI.probeContext().then(updateCtx).catch(() => { });
     requestAnimationFrame(() => Sch.fit());
@@ -1141,8 +1145,10 @@ const App = (() => {
       const n = prompt('New project name', 'New project'); if (n !== null) Projects.create(n.trim() || 'Untitled');
     };
     $('#btnSave').onclick = async () => {
-      if (!Projects.online) { exportAs('json'); return; }
-      toast((await Projects.saveNow()) ? 'Project saved' : 'Save failed — see the status next to the name');
+      const toFolder = Folder.onSave();   // also the PC folder this project is linked to (asks for permission again if needed)
+      if (!Projects.online) { if (!(await toFolder)) exportAs('json'); else toast('Saved to ' + Folder.linked); return; }
+      const ok = await Projects.saveNow(), fd = await toFolder;
+      toast(ok ? 'Project saved' + (fd ? ' · also in ' + Folder.linked : '') : 'Save failed — see the status next to the name');
     };
     $('#btnSaveAs').onclick = async () => {
       if (!Projects.online) { exportAs('json'); return; }
@@ -1179,8 +1185,7 @@ const App = (() => {
           toast(`Imported EasyEDA PCB: ${r.components} parts, ${r.nets} nets, ${r.tracks} tracks, ${r.vias} vias${r.notes.length ? ' — ' + r.notes.join('; ') : ''}`, 9000);
           e.target.value = ''; return;
         }
-        delete d.id; if (!d.name) d.name = name;
-        Model.load(d); Projects.markLoaded(); await Projects.saveNow(); Projects.close(); Sch.fit(); toast('Imported ' + f.name + ' as a new project');
+        await openProjectData(d, name); toast('Imported ' + f.name + ' as a new project');
       } catch (err) { toast('Could not open: ' + err.message); }
       e.target.value = '';
     };
@@ -1269,6 +1274,6 @@ const App = (() => {
     });
     $('#schSvg').oncontextmenu = $('#pcbSvg').oncontextmenu = e => e.preventDefault();
   }
-  return { init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download };
+  return { init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download, openProjectData, exportProject: () => exportAs('json') };
 })();
 window.addEventListener('DOMContentLoaded', App.init);

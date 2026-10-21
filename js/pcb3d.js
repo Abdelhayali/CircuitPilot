@@ -1,8 +1,10 @@
 'use strict';
-// 3D view of the PCB: solder mask / copper / pads / silkscreen textures on both sides and simple 3D part models.
+// 3D view of the PCB: solder mask / copper / pads / silkscreen textures on both sides and 3D part models —
+// the real model of each part from the JLCEDA/EasyEDA Official Library (OBJ from modules.easyeda.com) when its
+// footprint has one, otherwise a simple shape made from the footprint and part type.
 const Pcb3D = (() => {
   const $ = s => document.querySelector(s);
-  const ui = { on: false, parts: true, finish: 'enig' };
+  const ui = { on: false, parts: true, finish: 'enig', real: true };
   let renderer, scene, camera, root, wrap, cam = { th: -1.2, ph: 0.85, r: 120, tx: 0, ty: 0, tz: 0 }, dirty = true, timer = null, busy = false;
 
   function loadThree() {
@@ -17,11 +19,12 @@ const Pcb3D = (() => {
   function init() {
     wrap = $('#pcb3dView');
     wrap.innerHTML = `<div class="encmsg" id="p3msg"></div>
-      <div class="p3bar"><button data-cam="top">Top</button><button data-cam="bottom">Bottom</button><button data-cam="iso">Iso</button><button id="p3parts" class="on">Parts</button>
+      <div class="p3bar"><button data-cam="top">Top</button><button data-cam="bottom">Bottom</button><button data-cam="iso">Iso</button><button id="p3parts" class="on">Parts</button><button id="p3real" class="on" title="Real 3D models from the JLCEDA/EasyEDA Official Library (simple shapes when off or when a part has none)">Real models</button>
       <select id="p3finish" title="Pad finish"><option value="enig">ENIG (gold)</option><option value="hasl">HASL (silver)</option></select><select id="p3mask" title="Solder mask colour"><option value="#1d6b38">Green</option><option value="#1a1a1a">Black</option><option value="#1c3f8f">Blue</option><option value="#8f1c1c">Red</option><option value="#e8e8e8">White</option><option value="#5a2a8a">Purple</option></select></div>
       <div class="encinfo" id="p3info">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom</div>`;
     wrap.querySelectorAll('[data-cam]').forEach(b => b.onclick = () => preset(b.dataset.cam));
     $('#p3parts').onclick = () => { ui.parts = !ui.parts; $('#p3parts').classList.toggle('on', ui.parts); if (root && root.userData.parts) root.userData.parts.visible = ui.parts; draw(); };
+    $('#p3real').onclick = () => { ui.real = !ui.real; $('#p3real').classList.toggle('on', ui.real); dirty = true; rebuild(false); };
     $('#p3finish').onchange = e => { ui.finish = e.target.value; dirty = true; rebuild(false); };
     $('#p3mask').onchange = () => { dirty = true; rebuild(false); };
     Model.subscribe(kind => { if (kind === 'move') return; dirty = true; if (ui.on) { clearTimeout(timer); timer = setTimeout(() => rebuild(false), 400); } });
@@ -150,6 +153,97 @@ const Pcb3D = (() => {
     return g;
   }
 
+  // ---------- real models (EasyEDA library OBJ) ----------
+  // OBJ with inline materials (newmtl … Kd … d … endmtl; d is transparency). One template per model uuid,
+  // centred in x / y with its bottom at z = 0; instances share geometry and materials.
+  const objCache = new Map();
+  async function fetchObj(uuid) {
+    const url = 'https://modules.easyeda.com/3dmodel/' + uuid;
+    let store = null; try { store = await caches.open('circuitpilot-3d'); const hit = await store.match(url); if (hit) return hit.text(); } catch (e) { store = null; }
+    const r = await fetch(url); if (!r.ok) throw new Error('3D model ' + r.status);
+    const text = await r.text(); try { if (store) await store.put(url, new Response(text)); } catch (e) { }
+    return text;
+  }
+  function parseObj(text, T) {
+    const V = [], mats = {}, groups = []; let mat = null, cur = null, def = null;
+    for (const line of text.split('\n')) {
+      const t = line.trim().split(/\s+/), k = t[0];
+      if (k === 'v') V.push(+t[1], +t[2], +t[3]);
+      else if (k === 'newmtl') { def = mats[t[1]] = { kd: [0.6, 0.6, 0.6], d: 0 }; }
+      else if (k === 'Kd' && def) def.kd = [+t[1], +t[2], +t[3]];
+      else if (k === 'd' && def) def.d = +t[1] || 0;
+      else if (k === 'endmtl') def = null;
+      else if (k === 'usemtl') { mat = t[1]; cur = null; }
+      else if (k === 'f') {
+        if (!cur) { cur = { mat, idx: [] }; groups.push(cur); }
+        const f = t.slice(1).map(s => { const i = parseInt(s, 10); return i < 0 ? V.length / 3 + i : i - 1; });
+        for (let i = 1; i + 1 < f.length; i++) cur.idx.push(f[0], f[i], f[i + 1]);
+      }
+    }
+    if (!V.length) throw new Error('empty 3D model');
+    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < V.length; i += 3) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], V[i + a]); mx[a] = Math.max(mx[a], V[i + a]); }
+    const off = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, mn[2]];
+    const pos = new Float32Array(V.length); for (let i = 0; i < V.length; i++) pos[i] = V[i] - off[i % 3];
+    const g = new T.Group(), byMat = new Map();
+    for (const gr of groups) { const k = gr.mat || ''; if (!byMat.has(k)) byMat.set(k, []); byMat.get(k).push(...gr.idx); }
+    for (const [k, idx] of byMat) {
+      const geo = new T.BufferGeometry(); geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setIndex(idx);
+      const nonIdx = geo.toNonIndexed(); nonIdx.computeVertexNormals();
+      const m = mats[k] || { kd: [0.6, 0.6, 0.6], d: 0 }, op = Math.max(0.15, 1 - m.d), bright = (m.kd[0] + m.kd[1] + m.kd[2]) / 3;
+      g.add(new T.Mesh(nonIdx, new T.MeshStandardMaterial({ color: new T.Color(m.kd[0], m.kd[1], m.kd[2]), roughness: 0.55, metalness: bright > 0.6 ? 0.25 : 0.05, transparent: op < 1, opacity: op, side: T.DoubleSide })));
+    }
+    g.userData.size = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]];
+    return g;
+  }
+  function objTemplate(uuid, T) {
+    if (!objCache.has(uuid)) objCache.set(uuid, fetchObj(uuid).then(t => parseObj(t, T)).catch(e => { objCache.delete(uuid); throw e; }));
+    return objCache.get(uuid);
+  }
+  // the footprint's model info; parts placed before 3D models were kept get it once from the parts database
+  const infoAsked = new Map();   // part code -> pending request, so parts sharing a footprint wait for the same answer
+  async function modelInfo(c) {
+    // database / custom parts: their library entry; palette parts (resistor, LED…): the JLCPCB part behind their footprint
+    const key = c.type === 'part' ? c.lcsc : c.dbfp; if (!key) return null;
+    const lib = Model.S.lib[key], fp = lib && lib.footprint; if (!fp) return null;
+    if ('model3d' in fp) return fp.model3d;
+    const code = /^(C\d+|EE-[0-9A-F]{32})$/.test(key) ? key : (c.type === 'part' ? Model.lcscOf(c) : '');
+    if (!code) return null;
+    if (!infoAsked.has(code)) infoAsked.set(code, Engine.partsApi('get/' + encodeURIComponent(code)).catch(() => null));
+    const m = await infoAsked.get(code);
+    if ('model3d' in fp) return fp.model3d;
+    const m3 = m && m.footprint ? m.footprint.model3d || null : null;
+    // only when the footprint is the library's own (same pads): an edited footprint keeps the simple shape
+    const same = m && m.footprint && m.footprint.pads.length === fp.pads.length && m.footprint.pads.every((p, i) => Math.abs(p.x - fp.pads[i].x) < 0.01 && Math.abs(p.y - fp.pads[i].y) < 0.01);
+    fp.model3d = same ? m3 : null;
+    return fp.model3d;
+  }
+  // model in footprint coordinates (CircuitPilot footprint centre, 3D y up): EasyEDA rotations are in the y-down
+  // footprint frame, so x / z angles change sign; a quarter turn is added when the model does not fit its outline
+  async function realModel(c, T) {
+    const m3 = await modelInfo(c); if (!m3 || !m3.uuid) return null;
+    const tpl = await objTemplate(m3.uuid, T), inst = tpl.clone(), d = Math.PI / 180;
+    let rz = -(m3.rz || 0);
+    if (m3.w && m3.h) {
+      const [sx, sy] = tpl.userData.size, a = Math.abs(Math.round(rz / 90)) % 2, fx = a ? sy : sx, fy = a ? sx : sy;
+      const fits = (p, q) => Math.abs(p - m3.w) <= 0.15 * m3.w + 0.2 && Math.abs(q - m3.h) <= 0.15 * m3.h + 0.2;
+      if (!fits(fx, fy) && fits(fy, fx) && !(m3.rx || m3.ry)) rz += 90;
+    }
+    inst.rotation.set(-(m3.rx || 0) * d, (m3.ry || 0) * d, rz * d);
+    inst.position.set(m3.x || 0, -(m3.y || 0), m3.z || 0);
+    const g = new T.Group(); g.add(inst); g.userData.real = true;
+    return g;
+  }
+  // part on the board: footprint frame → board (CircuitPilot rotates clockwise in y-down = negative angle in 3D;
+  // a bottom part is flipped over: x and z mirrored, i.e. turned 180° about y)
+  function placeOnBoard(g, c, th) {
+    const wrapG = new (window.THREE.Group)(); wrapG.add(g);
+    if (Pcb.isBottom(c)) g.scale.set(-1, 1, -1);
+    wrapG.rotation.z = -(c.pcb.rot || 0) * Math.PI / 180;
+    wrapG.position.set(c.pcb.x, -c.pcb.y, Pcb.isBottom(c) ? 0 : th);
+    return wrapG;
+  }
+
   // ---------- build ----------
   async function rebuild(fit) {
     if (busy) { dirty = true; return; }
@@ -173,13 +267,28 @@ const Pcb3D = (() => {
     const faceT = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshStandardMaterial({ map: top, roughness: 0.55, metalness: 0.05 })); faceT.position.z = th + 0.001; root.add(faceT);
     const faceB = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshStandardMaterial({ map: bot, roughness: 0.55, metalness: 0.05, side: T.BackSide })); faceB.position.z = -0.001; root.add(faceB);
     const parts = new T.Group(); parts.visible = ui.parts; root.add(parts); root.userData.parts = parts;
-    for (const c of Pcb.placed()) {
+    const myRoot = root, cs = Pcb.placed(), simple = new Map();
+    for (const c of cs) {
       const m = partModel(c, T);
       if (Pcb.isBottom(c)) { m.scale.z = -1; m.position.z = 0; } else m.position.z = th;
-      parts.add(m);
+      parts.add(m); simple.set(c.ref, m);
     }
     resize(); if (fit) preset('iso'); else draw();
-    $('#p3info').innerHTML = `<b>${S.board.w} × ${S.board.h} × ${th} mm</b> · ${Pcb.placed().length} parts · ${S.pcb.traces.length} tracks · ${S.pcb.vias.length} vias<br><span class="muted">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom</span>`;
+    const info = n => `<b>${S.board.w} × ${S.board.h} × ${th} mm</b> · ${cs.length} parts · ${S.pcb.traces.length} tracks · ${S.pcb.vias.length} vias` +
+      (n ? `<br><span class="muted">${n} real 3D models: JLCEDA/EasyEDA Official Library (<a href="https://easyeda.com" target="_blank" rel="noopener">easyeda.com</a>, <a href="https://lceda.cn" target="_blank" rel="noopener">lceda.cn</a>)</span>` : '') +
+      `<br><span class="muted">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom</span>`;
+    $('#p3info').innerHTML = info(0);
+    // real models replace the simple shapes as they arrive (each model is downloaded once, then cached)
+    if (ui.real) {
+      let n = 0;
+      await Promise.all(cs.map(async c => {
+        let g = null; try { g = await realModel(c, T); } catch (e) { g = null; }
+        if (!g || root !== myRoot) return;
+        parts.remove(simple.get(c.ref)); parts.add(placeOnBoard(g, c, th)); n++;
+        draw();
+      }));
+      if (root === myRoot) { $('#p3info').innerHTML = info(n); draw(); }
+    }
   }
   // PNG of the 3D board for documents (rendered off-screen at a fixed size on a light background)
   async function snapshot(view = 'iso', w = 1400, h = 950, bg = '#ffffff') {

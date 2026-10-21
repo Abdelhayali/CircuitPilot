@@ -141,37 +141,6 @@
     }
     return out;
   }
-  // JLCPCB Open Platform (optional, the user's own app keys from ⚙ Settings): official stock and price by C-number.
-  // Signed here with WebCrypto (HMAC-SHA256, docs: API Request Signature); the relay only forwards the request.
-  let jlcDenied = 0;
-  async function jlcDetails(codes) {
-    const k = typeof AI !== 'undefined' && AI.settings && AI.settings.jlcApi;
-    codes = [...new Set(codes.filter(c => /^C\d+$/.test(c || '')))];
-    if (!k || !codes.length || Date.now() < jlcDenied) return {};
-    const path = '/overseas/openapi/component/getComponentDetailByCode', out = {};
-    const nonceChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', rnd = crypto.getRandomValues(new Uint8Array(32));
-    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(k.secret_key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const num = v => { const n = parseFloat(v); return isFinite(n) ? n : null; };
-    for (let i = 0; i < codes.length; i += 50) {
-      const body = JSON.stringify({ componentCodes: codes.slice(i, i + 50) }), ts = String(Math.floor(Date.now() / 1000));
-      const nonce = [...crypto.getRandomValues(new Uint8Array(32))].map(b => nonceChars[b % nonceChars.length]).join('');
-      const sig = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`POST\n${path}\n${ts}\n${nonce}\n${body}\n`)))));
-      let j;
-      try {
-        const r = await realFetch(needRelay() + '/jlcapi' + path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `JOP appid="${k.app_id}",accesskey="${k.access_key}",nonce="${nonce}",timestamp="${ts}",signature="${sig}"` }, body });
-        j = await r.json();
-      } catch (e) { jlcDenied = Date.now() + 600000; return out; }
-      if (!(j && (j.success || j.code === 200))) { jlcDenied = Date.now() + 600000; return out; }   // e.g. API not authorised yet: retry in 10 min
-      let data = j.data; if (data && !Array.isArray(data)) data = data.componentDetailResponseVOList || data.list || [];
-      for (const d of data || []) {
-        const code = String(d.componentCode || '').toUpperCase(); if (!code) continue;
-        const pr = (d.priceRanges || d.prices || []).slice().sort((a, b) => (num(a.startQuantity ?? a.startNumber) || 0) - (num(b.startQuantity ?? b.startNumber) || 0));
-        const lib = String(d.componentLibraryType || d.libraryType || '').toLowerCase();
-        out[code] = { stock: Math.round(num(d.stockCount) || 0), price: pr.length ? num(pr[0].unitPrice ?? pr[0].productPrice) : null, basic: lib ? (lib === 'base' || lib === 'basic' ? 1 : 0) : null };
-      }
-    }
-    return out;
-  }
   // EasyEDA community library: parts drawn by EasyEDA users (keys EE-<uuid>); only ones with a footprint attached
   async function searchCommunity(q, limit) {
     const j = await postForm('/easyeda/community', [['type', 3], ['doctype[]', 2], ['returnListStyle', 'classifyarr'], ['wd', q], ['uid', 'user'], ['page', 1]]);
@@ -228,8 +197,6 @@
       if (!r.footprint) { dropped++; continue; }
       extra.push(Object.assign({}, r, { sources: ['easyeda'], note: 'EasyEDA library part, not in the JLCPCB results: ' + (r.lcsc.startsWith('C99') ? 'placeholder code, not sold by LCSC' : 'check LCSC / JLCPCB stock') }));
     }
-    const det = await Promise.race([jlcDetails(extra.map(r => r.lcsc)).catch(() => ({})), new Promise(res => setTimeout(() => res({}), 3000))]);
-    for (const r of extra) { const d = det[r.lcsc]; if (!d) continue; for (const k of ['stock', 'price', 'basic']) if (d[k] != null) r[k] = d[k]; r.sources = ['easyeda', 'jlcapi']; r.note = 'EasyEDA library part; stock and price from the JLCPCB API'; }
     const community = com.filter(r => { const t = norm([r.mfr_part, r.brand, r.package, r.description].join(' ')); return words.every(w => t.includes(w)); })
       .map(r => Object.assign({}, r, { sources: ['community'], note: 'EasyEDA community part by ' + (r.author || 'a user') + ': placed as a custom part (check the footprint against the datasheet)' }));
     // official-library parts get at least a third of the list, community parts at least a fifth
@@ -282,7 +249,25 @@
     const ox = (Math.min(...xs) + Math.max(...xs)) / 2, oy = (Math.min(...ys) + Math.max(...ys)) / 2;
     const out = pads.map(p => Object.assign({ num: p.num, x: r4((p.x - ox) * U), y: r4((p.y - oy) * U), w: r4(p.w * U), h: r4(p.h * U), shape: p.shape }, p.drill ? { drill: r4(p.drill, 3) } : {}));
     const bx = silk.map(q => (q[0] - ox) * U).concat(xs.map(v => (v - ox) * U)), by = silk.map(q => (q[1] - oy) * U).concat(ys.map(v => (v - oy) * U));
-    return { name: pkg.title || 'footprint', pads: out, body: [r4(Math.min(...bx), 3), r4(Math.min(...by), 3), r4(Math.max(...bx), 3), r4(Math.max(...by), 3)] };
+    return { name: pkg.title || 'footprint', pads: out, body: [r4(Math.min(...bx), 3), r4(Math.min(...by), 3), r4(Math.max(...bx), 3), r4(Math.max(...by), 3)], model3d: model3d(ds.shape || [], ox, oy) };
+  }
+  // the footprint's 3D model (EasyEDA library OBJ): offset from the pad centre in mm (y down), bottom height, rotation (same as partsdb.py)
+  function model3d(shapes, ox, oy) {
+    for (const s of shapes) {
+      if (!s.startsWith('SVGNODE~')) continue;
+      let n; try { n = JSON.parse(s.slice(8)); } catch (e) { continue; }
+      const a = n.attrs || {};
+      if (a.c_etype !== 'outline3D' || !/^[0-9a-f]{32}$/.test(a.uuid || '')) continue;
+      let [x, y] = String(a.c_origin || '0,0').split(',').map(num), w = null, h = null;
+      const rot = String(a.c_rotation || '0,0,0').split(',').map(num), pts = [];
+      for (const c of n.childNodes || []) { const v = String((c.attrs || {}).points || '').trim().split(/\s+/).map(num); for (let i = 0; i + 1 < v.length; i += 2) pts.push([v[i], v[i + 1]]); }
+      if (pts.length) {   // the drawn outline is where the model really sits (c_origin is wrong on some footprints)
+        const bx = pts.map(p => p[0]), by = pts.map(p => p[1]);
+        x = (Math.min(...bx) + Math.max(...bx)) / 2; y = (Math.min(...by) + Math.max(...by)) / 2; w = r4((Math.max(...bx) - Math.min(...bx)) * U, 3); h = r4((Math.max(...by) - Math.min(...by)) * U, 3);
+      }
+      return { uuid: a.uuid, x: r4((x - ox) * U), y: r4(((y || 0) - oy) * U), z: r4(num(a.z) * U), rx: rot[0] || 0, ry: rot[1] || 0, rz: rot[2] || 0, w, h, title: a.title || '' };
+    }
+    return null;
   }
   function symbolPins(ds, fp) {
     const head = ds.head || {};
@@ -317,7 +302,7 @@
     if (!community && !/^C\d{1,10}$/.test(lcsc)) throw httpError(400, `"${lcsc}" is not an LCSC part number (e.g. C2838502) or an EasyEDA community key (EE-…)`);
     const cached = await dbGet('models', lcsc).catch(() => null);
     if (community) { if (cached) return cached.data; return getCommunity(lcsc); }
-    if (cached && cached.data && (cached.data.uuid || cached.data.no_uuid)) return cached.data;
+    if (cached && cached.data && (cached.data.uuid || cached.data.no_uuid) && (!cached.data.footprint || 'model3d' in cached.data.footprint)) return cached.data;
     const res = await realFetch(needRelay() + '/easyeda/components/' + lcsc);
     const j = await res.json().catch(() => ({}));
     const r = j && j.success ? j.result : null;

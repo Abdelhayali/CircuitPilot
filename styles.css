@@ -491,3 +491,9 @@ body:not(.static-web) #modal .webonly { display: none; }
 .lp-info { line-height: 1.5; }
 .lp-prev .row { display: flex; gap: 8px; align-items: center; margin-top: auto; }
 @media (max-width: 700px) { .libpanel { left: 8px !important; right: 8px; top: 56px; width: auto; min-width: 0; } .lp-body { grid-template-columns: 1fr; } .lp-prev { display: none; } }
+
+/* PC folder link indicator + open dialog */
+.folderstate { margin-left: 8px; font-size: 12px; cursor: pointer; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.folderstate:hover { text-decoration: underline; }
+.fdlist { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow: auto; min-width: 320px; }
+.fdlist button { text-align: left; }

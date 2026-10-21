@@ -41,10 +41,6 @@ async function relay(req, url) {
   // EasyEDA library: keyword search and the batch footprint check (form-encoded POST bodies, forwarded as they are)
   if ((p === '/easyeda/search' || p === '/easyeda/codes') && req.method === 'POST')
     return fetch(p === '/easyeda/search' ? EE_SEARCH : EE_CODES, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'user-agent': UA }, body: await req.text() });
-  // JLCPCB Open Platform, Components API only: the browser signs each request with the user's own app keys
-  // (Authorization: JOP …); the relay forwards it unchanged and never sees or stores the secret key
-  if ((m = /^\/jlcapi(\/overseas\/openapi\/component\/[A-Za-z]+)$/.exec(p)) && req.method === 'POST')
-    return fetch('https://open.jlcpcb.com' + m[1], { method: 'POST', headers: { 'content-type': 'application/json', 'accept': 'application/json', 'authorization': req.headers.get('authorization') || '' }, body: await req.text() });
   // EasyEDA community library: keyword search (form POST) and one symbol / footprint document by uuid
   if (p === '/easyeda/community' && req.method === 'POST')
     return fetch('https://easyeda.com/api/components/search', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept': 'application/json', 'user-agent': UA }, body: await req.text() });

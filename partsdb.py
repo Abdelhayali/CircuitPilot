@@ -21,7 +21,6 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
-import jlcapi
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts.db")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CircuitPilot"
@@ -222,17 +221,6 @@ def search(q, limit=20):
             community.append(dict(r, sources=["community"], note="EasyEDA community part by " + (r["author"] or "a user")
                                   + ": placed as a custom part (check the footprint against the datasheet)"))
     # official-library parts get at least a third of the list, community parts at least a fifth
-    # official JLCPCB Components API (your own app keys, desktop only): real stock and price for library-only parts
-    try:
-        det = _pool.submit(jlcapi.component_details, [r["lcsc"] for r in extra]).result(timeout=max(0.5, SLOW_SOURCE + 2 - (time.time() - t0)))
-    except Exception:
-        det = {}
-    for r in extra:
-        d = det.get(r["lcsc"])
-        if d:
-            r.update({k: v for k, v in (("stock", d["stock"]), ("price", d["price"]), ("basic", d["basic"])) if v is not None})
-            r["sources"] = ["easyeda", "jlcapi"]
-            r["note"] = "EasyEDA library part; stock and price from the JLCPCB API"
     n_com = min(len(community), max(limit - len(keep) - len(extra), limit // 5))
     n_extra = min(len(extra), max(limit - len(keep) - n_com, limit // 3))
     rows = keep[:limit - n_extra - n_com] + extra[:n_extra] + community[:n_com]
@@ -345,7 +333,36 @@ def _parse_footprint(pkg):
     bx = [(x - ox) * U for x, _ in silk] + [(v - ox) * U for v in xs]
     by = [(y - oy) * U for _, y in silk] + [(v - oy) * U for v in ys]
     body = [round(min(bx), 3), round(min(by), 3), round(max(bx), 3), round(max(by), 3)]
-    return {"name": pkg.get("title") or "footprint", "pads": out, "body": body}
+    return {"name": pkg.get("title") or "footprint", "pads": out, "body": body, "model3d": _model3d(ds.get("shape", []), ox, oy)}
+
+
+def _model3d(shapes, ox, oy):
+    """The footprint's 3D model (EasyEDA library OBJ at modules.easyeda.com/3dmodel/<uuid>): position relative to the
+    pad centre in mm (footprint frame, y down), bottom height z in mm, rotation in degrees as EasyEDA gives it, and the
+    size of its outline on the board (w, h). The position is the centre of that drawn outline — c_origin is not
+    always where the model sits (e.g. SOT-223 footprints) — falling back to c_origin when there is no outline."""
+    for s in shapes:
+        if not s.startswith("SVGNODE~"):
+            continue
+        try:
+            a = json.loads(s.split("~", 1)[1]).get("attrs") or {}
+        except ValueError:
+            continue
+        if a.get("c_etype") != "outline3D" or not re.fullmatch(r"[0-9a-f]{32}", a.get("uuid") or ""):
+            continue
+        x, y = (_num(v) for v in (str(a.get("c_origin") or "0,0").split(",") + ["0"])[:2])
+        rot = [_num(v) for v in (str(a.get("c_rotation") or "0,0,0").split(",") + ["0", "0"])[:3]]
+        pts = []
+        for c in json.loads(s.split("~", 1)[1]).get("childNodes") or []:
+            v = [_num(t) for t in str((c.get("attrs") or {}).get("points") or "").split()]
+            pts += list(zip(v[0::2], v[1::2]))
+        w = h = None
+        if pts:
+            bx, by = [p[0] for p in pts], [p[1] for p in pts]
+            x, y, w, h = (min(bx) + max(bx)) / 2, (min(by) + max(by)) / 2, (max(bx) - min(bx)) * U, (max(by) - min(by)) * U
+        return {"uuid": a["uuid"], "x": round((x - ox) * U, 4), "y": round((y - oy) * U, 4), "z": round(_num(a.get("z")) * U, 4),
+                "rx": rot[0], "ry": rot[1], "rz": rot[2], "w": round(w, 3) if w else None, "h": round(h, 3) if h else None, "title": a.get("title") or ""}
+    return None
 
 
 def get_part(lcsc):
@@ -357,7 +374,7 @@ def get_part(lcsc):
         row = con.execute("SELECT json FROM models WHERE lcsc=?", (lcsc,)).fetchone()
     if row:
         m = json.loads(row[0])
-        if m.get("uuid") or m.get("no_uuid"):
+        if (m.get("uuid") or m.get("no_uuid")) and (not m.get("footprint") or "model3d" in m["footprint"]):
             return m
         # cached before the EasyEDA library ids were kept: fetch once more (fall back to the cached copy offline)
         try:

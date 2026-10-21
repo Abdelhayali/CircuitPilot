@@ -97,10 +97,9 @@ const Pcb3D = (() => {
       if ((Pcb.isBottom(c) ? 'B' : 'F') !== L) continue;
       const b = Pcb.fpBox(c);
       o.push(`<rect x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="${silk}" stroke-width="0.15"/>`);
-      const tx = (b[0] + b[2]) / 2, ty = b[1] - 0.4;
-      o.push(`<text x="${tx}" y="${ty}" text-anchor="middle" fill="${silk}" font-family="Arial, sans-serif" font-weight="700" font-size="1.1"${L === 'B' ? ` transform="translate(${2 * tx} 0) scale(-1 1)"` : ''}>${esc(c.ref)}</text>`);
     }
-    if (L === 'F') o.push(`<text x="${w - 1.2}" y="${h - 1.2}" text-anchor="end" fill="${silk}" font-family="Arial, sans-serif" font-size="1.2" opacity="0.9">${esc(Model.S.name || '')}</text>`);
+    // part references and board name: the same strokes as the Gerber silkscreen
+    for (const l of Pcb.silkLabels(L)) o.push(`<path d="${l.lines.map(pl => 'M' + pl.map(q => q.join(' ')).join('L')).join('')}" fill="none" stroke="${silk}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round"/>`);
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(w * px)}" height="${Math.round(h * px)}" viewBox="0 0 ${w} ${h}"><defs><clipPath id="b"><path d="${d}"/></clipPath></defs><g clip-path="url(#b)">${o.join('')}</g></svg>`;
   }
   function shade(hex, k) { const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255, f = v => Math.max(0, Math.min(255, Math.round(v + (255 - v) * k))); return `rgb(${f(r)},${f(g)},${f(b)})`; }

@@ -1371,6 +1371,66 @@ const Pcb = (() => {
   }
 
   // ---------- fabrication outputs ----------
+  // ---------- silkscreen text (Gerber has no fonts: a simple stroke font, glyphs on a 4 × 6 grid, y up) ----------
+  const GLYPHS = {
+    '0': '1,0 0,1 0,5 1,6 3,6 4,5 4,1 3,0 1,0', '1': '1,5 2,6 2,0|1,0 3,0', '2': '0,5 1,6 3,6 4,5 4,4 0,0 4,0',
+    '3': '0,5 1,6 3,6 4,5 4,4 3,3 4,2 4,1 3,0 1,0 0,1|1,3 3,3', '4': '3,0 3,6 0,2 4,2', '5': '4,6 0,6 0,3 3,3 4,2 4,1 3,0 0,0',
+    '6': '4,5 3,6 1,6 0,5 0,1 1,0 3,0 4,1 4,2 3,3 0,3', '7': '0,6 4,6 1,0', '8': '1,3 0,4 0,5 1,6 3,6 4,5 4,4 3,3 1,3 0,2 0,1 1,0 3,0 4,1 4,2 3,3',
+    '9': '0,1 1,0 3,0 4,1 4,5 3,6 1,6 0,5 0,4 1,3 4,3',
+    A: '0,0 0,4 2,6 4,4 4,0|0,3 4,3', B: '0,0 0,6 3,6 4,5 4,4 3,3 0,3|3,3 4,2 4,1 3,0 0,0', C: '4,5 3,6 1,6 0,5 0,1 1,0 3,0 4,1',
+    D: '0,0 0,6 2,6 4,4 4,2 2,0 0,0', E: '4,6 0,6 0,0 4,0|0,3 3,3', F: '4,6 0,6 0,0|0,3 3,3', G: '4,5 3,6 1,6 0,5 0,1 1,0 3,0 4,1 4,3 2,3',
+    H: '0,0 0,6|4,0 4,6|0,3 4,3', I: '1,6 3,6|2,6 2,0|1,0 3,0', J: '4,6 4,1 3,0 1,0 0,1', K: '0,0 0,6|4,6 0,2|1,3 4,0', L: '0,6 0,0 4,0',
+    M: '0,0 0,6 2,3 4,6 4,0', N: '0,0 0,6 4,0 4,6', O: '1,0 0,1 0,5 1,6 3,6 4,5 4,1 3,0 1,0', P: '0,0 0,6 3,6 4,5 4,4 3,3 0,3',
+    Q: '1,0 0,1 0,5 1,6 3,6 4,5 4,1 3,0 1,0|2,2 4,0', R: '0,0 0,6 3,6 4,5 4,4 3,3 0,3|2,3 4,0', S: '4,5 3,6 1,6 0,5 0,4 1,3 3,3 4,2 4,1 3,0 1,0 0,1',
+    T: '0,6 4,6|2,6 2,0', U: '0,6 0,1 1,0 3,0 4,1 4,6', V: '0,6 2,0 4,6', W: '0,6 1,0 2,3 3,0 4,6', X: '0,0 4,6|0,6 4,0', Y: '0,6 2,3 4,6|2,3 2,0',
+    Z: '0,6 4,6 0,0 4,0', '-': '1,3 3,3', '_': '0,0 4,0', '.': '1.8,0 2.2,0 2.2,0.4 1.8,0.4 1.8,0', '+': '2,1.5 2,4.5|0.5,3 3.5,3', '/': '0,0 4,6',
+    '(': '3,6 2,5 2,1 3,0', ')': '1,6 2,5 2,1 1,0', ':': '1.8,1 2.2,1|1.8,4 2.2,4', '#': '1,0 1,6|3,0 3,6|0,2 4,2|0,4 4,4', ',': '2,0.5 1.4,-0.8',
+    '?': '0,5 1,6 3,6 4,5 4,4 2,3 2,2|2,0 2,0.4', '=': '0.5,2 3.5,2|0.5,4 3.5,4', '*': '2,1 2,5|0.5,2 3.5,4|0.5,4 3.5,2', "'": '2,6 2,4.5',
+  };
+  const ADV = 5.5;   // grid units per character (glyph 4 + gap 1.5)
+  // text → polylines in board mm (y down). x / y: anchor point on the baseline; mirror: read from the bottom side
+  function strokeText(str, x, y, h, anchor = 'start', mirror = false) {
+    const u = h / 6, s = String(str).toUpperCase(), width = Math.max(0, s.length * ADV - 1.5) * u;
+    const x0 = anchor === 'middle' ? x - width / 2 : anchor === 'end' ? x - width : x, out = [];
+    [...s].forEach((ch, i) => {
+      const g = GLYPHS[ch] != null ? GLYPHS[ch] : ch === ' ' ? '' : GLYPHS['?'];
+      for (const stroke of g ? g.split('|') : []) {
+        const pts = stroke.split(' ').map(p => { const [gx, gy] = p.split(',').map(Number); let px = x0 + (i * ADV + gx) * u; if (mirror) px = 2 * (x0 + width / 2) - px; return [+px.toFixed(4), +(y - gy * u).toFixed(4)]; });
+        out.push(pts);
+      }
+    });
+    return out;
+  }
+  const textWidth = (str, h) => Math.max(0, String(str).length * ADV - 1.5) * h / 6;
+  // the silkscreen labels of one side (also drawn by the 3D view): each part's reference above its outline (below it
+  // when there is no room at the board edge), mirrored on the bottom side, and the board name in the bottom-right corner
+  const SILK_H = 1.0, SILK_W = 0.15;   // JLCPCB minimum text: 1 mm high, 0.15 mm line
+  function silkLabels(side) {
+    const S = Model.S, W = S.board.w, H = S.board.h, out = [], cs = placed().filter(c => (isBottom(c) ? 'B' : 'F') === side);
+    const boxes = cs.map(c => fpBox(c)), taken = [];   // part outlines + labels already placed
+    const hit = (r, skip) => r[0] < 0.2 || r[1] < 0.2 || r[2] > W - 0.2 || r[3] > H - 0.2 ||
+      boxes.some((b, i) => i !== skip && r[0] < b[2] && r[2] > b[0] && r[1] < b[3] && r[3] > b[1]) || taken.some(b => r[0] < b[2] && r[2] > b[0] && r[1] < b[3] && r[3] > b[1]);
+    // label rectangle for an anchor point (x, baseline y), with a small gap around the text
+    const rect = (x, y, tw, h, anchor) => { const x0 = anchor === 'middle' ? x - tw / 2 : anchor === 'end' ? x - tw : x; return [x0 - 0.1, y - h - 0.1, x0 + tw + 0.1, y + 0.1]; };
+    cs.forEach((c, i) => {
+      const b = boxes[i], h = SILK_H, tw = textWidth(c.ref, h), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+      const tries = [[cx, b[1] - 0.35, 'middle'], [cx, b[3] + 0.35 + h, 'middle'], [b[0] - 0.35, cy + h / 2, 'end'], [b[2] + 0.35, cy + h / 2, 'start']];
+      let pick = tries.find(([x, y, a]) => !hit(rect(x, y, tw, h, a), i));
+      // big part with no free spot around it: inside its outline
+      if (!pick && b[2] - b[0] > tw + 0.6 && b[3] - b[1] > h + 0.6) pick = [cx, cy + h / 2, 'middle'];
+      if (!pick) pick = tries.find(([x, y, a]) => { const r = rect(x, y, tw, h, a); return r[0] >= 0.2 && r[1] >= 0.2 && r[2] <= W - 0.2 && r[3] <= H - 0.2; }) || tries[0];
+      const [x, y, anchor] = pick;
+      taken.push(rect(x, y, tw, h, anchor));
+      out.push({ text: c.ref, x, y, h, w: SILK_W, anchor, mirror: side === 'B' });
+    });
+    if (side === 'F' && S.name) {
+      let h = 1.2; const room = W - 2.4; if (textWidth(S.name, h) > room) h = Math.max(0.8, h * room / textWidth(S.name, h));
+      const tw = textWidth(S.name, h), corners = [[W - 1.2, H - 1.2, 'end'], [1.2, H - 1.2, 'start'], [W - 1.2, 1.2 + h, 'end'], [1.2, 1.2 + h, 'start']];
+      const [x, y, anchor] = corners.find(([x, y, a]) => !hit(rect(x, y, tw, h, a), -1)) || corners[0];
+      out.push({ text: S.name, x, y, h, w: Math.max(SILK_W, h * 0.13), anchor, mirror: false });
+    }
+    return out.map(l => Object.assign(l, { lines: strokeText(l.text, l.x, l.y, l.h, l.anchor, l.mirror) }));
+  }
   function gerbers() {
     const S = Model.S, idx = Model.pinIndex(), cs = placed(), Hb = S.board.h;
     if (!cs.length || !S.board.w) throw new Error('No PCB to export');
@@ -1412,7 +1472,11 @@ const Pcb = (() => {
     const mask = (layer, func) => file(func, (A, b) => { for (const p of pads) if (onLayer(p, layer)) { b.push(A(padAp(p, 0.1)) + '*'); b.push(X(p.x, p.y) + 'D03*'); } });
     const paste = (layer, func) => file(func, (A, b) => { for (const p of pads) if (!p.drill && (p.layer || 'F') === layer) { b.push(A(padAp(p)) + '*'); b.push(X(p.x, p.y) + 'D03*'); } });
     const rectPath = (b, x0, y0, x1, y1) => { b.push(X(x0, y0) + 'D02*'); b.push(X(x1, y0) + 'D01*'); b.push(X(x1, y1) + 'D01*'); b.push(X(x0, y1) + 'D01*'); b.push(X(x0, y0) + 'D01*'); };
-    const silk = side => (A, b) => { b.push(A('C,0.150000') + '*'); for (const c of cs) if ((isBottom(c) ? 'B' : 'F') === side) { const bb = fpBox(c); rectPath(b, bb[0], bb[1], bb[2], bb[3]); } };
+    const silk = side => (A, b) => {
+      b.push(A('C,0.150000') + '*'); for (const c of cs) if ((isBottom(c) ? 'B' : 'F') === side) { const bb = fpBox(c); rectPath(b, bb[0], bb[1], bb[2], bb[3]); }
+      // part references and the board name, as strokes
+      for (const l of silkLabels(side)) { b.push(A(`C,${f6(l.w)}`) + '*'); for (const pl of l.lines) { b.push(X(...pl[0]) + 'D02*'); for (const q of (pl.length > 1 ? pl.slice(1) : pl)) b.push(X(...q) + 'D01*'); } }
+    };
     const files = {
       'board-F_Cu.gtl': copper('F', 'Copper,L1,Top'),
       'board-B_Cu.gbl': copper('B', 'Copper,L2,Bot'),
@@ -1734,7 +1798,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: S.board, seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { silkLabels, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

@@ -69,7 +69,7 @@ const App = (() => {
       if (view !== 'sch') showView('sch');
       const vb = Sch.vp.vb || [0, 0, 0, 0];
       const key = m.key || m.lcsc;
-      const c = Model.mutate(() => { if (!Model.S.lib[key]) Model.setLibPart(key, m); return Model.addComponent({ part: key, x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2 }); });
+      const c = Model.mutate(() => { if (!Model.S.lib[key]) Model.setLibPart(key, m); return Model.addComponent({ part: key, x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2, sheet: Sch.ui.sheet }); });
       Sch.select(c.ref); toast(`Added ${c.ref} · ${m.name} (${m.pins.length} pins, ${m.footprint ? m.footprint.pads.length + ' pads' : 'no footprint'})`);
     } catch (e) { toast('Could not load ' + code + ': ' + e.message, 6000); }
   }
@@ -79,7 +79,7 @@ const App = (() => {
     let part = null;
     if (d) { try { part = await AI.loadPart(d.lcsc); } catch (e) { toast('Parts database unavailable — using a generated footprint', 4000); } }
     const vb = Sch.vp.vb || [0, 0, 0, 0];
-    const c = Model.mutate(() => Model.addComponent({ type, x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2, dbPart: part }));
+    const c = Model.mutate(() => Model.addComponent({ type, x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2, dbPart: part, sheet: Sch.ui.sheet }));
     Sch.select(c.ref);
     if (c.pinMap) toast(`${c.ref}: ${part.name} · ${c.lcscPart} · ${part.footprint.name}`, 4000);
   }
@@ -89,7 +89,7 @@ const App = (() => {
     if (view !== 'sch') showView('sch');
     const vb = Sch.vp.vb || [0, 0, 0, 0];
     try {
-      const c = Model.mutate(() => { if (!Model.S.lib[key]) Model.setLibPart(key, m); return Model.addComponent({ part: key, x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2 }); });
+      const c = Model.mutate(() => { if (!Model.S.lib[key]) Model.setLibPart(key, m); return Model.addComponent({ part: key, x: vb[0] + vb[2] / 2, y: vb[1] + vb[3] / 2, sheet: Sch.ui.sheet }); });
       Sch.select(c.ref); toast(`Added ${c.ref} · ${m.name}`);
     } catch (e) { toast(e.message); }
   }

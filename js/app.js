@@ -1042,7 +1042,12 @@ const App = (() => {
     window.addEventListener('blur', hideCtx); window.addEventListener('resize', hideCtx);
     let saved = null; try { saved = localStorage.getItem('cp.design'); } catch (e) { }
     if (saved) try { Model.load(saved); } catch (e) { }
-    Model.subscribe(kind => { if (kind !== 'move') Pcb.ui.drc = null; if (kind === 'move') { if (view === 'sch') Sch.render(); else if (view === 'pcb') Pcb.render(); } else renderAll(); });
+    // drags fire 'move' on every mouse event: redraw at most once per frame so big boards stay smooth
+    let moveFrame = 0;
+    Model.subscribe(kind => {
+      if (kind !== 'move') { Pcb.ui.drc = null; if (moveFrame) { cancelAnimationFrame(moveFrame); moveFrame = 0; } renderAll(); return; }
+      if (!moveFrame) moveFrame = requestAnimationFrame(() => { moveFrame = 0; if (view === 'sch') Sch.render(); else if (view === 'pcb') Pcb.render(); });
+    });
     initTheme();
     PartEditor.init();
     // tell open tabs (phone, other PCs) when the app has been updated

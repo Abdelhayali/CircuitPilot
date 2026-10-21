@@ -744,7 +744,9 @@ const PcbView = (() => {
   // keep the item selection valid after undo/redo or external edits
   function validate() {
     const S = Model.S;
-    if (ui.item && ((ui.item.k === 'v' && !S.pcb.vias[ui.item.i]) || (ui.item.k === 'pour' && !(S.pcb.pours || [])[ui.item.i]) || (ui.item.k === 'h' && !(S.pcb.holes || [])[ui.item.i]) || (!['v', 'pour', 'h'].includes(ui.item.k) && !S.pcb.traces[ui.item.i]))) ui.item = null;
+    const it = ui.item, gone = it && (it.k === 'v' ? !S.pcb.vias[it.i] : it.k === 'pour' ? !(S.pcb.pours || [])[it.i] : it.k === 'h' ? !(S.pcb.holes || [])[it.i]
+      : it.k === 'txt' ? !(S.pcb.texts || [])[it.i] : it.k === 'blbl' ? false : !S.pcb.traces[it.i]);   // t / T: tracks
+    if (gone) ui.item = null;
     if (ui.sel && !Model.comp(ui.sel)) ui.sel = null;
     for (const r of [...ui.multi]) if (!Model.comp(r)) ui.multi.delete(r);
   }

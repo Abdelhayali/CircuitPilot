@@ -1393,17 +1393,17 @@ const Pcb = (() => {
     '?': '0,5 1,6 3,6 4,5 4,4 2,3 2,2|2,0 2,0.4', '=': '0.5,2 3.5,2|0.5,4 3.5,4', '*': '2,1 2,5|0.5,2 3.5,4|0.5,4 3.5,2', "'": '2,6 2,4.5',
   };
   const ADV = 5.5;   // grid units per character (glyph 4 + gap 1.5)
+  const parsed = {};   // glyph strings → stroke point arrays, parsed once
+  const glyph = ch => parsed[ch] || (parsed[ch] = ch === ' ' ? [] : (GLYPHS[ch] != null ? GLYPHS[ch] : GLYPHS['?']).split('|').map(st => st.split(' ').map(p => p.split(',').map(Number))));
   // text → polylines in board mm (y down). x / y: anchor point on the baseline; mirror: read from the bottom side
   function strokeText(str, x, y, h, anchor = 'start', mirror = false) {
     const u = h / 6, s = String(str).toUpperCase(), width = Math.max(0, s.length * ADV - 1.5) * u;
     const x0 = anchor === 'middle' ? x - width / 2 : anchor === 'end' ? x - width : x, out = [];
-    [...s].forEach((ch, i) => {
-      const g = GLYPHS[ch] != null ? GLYPHS[ch] : ch === ' ' ? '' : GLYPHS['?'];
-      for (const stroke of g ? g.split('|') : []) {
-        const pts = stroke.split(' ').map(p => { const [gx, gy] = p.split(',').map(Number); let px = x0 + (i * ADV + gx) * u; if (mirror) px = 2 * (x0 + width / 2) - px; return [+px.toFixed(4), +(y - gy * u).toFixed(4)]; });
-        out.push(pts);
-      }
-    });
+    const mid = 2 * (x0 + width / 2);
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i], g = glyph(ch);
+      for (const stroke of g) out.push(stroke.map(([gx, gy]) => { let px = x0 + (i * ADV + gx) * u; if (mirror) px = mid - px; return [Math.round(px * 1e4) / 1e4, Math.round((y - gy * u) * 1e4) / 1e4]; }));
+    }
     return out;
   }
   const textWidth = (str, h) => Math.max(0, String(str).length * ADV - 1.5) * h / 6;
@@ -1437,10 +1437,17 @@ const Pcb = (() => {
   function silkLabelsRaw(side) {
     const S = Model.S, W = S.board.w, H = S.board.h, out = [], cs = placed().filter(c => (isBottom(c) ? 'B' : 'F') === side);
     const boxes = cs.map(c => fpBox(c)), pads = padRects(side), taken = [];
+    // spatial grid (2 mm cells) so each candidate spot is only checked against nearby pads, parts and labels
+    const G = 2, cells = (r, f) => { const x1 = Math.floor(r[2] / G), y0 = Math.floor(r[1] / G), y1 = Math.floor(r[3] / G); for (let gx = Math.floor(r[0] / G); gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) if (f(gx * 4096 + gy)) return true; return false; };
+    const grid = { pad: new Map(), box: new Map(), lbl: new Map() };
+    const put = (m, r, v) => cells(r, k => { (m.get(k) || m.set(k, []).get(k)).push(v); return false; });
+    pads.forEach(r => put(grid.pad, r, r)); boxes.forEach((r, i) => put(grid.box, r, i));
+    const near = (m, r, f) => cells(r, k => { const a = m.get(k); if (a) for (let j = 0; j < a.length; j++) if (f(a[j])) return true; return false; });
     const offBoard = r => r[0] < 0.2 || r[1] < 0.2 || r[2] > W - 0.2 || r[3] > H - 0.2;
-    const onPads = r => pads.some(b => overlap(r, b));
-    const hit = (r, skip) => offBoard(r) || onPads(r) || boxes.some((b, i) => i !== skip && overlap(r, b)) || taken.some(b => overlap(r, b));
-    const add = (o) => { o.rect = labelRect(o.x, o.y, textWidth(o.text, o.h), o.h, o.anchor); o.overPads = onPads(o.rect); taken.push(o.rect); out.push(o); };
+    const onPads = r => near(grid.pad, r, b => overlap(r, b));
+    const onLabels = r => near(grid.lbl, r, b => overlap(r, b));
+    const hit = (r, skip) => offBoard(r) || onPads(r) || near(grid.box, r, i => i !== skip && overlap(r, boxes[i])) || onLabels(r);
+    const add = (o) => { o.rect = labelRect(o.x, o.y, textWidth(o.text, o.h), o.h, o.anchor); o.overPads = onPads(o.rect); taken.push(o.rect); put(grid.lbl, o.rect, o.rect); out.push(o); };
     // free text first: fixed positions the automatic labels must avoid
     (S.pcb.texts || []).forEach((t, i) => { if ((t.side || 'F') !== side || !String(t.text || '').trim()) return; const h = +t.h || 1.2; add({ kind: 'text', i, text: String(t.text), x: +t.x, y: +t.y + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: side === 'B', auto: false }); });
     // labels the user / AI placed by hand
@@ -1458,9 +1465,9 @@ const Pcb = (() => {
       // crosses part outlines — never pads
       if (!pick) {
         const ring = [];
-        for (let d = 0.6; d <= 4.01; d += 0.4) for (let k = 0; k < 16; k++) { const a = k / 16 * 2 * Math.PI, rx = (b[2] - b[0]) / 2 + d + tw / 2, ry = (b[3] - b[1]) / 2 + d + h / 2; ring.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry + h / 2, 'middle']); }
+        for (let d = 0.6; d <= 4.01; d += 0.5) for (let k = 0; k < 12; k++) { const a = k / 12 * 2 * Math.PI, rx = (b[2] - b[0]) / 2 + d + tw / 2, ry = (b[3] - b[1]) / 2 + d + h / 2; ring.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry + h / 2, 'middle']); }
         pick = ring.find(([x, y, a]) => !hit(labelRect(x, y, tw, h, a), i)) ||
-          ring.find(([x, y, a]) => { const r = labelRect(x, y, tw, h, a); return !offBoard(r) && !onPads(r) && !taken.some(t => overlap(r, t)); });
+          ring.find(([x, y, a]) => { const r = labelRect(x, y, tw, h, a); return !offBoard(r) && !onPads(r) && !onLabels(r); });
       }
       // last resort: the first spot on the board that is clear of pads (labels may touch), else the first on the board
       if (!pick) pick = tries.find(([x, y, a]) => { const r = labelRect(x, y, tw, h, a); return !offBoard(r) && !onPads(r); }) || tries.find(([x, y, a]) => !offBoard(labelRect(x, y, tw, h, a))) || tries[0];

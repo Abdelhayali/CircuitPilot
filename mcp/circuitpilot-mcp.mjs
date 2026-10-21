@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,6 +44,38 @@ Object.assign(Engine.env, {
   render: async args => api('POST', '/api/render/request', { project: currentId, args }),
 });
 
+// ---------- make sure the CircuitPilot app is running (Claude Desktop / Claude Code only start this MCP server) ----------
+async function ping() {
+  try { const r = await fetch(BASE + '/api/version', { headers, signal: AbortSignal.timeout(2500) }); return r.ok; } catch { return false; }
+}
+let appReady = null;
+function ensureApp() {
+  if (!appReady) appReady = (async () => {
+    if (await ping()) return true;
+    if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(BASE)) return false;   // a remote app cannot be started from here
+    const args = ['server.py', new URL(BASE).port || '5173', '--allow-ports', '8080'];
+    if (fs.existsSync(path.join(ROOT, 'access-password.txt'))) args.push('--password-file', 'access-password.txt');
+    try { spawn(process.env.CP_PYTHON || 'python', args, { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true }).unref(); log('started server.py'); }
+    catch (e) { log('could not start server.py:', e.message); return false; }
+    for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 500)); if (await ping()) return true; }
+    return false;
+  })().then(ok => { if (!ok) appReady = null; return ok; });
+  return appReady;
+}
+// Show the user the project being worked on: open the app in the browser once if no tab is connected,
+// and ask open tabs to switch to this project (they follow Claude).
+let browserOpened = false;
+function openBrowser(url) {
+  browserOpened = true;
+  const [cmd, args] = process.platform === 'win32' ? ['explorer.exe', [url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try { spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref(); } catch { }
+}
+async function showProject(id) {
+  if (!id) return;
+  try { await api('POST', '/api/render/focus', { project: id }); } catch { }
+  try { const t = await api('GET', '/api/render/tabs'); if (!t.tabs && !browserOpened) openBrowser(BASE + '/?project=' + encodeURIComponent(id)); } catch { }
+}
+
 async function api(method, p, body) {
   const r = await fetch(BASE + p, { method, headers: Object.assign({}, headers, body ? { 'content-type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined });
   const txt = await r.text(); let j;
@@ -62,9 +95,10 @@ async function resolveProject(ref) {
 async function ensureProject() {
   if (currentId) return currentId;
   const p = await resolveProject(process.env.CP_PROJECT);
-  if (p) return (currentId = p.id);
-  const d = Model.blank(); d.name = 'Untitled';
-  return (currentId = (await api('PUT', '/api/projects/', d)).id);
+  if (p) currentId = p.id;
+  else { const d = Model.blank(); d.name = 'Untitled'; currentId = (await api('PUT', '/api/projects/', d)).id; }
+  await showProject(currentId);
+  return currentId;
 }
 async function withProject(fn) {
   const id = await ensureProject();
@@ -78,6 +112,7 @@ async function withProject(fn) {
 
 // ---------- extra tools (projects & exports) ----------
 const EXTRA = [
+  { name: 'start_here', description: 'CALL THIS FIRST whenever the user asks for anything about electronics: designing a circuit, schematic, PCB or board, choosing parts, routing, Gerbers, an enclosure / case, or a datasheet. It starts the CircuitPilot app if needed, opens it in the browser, and returns the step-by-step workflow and the current project.', input_schema: { type: 'object', properties: {} } },
   { name: 'list_projects', description: 'List all CircuitPilot projects (id, name, parts, nets, whether a PCB exists, last update). The current project is marked.', input_schema: { type: 'object', properties: {} } },
   { name: 'open_project', description: 'Make a project current (by id or name). All design tools act on the current project; the browser app shows changes live.', input_schema: { type: 'object', required: ['project'], properties: { project: { type: 'string', description: 'Project id or name' } } } },
   { name: 'create_project', description: 'Create a new empty project and make it current.', input_schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, knowledge_folder: { type: 'string', description: 'Optional knowledge folder path' } } } },
@@ -90,17 +125,26 @@ const TOOLS = [...EXTRA, ...Engine.TOOLS.map(t => ({ name: t.name, description: 
 
 async function callTool(name, input = {}) {
   switch (name) {
+    case 'start_here': {
+      const ps = await api('GET', '/api/projects'), id = await ensureProject(), cur = ps.find(p => p.id === id);
+      return {
+        app: BASE + ' (running; the user sees every change live in the browser)',
+        current_project: cur ? { id, name: cur.name, parts: cur.parts, nets: cur.nets, pcb: cur.pcb } : { id },
+        other_projects: ps.filter(p => p.id !== id).slice(0, 10).map(p => p.name),
+        workflow: WORKFLOW,
+      };
+    }
     case 'list_projects': {
       const ps = await api('GET', '/api/projects');
       return ps.map(p => ({ ...p, current: p.id === currentId, updated: new Date(p.updated * 1000).toISOString() }));
     }
     case 'open_project': {
       const p = await resolveProject(input.project); if (!p) throw new Error(`No project matching "${input.project}"`);
-      currentId = p.id; return { opened: p.name, id: p.id, parts: p.parts, nets: p.nets };
+      currentId = p.id; await showProject(currentId); return { opened: p.name, id: p.id, parts: p.parts, nets: p.nets };
     }
     case 'create_project': {
       const d = Model.blank(); d.name = input.name || 'Untitled';
-      currentId = (await api('PUT', '/api/projects/', d)).id;
+      currentId = (await api('PUT', '/api/projects/', d)).id; await showProject(currentId);
       let k = null;
       if (input.knowledge_folder) k = await withProject(() => Engine.exec('set_knowledge_folder', { path: input.knowledge_folder }));
       return { created: d.name, id: currentId, knowledge: k };
@@ -144,7 +188,19 @@ async function callTool(name, input = {}) {
 
 // Serialize calls: every tool loads, edits and saves the shared project.
 let queue = Promise.resolve();
-const run = (name, input) => (queue = queue.then(() => callTool(name, input), () => callTool(name, input)));
+async function callChecked(name, input) {
+  if (!(await ensureApp())) throw new Error(`The CircuitPilot app is not running at ${BASE} and could not be started. Ask the user to run "python server.py" in ${ROOT}.`);
+  return callTool(name, input);
+}
+const run = (name, input) => (queue = queue.then(() => callChecked(name, input), () => callChecked(name, input)));
+
+const WORKFLOW = `1. New design: create_project {name}. To continue an existing one: list_projects → open_project.
+2. Parts: search_parts for real ICs, modules, regulators, connectors (JLCPCB catalogue) → get_part for the exact pinout. Passives (resistor, capacitor, LED, diode…) can be added by type.
+3. Schematic: add_components (give x/y positions, ~150 units apart, related parts together) → connect pins with named nets (GND, +3V3, +5V are power nets) → run_erc and fix errors. Use sheets (add_sheet) for big designs.
+4. Look at it: view_design {view:"schematic"} and fix crowded or confusing areas.
+5. PCB: generate_pcb (board size if the user gave one) → pcb_status / run_drc → if nets are unrouted: optimize_pcb → add_copper_pour GND → run_drc. Check with view_design {view:"pcb"} and {view:"pcb_3d"}.
+6. Optional: enclosure (get_enclosure / set_enclosure, or enclosure_script_help for wearables and custom cases; check with view_design {view:"enclosure"}), datasheet text (set_documentation), Gerbers (export_gerbers {out_dir}).
+Tell the user what you built and what to check (footprints against datasheets, antenna keep-out, power ratings).`;
 
 const INSTRUCTIONS = `CircuitPilot is an AI schematic + PCB designer. These tools edit the CURRENT project (see list_projects / open_project / create_project); the user sees every change live in the CircuitPilot browser app.
 Workflow: search_parts → get_part for real ICs/modules (exact pinout + footprint) → add_components → connect (named nets; GND / +3V3 / +5V are power nets) → run_erc → generate_pcb → export_gerbers.
@@ -172,7 +228,14 @@ function startStdio() {
     const fail = (code, message) => id !== undefined && send({ jsonrpc: '2.0', id, error: { code, message } });
     switch (method) {
       case 'initialize':
-        return reply({ protocolVersion: params.protocolVersion || '2025-06-18', capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'circuitpilot', version: '1.0.0' }, instructions: INSTRUCTIONS });
+        return reply({ protocolVersion: params.protocolVersion || '2025-06-18', capabilities: { tools: { listChanged: false }, prompts: { listChanged: false } }, serverInfo: { name: 'circuitpilot', version: '1.0.0' }, instructions: INSTRUCTIONS });
+      // ready-made prompt in the client's prompt menu (Claude Desktop: + → CircuitPilot)
+      case 'prompts/list': return reply({ prompts: [{ name: 'design_board', title: 'Design a board with CircuitPilot', description: 'Describe a circuit; Claude designs the schematic, PCB and (optionally) the enclosure in CircuitPilot', arguments: [{ name: 'description', description: 'What should the board do? e.g. "ESP32-C3 with a BME280 sensor and USB-C, 30 × 30 mm"', required: true }] }] });
+      case 'prompts/get': {
+        if (params.name !== 'design_board') return fail(-32602, 'Unknown prompt ' + params.name);
+        const desc = (params.arguments && params.arguments.description) || '';
+        return reply({ description: 'Design a board with CircuitPilot', messages: [{ role: 'user', content: { type: 'text', text: `Use CircuitPilot (call start_here first) to design this board: ${desc}\n\nCreate a new project, pick real JLCPCB parts, build and check the schematic, make and route the PCB, look at the result with view_design, then tell me what you built and what I should check.` } }] });
+      }
       case 'notifications/initialized': case 'notifications/cancelled': return;
       case 'ping': return reply({});
       case 'tools/list': return reply({ tools: TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.input_schema })) });

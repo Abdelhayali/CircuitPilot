@@ -196,7 +196,15 @@ Only document-type files inside the chosen folder are read (no `..` escapes, hid
 
 ## Control from Claude Code (MCP) and other tools
 
-`mcp/circuitpilot-mcp.mjs` exposes all 57 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
+`mcp/circuitpilot-mcp.mjs` exposes all 58 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
+
+**Claude Desktop (easiest)** — run once:
+
+```bash
+node mcp/install-claude-desktop.mjs
+```
+
+then quit Claude Desktop completely (also from the system tray) and open it again. Now just ask, e.g. *"Design a USB-C powered ESP32-C3 board with a BME280 sensor, 30 × 30 mm"*. Claude calls `start_here`, CircuitPilot starts `server.py` by itself if it isn't running, opens the project in your browser, and the open tab follows whichever project Claude works on. There's also a ready-made **Design a board with CircuitPilot** prompt in Claude Desktop's **+** menu.
 
 **Claude Code** — this repo ships a `.mcp.json`, so just open the folder in Claude Code (with `server.py` running) and approve the `circuitpilot` server. Or add it globally:
 

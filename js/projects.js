@@ -141,18 +141,23 @@ const Projects = (() => {
   }
   async function renderLoop() {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
-    let ctl = null, pid = null;
+    let ctl = null, pid = null, since = Date.now() / 1000;   // focus requests older than this page are ignored
     Model.subscribe(() => { if (ctl && Model.S.id !== pid) ctl.abort(); });   // another project opened: wait for its requests now
     for (;;) {
       if (!Model.S.id || !Engine.env.render) { await sleep(3000); continue; }
       let job = null;
       ctl = new AbortController(); pid = Model.S.id;
       try {
-        const r = await fetch('/api/render/next?project=' + encodeURIComponent(pid), { signal: ctl.signal });
+        const r = await fetch('/api/render/next?project=' + encodeURIComponent(pid) + '&since=' + since, { signal: ctl.signal });
         if (r.status === 200) job = await r.json(); else if (r.status !== 204) { await sleep(10000); continue; }
       } catch (e) { if (!ctl.signal.aborted) await sleep(10000); continue; }
       if (job && Model.S.id !== pid) { try { await fetch('/api/render/result', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: job.id, error: 'The project was closed in the browser' }) }); } catch (e) { } continue; }
       if (!job) continue;
+      if (job.focus) {   // Claude (MCP) is working on another project: follow it so the user sees the work live
+        since = job.t;
+        if (job.focus !== Model.S.id) { try { await open(job.focus); App.toast('Following Claude: opened the project it is working on', 5000); } catch (e) { } }
+        continue;
+      }
       let out;
       try { await pullLatest(); const img = await Engine.env.render(job.args || {}); out = { id: job.id, mime: img.mime, data: img.data, w: img.w, h: img.h }; }
       catch (e) { out = { id: job.id, error: e.message || String(e) }; }
@@ -169,6 +174,9 @@ const Projects = (() => {
       }
       await saveNow();
       setInterval(poll, 2500);
+      // a link like /?project=<id> (Claude Desktop opens one) shows that project
+      const want = new URLSearchParams(location.search).get('project');
+      if (want && want !== Model.S.id) { try { await open(want); } catch (e) { } history.replaceState(null, '', location.pathname); }
       if (!(window.CPStatic && CPStatic.mode === 'static')) renderLoop();
     } else setStatus('local');
     $('#projClose').onclick = close;

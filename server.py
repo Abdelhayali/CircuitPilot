@@ -62,11 +62,22 @@ _rjobs = {}   # id -> {"project", "args", "claimed", "result"}
 _rtabs = {}   # project id -> last time a browser tab with it open asked for work
 
 
-def render_next(project, wait=25.0):
+_rfocus = {"project": "", "t": 0.0}   # project an MCP client (Claude) is working on
+
+
+def render_focus(project):
+    with _rlock:
+        _rfocus.update(project=project, t=time.time())
+        _rlock.notify_all()
+
+
+def render_next(project, wait=25.0, since=0.0):
     end = time.time() + wait
     with _rlock:
         while True:
             _rtabs[project] = time.time()
+            if _rfocus["project"] and _rfocus["project"] != project and _rfocus["t"] > since:
+                return {"focus": _rfocus["project"], "t": _rfocus["t"]}
             for jid, j in _rjobs.items():
                 # a job claimed by a tab that went away (reloaded, closed) is offered again after 15 s
                 stale = j["claimed"] and time.time() - j["claimed"] > 15
@@ -180,9 +191,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._knowledge(path)
         if path.startswith("/api/web/"):
             return self._web(path)
+        if path == "/api/render/tabs":   # is the app open in a browser? (Claude Desktop opens it when not)
+            now = time.time()
+            with _rlock:
+                live = [p for p, t in _rtabs.items() if now - t < 40]
+            return self._send(200, json.dumps({"tabs": len(live), "projects": live}).encode(), "application/json")
         if path == "/api/render/next":
             q = urllib.parse.parse_qs(self.path.partition("?")[2])
-            job = render_next((q.get("project") or [""])[0])
+            job = render_next((q.get("project") or [""])[0], since=float((q.get("since") or ["0"])[0] or 0))
             return self._send(200, json.dumps(job).encode(), "application/json") if job else self._send(204, b"", "application/json")
         if not STATIC_RE.match(path):  # never serve parts.db, *.py, password file, .git ...
             return self._send(404, b"not found", "text/plain")
@@ -217,7 +233,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._ext()
         if path.startswith(("/api/projects", "/api/library")):
             return self._store(path)
-        if path in ("/api/render/request", "/api/render/result") and self.command == "POST":
+        if path in ("/api/render/request", "/api/render/result", "/api/render/focus") and self.command == "POST":
             n = int(self.headers.get("Content-Length") or 0)
             if n > 30_000_000:
                 return self._send(413, b'{"error":"too large"}', "application/json")
@@ -227,6 +243,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._send(400, b'{"error":"body must be JSON"}', "application/json")
             if path == "/api/render/result":
                 render_result(str(body.get("id", "")), body)
+                return self._send(200, b'{"ok":true}', "application/json")
+            if path == "/api/render/focus":   # an MCP client switched project: open browser tabs follow it
+                render_focus(str(body.get("project") or ""))
                 return self._send(200, b'{"ok":true}', "application/json")
             out, status = render_request(str(body.get("project") or ""), body.get("args") or {})
             return self._send(status, json.dumps(out).encode(), "application/json")

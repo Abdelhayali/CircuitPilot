@@ -173,9 +173,10 @@ const App = (() => {
         ${view === 'pcb' && c.pcb ? `<div class="ph small">Place on board edge${c.pcbEdge ? ' · <span class="muted">' + c.pcbEdge + '</span>' : ''}</div><div class="row edgebtns"><button data-edge="left" title="Left edge">⇤ Left</button><button data-edge="top" title="Top edge">⤒ Top</button><button data-edge="bottom" title="Bottom edge">⤓ Bottom</button><button data-edge="right" title="Right edge">Right ⇥</button></div>` : ''}
         ${view === 'pcb' && c.pcb ? (() => { const L = c.pcb.silk || {}, li = Pcb.silkInfo().find(x => x.kind === 'part' && x.ref === c.ref); return `<div class="ph small">Silkscreen label${li && li.covers_pads ? ' · <span class="bad">covers pads</span>' : ''}</div>
         <label>Text<input id="pSlT" value="${esc(L.text || '')}" placeholder="${esc(c.ref)}"></label>
-        <div class="row"><label style="flex:1">Size (mm)<input id="pSlH" type="number" step="0.1" min="0.6" value="${L.h || ''}" placeholder="1.0"></label><label class="chk"><input type="checkbox" id="pSlHide" ${L.hide ? 'checked' : ''}> Hide</label></div>
+        <div class="row"><label style="flex:1">Size (mm)<input id="pSlH" type="number" step="0.1" min="0.6" value="${L.h || ''}" placeholder="1.0"></label><label style="flex:1">Rotation (°)<input id="pSlR" type="number" step="15" value="${L.rot || 0}"></label></div>
+        <label class="chk"><input type="checkbox" id="pSlHide" ${L.hide ? 'checked' : ''}> Hide</label>
         <div class="row"><button id="pSlAuto" ${L.dx == null ? 'disabled' : ''} title="Put the label back where it covers no pad, part or label">Automatic position</button></div>
-        <div class="muted small">Drag the label on the board to move it; it then moves with the part.</div>`; })() : ''}
+        <div class="muted small">Drag the label on the board to move it (it then moves with the part); click the label, then R rotates it and + / − change its size.</div>`; })() : ''}
         <div class="row"><button id="pEdit" style="flex:1">✎ ${c.type === 'part' ? 'Edit symbol &amp; footprint' : 'Make editable part'}</button></div>
         <div class="ph small">Pins</div><table class="pins">${Lib.type(c.type).pins(c).map(p => `<tr><td>${esc(p.num)}</td><td>${esc(p.name)}</td><td class="${idx[c.ref + '.' + p.num] ? '' : 'muted'}">${esc(idx[c.ref + '.' + p.num] || '—')}</td></tr>`).join('')}</table>`;
       const apply = (u) => { try { Model.mutate(() => Model.updateComponent(Object.assign({ ref: c.ref }, u))); if (u.new_ref) { Sch.ui.sel = u.new_ref; Pcb.ui.sel = u.new_ref; } } catch (e) { toast(e.message); } };
@@ -189,7 +190,7 @@ const App = (() => {
       if ($('#pSlT')) {
         const sl = o => Model.mutate(() => Pcb.setSilkLabel(c.ref, o));
         $('#pSlT').onchange = e => sl({ text: e.target.value }); $('#pSlH').onchange = e => sl({ size: +e.target.value || 1.0 });
-        $('#pSlHide').onchange = e => sl({ hidden: e.target.checked }); $('#pSlAuto').onclick = () => sl({ auto: true });
+        $('#pSlHide').onchange = e => sl({ hidden: e.target.checked }); $('#pSlAuto').onclick = () => sl({ auto: true }); $('#pSlR').onchange = e => sl({ rotation: +e.target.value || 0 });
       }
       $('#pEdit').onclick = () => editComponent(c.ref);
       el.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { try { Model.mutate(() => Pcb.placeFootprint(c.ref, { side: b.dataset.side })); toast(`${c.ref} on the ${b.dataset.side} side — press Route to reconnect`); } catch (e) { toast(e.message); } });
@@ -1015,6 +1016,7 @@ const App = (() => {
         easyedaExport(kind === 'easyedaproj' ? 'project' : kind === 'easyedapcb' ? 'pcb' : 'sch');
         return;
       }
+      if (kind === 'pcbpdf') { toast('Making the PCB drawing…', 8000); PcbPdf.export().then(r => toast(`PCB drawing saved: ${r.pages} pages, ${r.scale === 1 ? 'true scale 1:1 — print at 100% (actual size)' : 'scaled to fit the page'}`, 9000)).catch(e => toast('PDF failed: ' + e.message, 8000)); return; }
       if (kind === 'pcbsvg') { if (!S.board.w) throw new Error('No PCB yet'); if (view !== 'pcb') Pcb.render(); download(fname('-pcb.svg'), Pcb.exportSVG(), 'image/svg+xml'); }
       if (kind === 'bomjlc') { jlcBom(); return; }
       if (kind === 'bom') {

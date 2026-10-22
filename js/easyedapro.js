@@ -224,7 +224,13 @@ const EasyEDAPro = (() => {
     const lcscOf = attrs => { const d = devOf(attrs), v = (d && (d.attrs['Supplier Part'] || d.attrs['LCSC Part'] || d.attrs['JLCPCB Part'])) || attrs['Supplier Part'] || ''; return /^C\d+$/.test(v) ? v : ''; };
     const symOf = attrs => P.symbols[attrs.Symbol] || P.symbols[(devOf(attrs) || { attrs: {} }).attrs.Symbol] || null;
     const footOf = attrs => P.footprints[attrs.Footprint] || P.footprints[(devOf(attrs) || { attrs: {} }).attrs.Footprint] || null;
-    const valueOf = attrs => { const d = devOf(attrs); return String(attrs.Value || attrs.Name || (d && (d.attrs.Value || d.attrs.Name)) || (d && d.title) || ''); };
+    // EasyEDA Pro values can be templates like "={Manufacturer Part}": fill them in from the part's attributes
+    const valueOf = attrs => {
+      const d = devOf(attrs), all = Object.assign({}, d ? d.attrs : {}, attrs);
+      const fill = v => String(v || '').replace(/^=/, '').replace(/\{([^}]+)\}/g, (m, k) => all[k] != null ? String(all[k]) : '').trim();
+      for (const v of [attrs.Value, attrs.Name, d && d.attrs.Value, d && d.attrs.Name, d && d.title]) { const t = /^=/.test(String(v || '')) ? fill(v) : String(v || '').trim(); if (t) return t; }
+      return '';
+    };
     const netName = n => String(n || '').trim().replace(/\s+/g, '_');
 
     // --- schematic parts (by designator; multi-unit symbols are one part) and positions

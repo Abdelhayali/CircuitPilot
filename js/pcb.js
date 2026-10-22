@@ -1423,8 +1423,17 @@ const Pcb = (() => {
     return out;
   }
   const overlap = (r, b) => r[0] < b[2] && r[2] > b[0] && r[1] < b[3] && r[3] > b[1];
+  // text rotation: degrees counter-clockwise (as seen on the screen), about the centre of the text
+  const rotPt = (x, y, cx, cy, deg) => { const a = -deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), dx = x - cx, dy = y - cy; return [cx + dx * c - dy * s, cy + dx * s + dy * c]; };
+  function rotRect(r, deg) {
+    if (!deg) return r;
+    const cx = (r[0] + r[2]) / 2, cy = (r[1] + r[3]) / 2, q = [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]].map(([x, y]) => rotPt(x, y, cx, cy, deg));
+    return [Math.min(...q.map(p => p[0])), Math.min(...q.map(p => p[1])), Math.max(...q.map(p => p[0])), Math.max(...q.map(p => p[1]))];
+  }
+  const normRot = v => ((Math.round(+v || 0) % 360) + 360) % 360;
   // label rectangle for an anchor point (x, baseline y), with a small gap around the text
-  const labelRect = (x, y, tw, h, anchor) => { const x0 = anchor === 'middle' ? x - tw / 2 : anchor === 'end' ? x - tw : x; return [x0 - 0.1, y - h - 0.1, x0 + tw + 0.1, y + 0.1]; };
+  const labelRect0 = (x, y, tw, h, anchor) => { const x0 = anchor === 'middle' ? x - tw / 2 : anchor === 'end' ? x - tw : x; return [x0 - 0.1, y - h - 0.1, x0 + tw + 0.1, y + 0.1]; };
+  const labelRect = labelRect0;
   // the 2D view redraws often: keep the result until something that affects the labels changes
   const silkCache = {};
   function silkLabels(side) {
@@ -1447,15 +1456,16 @@ const Pcb = (() => {
     const onPads = r => near(grid.pad, r, b => overlap(r, b));
     const onLabels = r => near(grid.lbl, r, b => overlap(r, b));
     const hit = (r, skip) => offBoard(r) || onPads(r) || near(grid.box, r, i => i !== skip && overlap(r, boxes[i])) || onLabels(r);
-    const add = (o) => { o.rect = labelRect(o.x, o.y, textWidth(o.text, o.h), o.h, o.anchor); o.overPads = onPads(o.rect); taken.push(o.rect); put(grid.lbl, o.rect, o.rect); out.push(o); };
+    const add = (o) => { o.rot = normRot(o.rot); o.rect0 = labelRect(o.x, o.y, textWidth(o.text, o.h), o.h, o.anchor); o.rect = rotRect(o.rect0, o.rot); o.overPads = onPads(o.rect); taken.push(o.rect); put(grid.lbl, o.rect, o.rect); out.push(o); };
     // free text first: fixed positions the automatic labels must avoid
-    (S.pcb.texts || []).forEach((t, i) => { if ((t.side || 'F') !== side || !String(t.text || '').trim()) return; const h = +t.h || 1.2; add({ kind: 'text', i, text: String(t.text), x: +t.x, y: +t.y + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: side === 'B', auto: false }); });
+    (S.pcb.texts || []).forEach((t, i) => { if ((t.side || 'F') !== side || !String(t.text || '').trim()) return; const h = +t.h || 1.2; add({ kind: 'text', i, text: String(t.text), x: +t.x, y: +t.y + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: side === 'B', auto: false, rot: t.rot }); });
     // labels the user / AI placed by hand
     const manual = cs.filter(c => c.pcb.silk && c.pcb.silk.dx != null && !c.pcb.silk.hide);
-    for (const c of manual) { const L = c.pcb.silk, h = +L.h || SILK_H; add({ kind: 'part', ref: c.ref, text: String(L.text || c.ref), x: c.pcb.x + L.dx, y: c.pcb.y + L.dy + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: side === 'B', auto: false }); }
+    for (const c of manual) { const L = c.pcb.silk, h = +L.h || SILK_H; add({ kind: 'part', ref: c.ref, text: String(L.text || c.ref), x: c.pcb.x + L.dx, y: c.pcb.y + L.dy + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: side === 'B', auto: false, rot: L.rot }); }
     cs.forEach((c, i) => {
       const L = c.pcb.silk || {}; if (L.hide || L.dx != null) return;
-      const b = boxes[i], h = +L.h || SILK_H, text = String(L.text || c.ref), tw = textWidth(text, h), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+      const b = boxes[i], h = +L.h || SILK_H, text = String(L.text || c.ref), tw0 = textWidth(text, h), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, rot = normRot(L.rot);
+      const labelRect = (x, y, tw, hh, a) => rotRect(labelRect0(x, y, tw, hh, a), rot), tw = tw0;
       const tries = [[cx, b[1] - 0.35, 'middle'], [cx, b[3] + 0.35 + h, 'middle'], [b[0] - 0.35, cy + h / 2, 'end'], [b[2] + 0.35, cy + h / 2, 'start'],
         [cx, b[1] - 1.2, 'middle'], [cx, b[3] + 1.2 + h, 'middle']];   // a little further out when the near spots are taken
       let pick = tries.find(([x, y, a]) => !hit(labelRect(x, y, tw, h, a), i));
@@ -1472,20 +1482,24 @@ const Pcb = (() => {
       // last resort: the first spot on the board that is clear of pads (labels may touch), else the first on the board
       if (!pick) pick = tries.find(([x, y, a]) => { const r = labelRect(x, y, tw, h, a); return !offBoard(r) && !onPads(r); }) || tries.find(([x, y, a]) => !offBoard(labelRect(x, y, tw, h, a))) || tries[0];
       const [x, y, anchor] = pick;
-      add({ kind: 'part', ref: c.ref, text, x, y, h, w: SILK_W, anchor, mirror: side === 'B', auto: true });
+      add({ kind: 'part', ref: c.ref, text, x, y, h, w: SILK_W, anchor, mirror: side === 'B', auto: true, rot });
     });
     const BL = S.pcb.boardLabel || {}, name = String(BL.text != null && BL.text !== '' ? BL.text : S.name || '');
     if (side === 'F' && name && !BL.hide) {
       let h = +BL.h || 1.2;
-      if (BL.x != null) add({ kind: 'board', text: name, x: +BL.x, y: +BL.y + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: false, auto: false });
+      if (BL.x != null) add({ kind: 'board', text: name, x: +BL.x, y: +BL.y + h / 2, h, w: Math.max(SILK_W, h * 0.13), anchor: 'middle', mirror: false, auto: false, rot: BL.rot });
       else {
         const room = W - 2.4; if (!BL.h && textWidth(name, h) > room) h = Math.max(0.8, h * room / textWidth(name, h));
         const tw = textWidth(name, h), corners = [[W - 1.2, H - 1.2, 'end'], [1.2, H - 1.2, 'start'], [W - 1.2, 1.2 + h, 'end'], [1.2, 1.2 + h, 'start']];
         const [x, y, anchor] = corners.find(([x, y, a]) => !hit(labelRect(x, y, tw, h, a), -1)) || corners.find(([x, y, a]) => !onPads(labelRect(x, y, tw, h, a))) || corners[0];
-        add({ kind: 'board', text: name, x, y, h, w: Math.max(SILK_W, h * 0.13), anchor, mirror: false, auto: true });
+        add({ kind: 'board', text: name, x, y, h, w: Math.max(SILK_W, h * 0.13), anchor, mirror: false, auto: true, rot: BL.rot });
       }
     }
-    return out.map(l => Object.assign(l, { lines: strokeText(l.text, l.x, l.y, l.h, l.anchor, l.mirror) }));
+    return out.map(l => {
+      let lines = strokeText(l.text, l.x, l.y, l.h, l.anchor, l.mirror);
+      if (l.rot) { const cx = (l.rect0[0] + l.rect0[2]) / 2, cy = (l.rect0[1] + l.rect0[3]) / 2; lines = lines.map(pl => pl.map(([x, y]) => rotPt(x, y, cx, cy, l.rot).map(v => Math.round(v * 1e4) / 1e4))); }
+      return Object.assign(l, { lines });
+    });
   }
   // centre of a label (what the user drags / the AI sets)
   const labelCentre = l => [+(((l.rect[0] + l.rect[2]) / 2)).toFixed(3), +(((l.rect[1] + l.rect[3]) / 2)).toFixed(3)];
@@ -1496,6 +1510,7 @@ const Pcb = (() => {
     if (/^(board|#board)$/i.test(ref)) {
       const L = Object.assign({}, S.pcb.boardLabel || {});
       if (o.text != null) L.text = String(o.text); if (o.size != null) L.h = Math.max(0.6, Math.min(10, +o.size)); if (o.hidden != null) L.hide = !!o.hidden;
+      if (o.rotation != null) { if (normRot(o.rotation)) L.rot = normRot(o.rotation); else delete L.rot; }
       if (o.auto) { delete L.x; delete L.y; } else if (o.x != null && o.y != null) { L.x = +(+o.x).toFixed(3); L.y = +(+o.y).toFixed(3); }
       S.pcb.boardLabel = L; return L;
     }
@@ -1503,6 +1518,7 @@ const Pcb = (() => {
     const L = Object.assign({}, c.pcb.silk || {});
     if (o.text != null) { if (String(o.text).trim() && String(o.text) !== c.ref) L.text = String(o.text); else delete L.text; }
     if (o.size != null) L.h = Math.max(0.6, Math.min(10, +o.size)); if (o.hidden != null) { if (o.hidden) L.hide = true; else delete L.hide; }
+    if (o.rotation != null) { if (normRot(o.rotation)) L.rot = normRot(o.rotation); else delete L.rot; }
     if (o.auto) { delete L.dx; delete L.dy; } else if (o.x != null && o.y != null) { L.dx = +(+o.x - c.pcb.x).toFixed(3); L.dy = +(+o.y - c.pcb.y).toFixed(3); }
     if (Object.keys(L).length) c.pcb.silk = L; else delete c.pcb.silk;
     return L;
@@ -1510,18 +1526,20 @@ const Pcb = (() => {
   // free silkscreen text: { text, x, y (centre, board mm), size (mm, default 1.2), side 'top' | 'bottom' }
   function addText(o) {
     const S = Model.S, t = { text: String(o.text || 'TEXT'), x: +(+(o.x != null ? o.x : S.board.w / 2)).toFixed(3), y: +(+(o.y != null ? o.y : S.board.h / 2)).toFixed(3), h: Math.max(0.6, Math.min(10, +o.size || 1.2)), side: /^b/i.test(o.side || '') ? 'B' : 'F' };
+    if (normRot(o.rotation)) t.rot = normRot(o.rotation);
     S.pcb.texts = (S.pcb.texts || []).concat([t]); return { index: S.pcb.texts.length - 1, ...t };
   }
   function updateText(i, o) {
     const t = (Model.S.pcb.texts || [])[i]; if (!t) throw new Error('No PCB text #' + i);
     if (o.text != null) t.text = String(o.text); if (o.x != null) t.x = +(+o.x).toFixed(3); if (o.y != null) t.y = +(+o.y).toFixed(3);
     if (o.size != null) t.h = Math.max(0.6, Math.min(10, +o.size)); if (o.side != null) t.side = /^b/i.test(o.side) ? 'B' : 'F';
+    if (o.rotation != null) { if (normRot(o.rotation)) t.rot = normRot(o.rotation); else delete t.rot; }
     return { index: i, ...t };
   }
   function removeText(i) { const a = Model.S.pcb.texts || []; if (!a[i]) throw new Error('No PCB text #' + i); a.splice(i, 1); return { removed: i }; }
   // every label with its position, for the AI and the properties panel
   function silkInfo() {
-    return ['F', 'B'].flatMap(side => silkLabels(side).map(l => { const [x, y] = labelCentre(l); return Object.assign({ kind: l.kind, side: side === 'F' ? 'top' : 'bottom', text: l.text, x, y, size: l.h, auto: l.auto }, l.kind === 'part' ? { ref: l.ref } : {}, l.kind === 'text' ? { index: l.i } : {}, l.overPads ? { covers_pads: true } : {}); }));
+    return ['F', 'B'].flatMap(side => silkLabels(side).map(l => { const [x, y] = labelCentre(l); return Object.assign({ kind: l.kind, side: side === 'F' ? 'top' : 'bottom', text: l.text, x, y, size: l.h, rotation: l.rot || 0, auto: l.auto }, l.kind === 'part' ? { ref: l.ref } : {}, l.kind === 'text' ? { index: l.i } : {}, l.overPads ? { covers_pads: true } : {}); }));
   }
   function gerbers() {
     const S = Model.S, idx = Model.pinIndex(), cs = placed(), Hb = S.board.h;

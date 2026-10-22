@@ -347,13 +347,18 @@ const PcbView = (() => {
     if (el && el.dataset.k === 'pour') { ui.sel = null; ui.item = { k: 'pour', i: +el.dataset.i }; ui.hlNet = (Model.S.pcb.pours[+el.dataset.i] || {}).net; ui.onSelect(null); render(); pan = { x: e.clientX, y: e.clientY }; return; }
     if (el && el.dataset.k === 'h') { const h = Model.S.pcb.holes[+el.dataset.i]; ui.sel = null; ui.item = { k: 'h', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); drag = { kind: 'hole', i: +el.dataset.i, ox: pt.x - h.x, oy: pt.y - h.y, moved: false }; render(); return; }
     if (el && el.dataset.k === 'v') { const v = Model.S.pcb.vias[+el.dataset.i]; selectItem({ k: 'v', i: +el.dataset.i }); drag = { kind: 'via', i: +el.dataset.i, ox: pt.x - v.x, oy: pt.y - v.y, moved: false }; return; }
+    if (el && el.dataset.k === 'lsize') {
+      const cx = +el.dataset.cx, cy = +el.dataset.cy;
+      drag = { kind: 'lsize', lk: el.dataset.lk, ref: el.dataset.lref, i: +el.dataset.i, cx, cy, h0: +el.dataset.h, d0: Math.max(0.2, Math.hypot(pt.x - cx, pt.y - cy)), moved: false }; return;
+    }
     if (el && el.dataset.k === 'lbl') {
       const lk = el.dataset.lk, cx = +el.dataset.cx, cy = +el.dataset.cy;
-      if (lk === 'part') { const c = Model.comp(el.dataset.lref); ui.item = null; ui.multi = new Set([c.ref]); ui.sel = c.ref; ui.hlNet = null; ui.onSelect(c.ref); }
+      if (lk === 'part') { const c = Model.comp(el.dataset.lref); ui.item = null; ui.multi = new Set([c.ref]); ui.sel = c.ref; ui.labelOf = c.ref; ui.hlNet = null; ui.onSelect(c.ref); }
       else { ui.sel = null; ui.multi = new Set(); ui.hlNet = null; ui.item = lk === 'board' ? { k: 'blbl' } : { k: 'txt', i: +el.dataset.i }; ui.onSelect(null); }
       drag = { kind: 'label', lk, ref: el.dataset.lref, i: +el.dataset.i, ox: pt.x - cx, oy: pt.y - cy, moved: false }; render(); return;
     }
     const ref = el && (el.dataset.ref || el.dataset.pref);
+    ui.labelOf = null;   // clicking anything but a label: R / + / − act on parts again
     if (ref) {
       const c = Model.comp(ref); ui.item = null;
       if (e.shiftKey || e.ctrlKey || e.metaKey) { // add to / remove from the selection
@@ -370,6 +375,15 @@ const PcbView = (() => {
     ui.item = null; ui.hlNet = null; ui.onSelect(ui.sel); render();
     ui.box = { x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y, add: keep }; drawBox();
   }
+  // the silkscreen text that is selected: a free text, the board name, or (with a part selected) that part's label
+  function selectedLabel() {
+    if (ui.item && ui.item.k === 'txt') return { lk: 'text', i: ui.item.i };
+    if (ui.item && ui.item.k === 'blbl') return { lk: 'board' };
+    if (ui.labelOf && !ui.item && ui.sel === ui.labelOf) return { lk: 'part', ref: ui.sel };
+    return null;
+  }
+  const labelSelected = l => { const s = selectedLabel(); return !!s && s.lk === l.kind && (l.kind === 'part' ? s.ref === l.ref : l.kind === 'text' ? s.i === l.i : true); };
+  function setLabel(t, o) { if (t.lk === 'part') Pcb.setSilkLabel(t.ref, o); else if (t.lk === 'board') Pcb.setSilkLabel('board', o); else Pcb.updateText(t.i, o); }
   function selectItem(it) {
     ui.sel = null; ui.item = it;
     const S = Model.S; ui.hlNet = it.k === 'v' ? S.pcb.vias[it.i].net : S.pcb.traces[it.i].net;
@@ -409,6 +423,10 @@ const PcbView = (() => {
       } else if (drag.kind === 'hole') {
         const h = Model.S.pcb.holes[drag.i], nx = +snapG(pt.x - drag.ox).toFixed(3), ny = +snapG(pt.y - drag.oy).toFixed(3);
         if (nx !== h.x || ny !== h.y) { if (!drag.moved) { Model.begin(); drag.moved = true; } h.x = nx; h.y = ny; h.auto = false; Model.emit('move'); }
+      } else if (drag.kind === 'lsize') {
+        const h = Math.max(0.6, Math.min(10, Math.round(drag.h0 * Math.hypot(pt.x - drag.cx, pt.y - drag.cy) / drag.d0 * 10) / 10));
+        if (!drag.moved) { Model.begin(); drag.moved = true; }
+        setLabel(drag, { size: h }); Model.emit('move');
       } else if (drag.kind === 'label') {
         const nx = +snapG(pt.x - drag.ox).toFixed(3), ny = +snapG(pt.y - drag.oy).toFixed(3);
         if (!drag.moved) { Model.begin(); drag.moved = true; }
@@ -470,6 +488,12 @@ const PcbView = (() => {
     if (k === 'Backspace' && ui.poly) { ui.poly.pts.pop(); if (!ui.poly.pts.length) ui.poly = null; renderLive(); return true; }
     if (k === 'Escape') { if (ui.route) finishRoute(); else if (ui.measure) { ui.measure = null; render(); } else if (ui.tool !== 'select') setTool('select'); else { ui.sel = null; ui.item = null; ui.hlNet = null; ui.onSelect(null); render(); } return true; }
     if ((k === 'Delete' || k === 'Backspace') && ui.item) { deleteItem(); return true; }
+    const lt = selectedLabel();
+    if (lt && (k === 'r' || k === '+' || k === '=' || k === '-')) {
+      const l = Pcb.silkInfo().find(x => x.kind === lt.lk && (lt.lk === 'part' ? x.ref === lt.ref : lt.lk === 'text' ? x.index === lt.i : true));
+      if (l) Model.mutate(() => setLabel(lt, k === 'r' ? { rotation: ((l.rotation || 0) + (e.shiftKey ? 270 : 90)) % 360 } : { size: Math.max(0.6, Math.round((l.size + (k === '-' ? -0.2 : 0.2)) * 10) / 10) }));
+      return true;
+    }
     if (k === 'r' && selected().length) { rotate(); return true; }
     if ((k === 'Delete' || k === 'Backspace') && selected().length) { del(); return true; }
     if ((k === '+' || k === '=' || k === '-') && ui.tool === 'track') { const w = Math.max(0.05, +((ui.width || curWidth(ui.route && ui.route.net)) + (k === '-' ? -0.05 : 0.05)).toFixed(3)); ui.width = w; $('#pWidth').value = w; if (ui.route) ui.route.w = w; renderLive(); coord(); return true; }
@@ -559,12 +583,16 @@ const PcbView = (() => {
       out.push(`<rect x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="${col(sl)}" stroke-width="0.15" pointer-events="none"/>`);
     }
     // silkscreen text exactly as exported (part labels, board name, free text); drag to move, red = covers pads
+    const lblHits = [];
     for (const [side, sl] of [['F', 'FS'], ['B', 'BS']]) {
       if (!vis(sl)) continue;
       for (const l of Pcb.silkLabels(side)) {
-        const r = l.rect, [cx, cy] = Pcb.labelCentre(l), on = (l.kind === 'part' && ui.sel === l.ref && !ui.item) || (ui.item && ((ui.item.k === 'txt' && l.kind === 'text' && ui.item.i === l.i) || (ui.item.k === 'blbl' && l.kind === 'board')));
+        const r = l.rect, [cx, cy] = Pcb.labelCentre(l), on = labelSelected(l);
         out.push(`<path d="${l.lines.map(pl => 'M' + pl.map(q => q.join(' ')).join('L')).join('')}" fill="none" stroke="${col(sl)}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>`);
-        out.push(`<rect class="lblhit${on ? ' on' : ''}${l.overPads ? ' bad' : ''}" data-k="lbl" data-lk="${l.kind}" data-lref="${esc(l.ref || '')}" data-i="${l.i != null ? l.i : ''}" data-cx="${cx}" data-cy="${cy}" x="${r[0]}" y="${r[1]}" width="${r[2] - r[0]}" height="${r[3] - r[1]}"><title>${esc(l.kind === 'part' ? l.ref + ' label' : l.kind === 'board' ? 'Board name' : 'Text')}${l.overPads ? ' — covers pads, move it' : ''} · drag to move</title></rect>`);
+        const data = `data-lk="${l.kind}" data-lref="${esc(l.ref || '')}" data-i="${l.i != null ? l.i : ''}" data-cx="${cx}" data-cy="${cy}" data-h="${l.h}"`;
+        lblHits.push(`<rect class="lblhit${on ? ' on' : ''}${l.overPads ? ' bad' : ''}" data-k="lbl" ${data} x="${r[0]}" y="${r[1]}" width="${r[2] - r[0]}" height="${r[3] - r[1]}"><title>${esc(l.kind === 'part' ? l.ref + ' label' : l.kind === 'board' ? 'Board name' : 'Text')}${l.overPads ? ' — covers pads, move it' : ''} · drag to move · R rotates · + / − size</title></rect>`);
+        // resize handle on the selected text: drag it away from / towards the centre
+        if (on) { const hs = Math.max(0.35, 7 / vp.s); lblHits.push(`<rect class="lblsize" data-k="lsize" ${data} x="${r[2] - hs / 2}" y="${r[1] - hs / 2}" width="${hs}" height="${hs}"><title>Drag to resize</title></rect>`); }
       }
     }
     if (vis('OL')) out.push(`<path d="${bpath}" fill="none" stroke="${col('OL')}" stroke-width="0.15" pointer-events="none"/>`);
@@ -573,10 +601,11 @@ const PcbView = (() => {
     // selection outlines
     for (const r of new Set([...ui.multi, ...(ui.sel ? [ui.sel] : [])])) { const c = Model.comp(r); if (c && c.pcb) { const b = Pcb.fpBox(c, 0.2); out.push(`<rect class="selbox" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); } }
     if (ui.item && ui.item.k === 'h') { const h = (S.pcb.holes || [])[ui.item.i]; if (h) out.push(`<circle class="selbox" cx="${h.x}" cy="${h.y}" r="${h.d / 2 + 0.4}"/>`); }
-    if (ui.item && ui.item.k !== 'pour' && ui.item.k !== 'h') {
+    if (ui.item && ['v', 't', 'T'].includes(ui.item.k)) {
       if (ui.item.k === 'v') { const v = S.pcb.vias[ui.item.i]; if (v) out.push(`<circle class="selbox" cx="${v.x}" cy="${v.y}" r="${v.d / 2 + 0.15}"/>`); }
       else { const t = S.pcb.traces[ui.item.i]; if (t) { const pts = ui.item.k === 'T' ? t.pts : [t.pts[ui.item.s - 1], t.pts[ui.item.s]]; out.push(`<polyline class="selline" points="${pts.map(p => p.join(',')).join(' ')}" stroke-width="${t.w + 0.2}"/>`); const a = pts[0], b = pts[pts.length - 1], fs = Math.min(1.2, Math.max(0.5, 14 / (vp.s || 10))); if (t.net) out.push(`<text class="netlabel-pcb" x="${(a[0] + b[0]) / 2}" y="${(a[1] + b[1]) / 2 - t.w / 2 - fs * 0.4}" text-anchor="middle" style="font-size:${fs}px">${esc(t.net)} · ${t.w} mm</text>`); } }
     }
+    out.push(...lblHits);   // text grab areas on top of everything (DRC marks, selection outlines)
     out.push('<g id="pcbLive"></g>');
     world.innerHTML = out.join('');
     renderLiveLayer();
@@ -643,12 +672,13 @@ const PcbView = (() => {
       el.innerHTML = `<div class="ph">Silkscreen text</div>
         <label>Text<input id="ptT" value="${esc(t.text)}"></label>
         <label>Size (mm)<input id="ptH" type="number" step="0.1" min="0.6" value="${t.h}"></label>
+        <label>Rotation (°, counter-clockwise)<input id="ptR" type="number" step="15" value="${t.rot || 0}"></label>
         <label>Side<select id="ptS"><option value="F" ${t.side !== 'B' ? 'selected' : ''}>Top</option><option value="B" ${t.side === 'B' ? 'selected' : ''}>Bottom (mirrored)</option></select></label>
         <label>X (mm)<input id="ptX" type="number" step="${ui.grid}" value="${t.x}"></label><label>Y (mm)<input id="ptY" type="number" step="${ui.grid}" value="${t.y}"></label>
-        <div class="muted small">Drag the text on the board to move it. 1 mm is the smallest size JLCPCB prints clearly.</div>
+        <div class="muted small">Drag the text to move it, drag its corner square to resize · R rotates 90° · + / − change the size. 1 mm is the smallest size JLCPCB prints clearly.</div>
         <div class="row"><button id="ppDel" class="danger">Delete text (Del)</button></div>`;
       const upd = o => Model.mutate(() => Pcb.updateText(it.i, o));
-      $('#ptT').onchange = e => upd({ text: e.target.value }); $('#ptH').onchange = e => upd({ size: +e.target.value }); $('#ptS').onchange = e => upd({ side: e.target.value });
+      $('#ptT').onchange = e => upd({ text: e.target.value }); $('#ptH').onchange = e => upd({ size: +e.target.value }); $('#ptR').onchange = e => upd({ rotation: +e.target.value || 0 }); $('#ptS').onchange = e => upd({ side: e.target.value });
       $('#ptX').onchange = e => upd({ x: +e.target.value }); $('#ptY').onchange = e => upd({ y: +e.target.value });
       $('#ppDel').onclick = deleteItem;
       return true;
@@ -658,12 +688,13 @@ const PcbView = (() => {
       el.innerHTML = `<div class="ph">Board name on the silkscreen</div>
         <label>Text<input id="pbT" value="${esc(L.text != null ? L.text : '')}" placeholder="${esc(S.name || '')}"></label>
         <label>Size (mm)<input id="pbH" type="number" step="0.1" min="0.6" value="${L.h || ''}" placeholder="1.2"></label>
+        <label>Rotation (°)<input id="pbR" type="number" step="15" value="${L.rot || 0}"></label>
         <label class="chk"><input type="checkbox" id="pbHide" ${L.hide ? 'checked' : ''}> Hide</label>
         <div class="row"><button id="pbAuto">Automatic position</button></div>
         <div class="muted small">Empty text = the project name. Drag it on the board to move it.</div>`;
       const upd = o => Model.mutate(() => Pcb.setSilkLabel('board', o));
       $('#pbT').onchange = e => upd({ text: e.target.value }); $('#pbH').onchange = e => upd({ size: +e.target.value || 1.2 }); $('#pbHide').onchange = e => upd({ hidden: e.target.checked });
-      $('#pbAuto').onclick = () => upd({ auto: true });
+      $('#pbAuto').onclick = () => upd({ auto: true }); $('#pbR').onchange = e => upd({ rotation: +e.target.value || 0 });
       return true;
     }
     if (it.k === 'h') {

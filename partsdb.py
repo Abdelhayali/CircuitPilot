@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import archive
 
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts.db")
+DB_PATH = os.path.join(os.environ.get("CP_DATA_DIR") or os.path.dirname(os.path.abspath(__file__)), "parts.db")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CircuitPilot"
 U = 0.254  # library unit (10 mil) in mm
 SOURCE = "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)"
@@ -167,7 +167,7 @@ def search(q, limit=20):
     q = (q or "").strip()
     if not q:
         return {"source": "none", "results": []}
-    limit = max(1, min(int(limit or 20), 50))
+    limit = max(1, min(int(limit or 20), 100))
     ck = (q.lower(), limit)
     hit = _recent.get(ck)
     if hit and time.time() - hit[0] < CACHE_TTL:

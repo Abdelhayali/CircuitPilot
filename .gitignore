@@ -12,3 +12,11 @@ jlcapi-keys.json
 
 # downloaded parts archives (Settings → Parts archives)
 archive/
+
+# Windows app build output (desktop/build_windows.py)
+build/
+dist/
+
+# built and published by .github/workflows/pages.yml
+data/parts-archive.tsv.gz
+data/parts-archive.json

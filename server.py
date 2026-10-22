@@ -217,6 +217,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 out = partsdb.stats()
             elif path == "/api/parts/archive":
                 out = archive.status()
+            elif path == "/api/parts/claude-desktop":
+                import desktop_link
+                out = desktop_link.status()
             elif path.startswith("/api/parts/get/"):
                 out = partsdb.get_part(path.rsplit("/", 1)[1])
             else:
@@ -228,6 +231,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        if path == "/api/parts/claude-desktop/connect":   # add CircuitPilot to Claude Desktop's MCP servers
+            if not self._authed():
+                return self._send(401, b'{"error":"login required"}', "application/json")
+            import desktop_link
+            try:
+                return self._send(200, json.dumps(desktop_link.connect()).encode(), "application/json")
+            except Exception as e:
+                return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
         if path == "/api/parts/archive/download":   # start downloading a parts archive (progress: GET /api/parts/archive)
             if not self._authed():
                 return self._send(401, b'{"error":"login required"}', "application/json")
@@ -423,6 +434,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
 
+def run(port=5173, allow_ports="8080", password=None, bind="", ready=None):
+    """start serving (blocks). The Windows app calls this from a thread with bind="127.0.0.1"."""
+    global ALLOWED_PORTS, PASSWORD
+    ALLOWED_PORTS = {int(p) for p in str(allow_ports).split(",") if str(p).strip()}
+    PASSWORD = password or None
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    srv = http.server.ThreadingHTTPServer((bind, port), Handler)
+    print(f"CircuitPilot on http://{bind or '0.0.0.0'}:{port}  proxy ports: {sorted(ALLOWED_PORTS)}  "
+          f"password: {'on' if PASSWORD else 'off'}", flush=True)
+    if ready:
+        ready(srv)
+    srv.serve_forever()
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="CircuitPilot server")
     ap.add_argument("port", nargs="?", type=int, default=5173)
@@ -430,12 +455,7 @@ if __name__ == "__main__":
     ap.add_argument("--password", default=os.environ.get("CP_PASSWORD"), help="require this password (or env CP_PASSWORD)")
     ap.add_argument("--password-file", help="read the password from this file")
     a = ap.parse_args()
-    ALLOWED_PORTS = {int(p) for p in a.allow_ports.split(",") if p.strip()}
     if a.password_file:
         with open(a.password_file, encoding="utf-8") as f:
             a.password = f.read().strip()
-    PASSWORD = a.password or None
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    print(f"CircuitPilot on http://0.0.0.0:{a.port}  proxy ports: {sorted(ALLOWED_PORTS)}  "
-          f"password: {'on' if PASSWORD else 'off'}", flush=True)
-    http.server.ThreadingHTTPServer(("", a.port), Handler).serve_forever()
+    run(a.port, a.allow_ports, a.password)

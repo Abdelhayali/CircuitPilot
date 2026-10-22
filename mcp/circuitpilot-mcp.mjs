@@ -56,10 +56,16 @@ function ensureApp() {
   if (!appReady) appReady = (async () => {
     if (await ping()) return true;
     if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(BASE)) return false;   // a remote app cannot be started from here
-    const args = ['server.py', new URL(BASE).port || '5173', '--allow-ports', '8080'];
-    if (fs.existsSync(path.join(ROOT, 'access-password.txt'))) args.push('--password-file', 'access-password.txt');
-    try { spawn(process.env.CP_PYTHON || 'python', args, { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true }).unref(); log('started server.py'); }
-    catch (e) { log('could not start server.py:', e.message); return false; }
+    const port = new URL(BASE).port || '5173';
+    try {
+      if (process.env.CP_APP_EXE) {   // the Windows app: CircuitPilot.exe serves the app (and opens its window when the user wants it)
+        spawn(process.env.CP_APP_EXE, ['--server-only', '--port', port], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); log('started CircuitPilot.exe');
+      } else {
+        const args = ['server.py', port, '--allow-ports', '8080'];
+        if (fs.existsSync(path.join(ROOT, 'access-password.txt'))) args.push('--password-file', 'access-password.txt');
+        spawn(process.env.CP_PYTHON || 'python', args, { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true }).unref(); log('started server.py');
+      }
+    } catch (e) { log('could not start CircuitPilot:', e.message); return false; }
     for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 500)); if (await ping()) return true; }
     return false;
   })().then(ok => { if (!ok) appReady = null; return ok; });
@@ -70,7 +76,8 @@ function ensureApp() {
 let browserOpened = false;
 function openBrowser(url) {
   browserOpened = true;
-  const [cmd, args] = process.platform === 'win32' ? ['explorer.exe', [url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  const [cmd, args] = process.env.CP_APP_EXE ? [process.env.CP_APP_EXE, ['--open', url]]   // the Windows app's own window
+    : process.platform === 'win32' ? ['explorer.exe', [url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
   try { spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref(); } catch { }
 }
 async function showProject(id) {

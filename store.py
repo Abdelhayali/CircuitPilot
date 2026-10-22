@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects.db")
+DB_PATH = os.path.join(os.environ.get("CP_DATA_DIR") or os.path.dirname(os.path.abspath(__file__)), "projects.db")
 _lock = threading.Lock()
 KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 

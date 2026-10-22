@@ -19,7 +19,7 @@ import time
 import urllib.request
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-DIR = os.path.join(ROOT, "archive")
+DIR = os.path.join(os.environ.get("CP_DATA_DIR") or ROOT, "archive")
 BASE = "https://cdfer.github.io/jlcpcb-parts-database/"
 FILES = {
     "basic": {"name": "Basic Parts Archive", "url": BASE + "jlcpcb-components-basic-preferred.csv", "file": "basic-preferred.csv", "about": "~1.3 MB"},

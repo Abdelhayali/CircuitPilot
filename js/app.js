@@ -972,7 +972,20 @@ const App = (() => {
     $('#sMax').value = s.maxTokens; $('#sCtxWin').value = +s.contextWindow > 0 ? s.contextWindow : ''; $('#sCtx').checked = !!s.includeContext; $('#sWeb').checked = s.webAccess !== false; $('#sBrave').value = s.braveKey || ''; $('#sRelay').value = s.relayUrl || '';
     $('#presets').innerHTML = Object.entries(AI.PRESETS).map(([n, u]) => `<button data-u="${esc(u)}">${esc(n)}</button>`).join('');
     $('#modal').classList.remove('hidden');
-    archiveUi();
+    archiveUi(); claudeUi();
+  }
+  // Settings → Claude Desktop (desktop version only: writes Claude Desktop's MCP settings on this PC)
+  async function claudeUi() {
+    const box = $('#sClaude'); if (!box) return;
+    if (document.body.classList.contains('static-web')) { box.innerHTML = '<div class="muted small">Only in the desktop version (CircuitPilot.exe or server.py on your PC).</div>'; return; }
+    let st; try { st = await AI.partsApi('claude-desktop'); } catch (e) { box.innerHTML = `<div class="dberr">${esc(e.message)}</div>`; return; }
+    const state = st.connected ? (st.points_here ? '<span class="good">✓ connected to this CircuitPilot</span>' : '<span class="warn">connected to another CircuitPilot copy — Connect again to use this one</span>') : st.claude_installed ? '<span class="muted">not connected</span>' : '<span class="muted">Claude Desktop does not seem to be installed (claude.ai/download)</span>';
+    box.innerHTML = `<div class="row archrow"><div style="flex:1"><div class="small">${state}</div><div class="muted small">${st.node ? '' : 'Node.js not found — install it from nodejs.org (the Windows app includes it)'}</div></div><button id="sClaudeGo" ${st.node ? '' : 'disabled'}>${st.connected ? 'Connect again' : 'Connect'}</button></div>`;
+    $('#sClaudeGo').onclick = async () => {
+      try { const r = await AI.partsApi('claude-desktop/connect', { method: 'POST' }); toast('CircuitPilot added to Claude Desktop. ' + r.next, 12000); }
+      catch (e) { toast('Could not connect Claude Desktop: ' + e.message, 9000); }
+      claudeUi();
+    };
   }
   // Settings → Parts archives: status, download / update, progress
   let archTimer = null;
@@ -986,7 +999,7 @@ const App = (() => {
       const state = j ? (j.state === 'error' ? `<span class="bad">failed: ${esc(j.error || '')}</span>` : j.state === 'indexing' ? 'building the search index…' : `downloading ${j.total ? Math.round(100 * j.done / j.total) + '%' : (j.done / 1e6).toFixed(0) + ' MB'}…`)
         : a.present ? `<span class="good">✓ ${a.updated || ''}</span>${a.parts ? ` · ${a.parts.toLocaleString()} parts` : ''}${k === 'full' && a.indexed === false ? ' · <span class="warn">not indexed</span>' : ''}` : '<span class="muted">not downloaded</span>';
       const off = a.desktop_only ? ' disabled title="Desktop version only (server.py)"' : j && j.state !== 'error' ? ' disabled' : '';
-      return `<div class="row archrow"><div style="flex:1"><b>${esc(a.name || k)}</b> <span class="muted small">${esc(a.size_about || '')}${k === 'basic' ? ' · Basic + Preferred parts' : ' · every part in stock'}</span><div class="small">${state}</div></div><button data-arch="${k}"${off}>${a.present ? 'Update' : 'Download'}</button></div>`;
+      return `<div class="row archrow"><div style="flex:1"><b>${esc(a.name || k)}</b> <span class="muted small">${esc(a.size_about || '')}${k === 'basic' ? ' · Basic + Preferred parts only' : ' · every JLCPCB part in stock'}</span><div class="small">${state}</div></div><button data-arch="${k}"${off}>${a.present ? 'Update' : 'Download'}</button></div>`;
     }).join('');
     box.querySelectorAll('[data-arch]').forEach(b => b.onclick = async () => {
       b.disabled = true; b.textContent = 'Starting…';

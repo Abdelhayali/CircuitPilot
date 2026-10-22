@@ -202,8 +202,52 @@
     archRows = parseCsv(rec.text).map(r => Object.assign(r, { _text: [r.lcsc, 'c' + r.lcsc, r.mfr, r.package, r.manufacturer, r.description, r.category, r.subcategory].join(' ').toLowerCase() }));
     return archRows;
   }
+  // ---------- full Parts Archive (web): CircuitPilot's compact copy of every JLCPCB part in stock, published with the
+  // website by .github/workflows/pages.yml (data/parts-archive.tsv.gz, ~12 MB). Kept compressed in this browser and
+  // searched as one text: lines are "lcsc  mfr  package  manufacturer  class  stock  price  category  description",
+  // sorted Basic → Preferred → stock, so the first matches are the best ones.
+  const FULL_URL = 'data/parts-archive.tsv.gz';
+  let fullText = null, fullLoading = null;
+  async function fullArchiveText() {
+    if (fullText) return fullText;
+    if (!fullLoading) fullLoading = (async () => {
+      const rec = await dbGet('archive', 'full').catch(() => null); if (!rec) return null;
+      const t = await new Response(rec.blob.stream().pipeThrough(new DecompressionStream('gzip'))).text();
+      fullText = t; return t;
+    })().finally(() => { fullLoading = null; });
+    return fullLoading;
+  }
+  async function downloadFull() {
+    const r = await realFetch(FULL_URL, { cache: 'no-cache' }); if (!r.ok) throw httpError(502, 'Could not download the Parts Archive (' + r.status + ')');
+    const blob = await r.blob(), meta = await realFetch('data/parts-archive.json', { cache: 'no-cache' }).then(x => x.json()).catch(() => ({}));
+    await dbPut('archive', { kind: 'full', blob, updated: Date.now(), parts: meta.parts || null, built: meta.built || '' });
+    fullText = null; const t = await fullArchiveText();
+    return { started: true, done: true, parts: meta.parts || (t.match(/\n/g) || []).length };
+  }
+  const esc = w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  function scanFull(text, words, limit) {
+    const out = [], codes = words.filter(w => /^c\d{1,10}$/.test(w));
+    if (codes.length && codes.length === words.length) {   // LCSC numbers: the line that starts with the number
+      for (const c of codes) { const i = text.startsWith(c.slice(1) + '\t') ? 0 : text.indexOf('\n' + c.slice(1) + '\t'); if (i >= 0) { const st = i ? i + 1 : 0, e = text.indexOf('\n', st); out.push(text.slice(st, e < 0 ? undefined : e)); } }
+      return out;
+    }
+    const anchor = words.reduce((a, b) => (b.length > a.length ? b : a)), re = new RegExp(esc(anchor), 'gi');
+    let m;
+    while (out.length < limit && (m = re.exec(text))) {
+      const st = text.lastIndexOf('\n', m.index) + 1, e = text.indexOf('\n', m.index), line = text.slice(st, e < 0 ? undefined : e);
+      const low = ('c' + line).toLowerCase();
+      if (words.every(w => low.includes(w))) out.push(line);
+      re.lastIndex = e < 0 ? text.length : e + 1;
+    }
+    return out;
+  }
+  function fullRow(line) {
+    const [lcsc, mfr, pkg, man, cls, stock, price, cat, desc] = line.split('\t');
+    return { lcsc: 'C' + lcsc, mfr_part: mfr, brand: man, package: pkg, category: cat || '', description: desc || '', stock: +stock || 0,
+      basic: cls === 'b' ? 1 : 0, preferred: cls === 'p' ? 1 : 0, price: price ? +price : null, datasheet: '', sources: ['archive'] };
+  }
   async function archiveDownload(kind) {
-    if (kind !== 'basic') throw httpError(400, 'The full Parts Archive (~360 MB) is only available in the desktop version (server.py). The web version keeps the Basic Parts Archive.');
+    if (kind === 'full') return downloadFull();
     const r = await realFetch(ARCH_URL); if (!r.ok) throw httpError(502, 'Could not download the Basic Parts Archive (' + r.status + ')');
     const text = await r.text(); await dbPut('archive', { kind: 'basic', text, updated: Date.now() }); archRows = null;
     return { started: true, done: true, parts: (await archiveRows()).length };
@@ -211,12 +255,15 @@
   async function archiveStatus() {
     const rec = await dbGet('archive', 'basic').catch(() => null);
     return { basic: Object.assign({ name: 'Basic Parts Archive', size_about: '~1.3 MB', present: !!rec }, rec ? { size: rec.text.length, updated: new Date(rec.updated).toISOString().slice(0, 16).replace('T', ' '), parts: (await archiveRows()).length } : {}),
-      full: { name: 'Parts Archive', size_about: '~360 MB', present: false, desktop_only: true } };
+      full: await (async () => { const f = await dbGet('archive', 'full').catch(() => null);
+        return Object.assign({ name: 'Parts Archive', size_about: '~12 MB download' }, f ? { present: true, updated: (f.built || new Date(f.updated).toISOString().slice(0, 16).replace('T', ' ')), parts: f.parts } : { present: false }); })() };
   }
   const priceOf = s => { const m = /^\s*\d+-\d*:([\d.]+)/.exec(s || ''); return m ? +m[1] : null; };
   async function archiveSearch(q, limit) {
-    const rows = await archiveRows(); if (!rows) return [];
     const words = String(q || '').toLowerCase().split(/[\s,]+/).filter(Boolean); if (!words.length) return [];
+    const full = await fullArchiveText().catch(() => null);
+    if (full) return scanFull(full, words, limit).map(fullRow);   // the full archive covers the basic one
+    const rows = await archiveRows(); if (!rows) return [];
     return rows.filter(r => words.every(w => r._text.includes(w))).sort((a, b) => (a.library_type !== 'base') - (b.library_type !== 'base') || (+b.stock || 0) - (+a.stock || 0)).slice(0, limit)
       .map(r => ({ lcsc: 'C' + r.lcsc, mfr_part: r.mfr, brand: r.manufacturer, package: r.package, category: [r.category, r.subcategory].filter(Boolean).join(' / '), description: String(r.description || '').slice(0, 300), stock: +r.stock || 0,
         basic: r.library_type === 'base' ? 1 : 0, preferred: +r.preferred ? 1 : 0, price: priceOf(r.price), datasheet: r.datasheet, sources: ['archive-basic'] }));
@@ -226,7 +273,7 @@
   const SLOW_SOURCE = 3500, recent = new Map();   // a database that has not answered in 3.5 s is skipped; repeats come from memory for 10 min
   async function partsSearch(q, limit) {
     q = String(q || '').trim(); if (!q) return { source: 'none', results: [] };
-    limit = Math.max(1, Math.min(+limit || 20, 50));
+    limit = Math.max(1, Math.min(+limit || 20, 100));
     needRelay();
     const ck = q.toLowerCase() + '|' + limit, hit = recent.get(ck);
     if (hit && Date.now() - hit.t < 600000) return hit.out;

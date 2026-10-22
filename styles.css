@@ -509,3 +509,5 @@ body:not(.static-web) #modal .webonly { display: none; }
 .archlist { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .archrow { align-items: center; gap: 10px; }
 .lp-tag.lp-archive, .lp-tag.lp-archive-basic { color: var(--warn); }
+
+.static-web .desktoponly { opacity: .7; }

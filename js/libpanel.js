@@ -6,7 +6,7 @@ const LibPanel = (() => {
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const SOURCES = [['all', 'All'], ['jlcpcb', 'JLCPCB'], ['easyeda', 'EasyEDA lib'], ['community', 'Community'], ['archive', 'Archive'], ['open', 'KiCad / open libs'], ['mine', 'My Library'], ['builtin', 'Built-in']];
-  let el = null, rows = [], sel = -1, filter = 'all', timer = null, seq = 0, loading = false, error = '';
+  let el = null, rows = [], sel = -1, filter = 'all', timer = null, seq = 0, loading = false, error = '', lim = 60, full = false;
   const models = new Map();   // preview cache: row id -> part definition (or a promise)
 
   // ---------- drag & drop: rows here and in the left palette carry { kind, id } ----------
@@ -26,7 +26,7 @@ const LibPanel = (() => {
           <div class="row"><button id="lpPlace" class="primary" disabled>Place</button><a id="lpDs" class="hidden" target="_blank" rel="noopener">Datasheet ↗</a></div></div></div>`;
     document.body.appendChild(el);
     $('#lpClose').onclick = close;
-    $('#lpQ').addEventListener('input', () => search(150));
+    $('#lpQ').addEventListener('input', () => { lim = 60; search(150); });
     $('#lpQ').addEventListener('keydown', e => {
       if (e.key === 'Escape') close();
       else if (e.key === 'Enter') { if (sel >= 0) place(rows[sel]); else search(0); }
@@ -72,10 +72,10 @@ const LibPanel = (() => {
       if (q.length < 2) return;
       const openP = OpenLib.search(q, 30).catch(() => []);
       try {
-        const j = await AI.partsApi('search?q=' + encodeURIComponent(q) + '&limit=40');
+        const j = await AI.partsApi('search?q=' + encodeURIComponent(q) + '&limit=' + lim); full = j.results.length >= lim - 5;
         if (my !== seq) return;
         rows = local.concat(j.results.map(r => ({ kind: 'db', id: r.lcsc, src: (r.sources || ['jlcpcb'])[0], name: r.mfr_part || r.lcsc, brand: r.brand, pkg: r.footprint || r.package || '', code: /^EE-/.test(r.lcsc) ? (r.supplier_part || '') : r.lcsc,
-          stock: r.stock, price: r.price, basic: r.basic, desc: r.description, note: r.note, author: r.author, datasheet: r.datasheet })));
+          stock: r.stock, price: r.price, basic: r.basic, desc: r.description, note: r.note, author: r.author, datasheet: r.datasheet, srcs: r.sources || [] })));
         if (j.error) error = j.source === 'local' ? 'Offline: showing cached parts' : j.error;
       } catch (e) { if (my === seq) error = e.message; }
       const open = await openP; if (my !== seq) return;
@@ -84,7 +84,8 @@ const LibPanel = (() => {
       const v = visible(); if (v.length) select(v[0]);
     }, delay);
   }
-  const visible = () => rows.map((r, i) => i).filter(i => filter === 'all' || rows[i].src === filter || (filter === 'archive' && /^archive/.test(rows[i].src)));
+  // a part found in several sources is listed once but counts under each of their tabs
+  const visible = () => rows.map((r, i) => i).filter(i => { const r = rows[i], all = [r.src].concat(r.srcs || []); return filter === 'all' || all.includes(filter) || (filter === 'archive' && all.some(s => /^archive/.test(s))); });
   const SRC_NAME = { archive: 'Archive', 'archive-basic': 'Archive', jlcpcb: 'JLCPCB', easyeda: 'EasyEDA lib', community: 'Community', open: 'Open lib', mine: 'My Library', builtin: 'Built-in' };
   function renderRows() {
     if (!el) return;
@@ -97,7 +98,9 @@ const LibPanel = (() => {
         <td>${r.price != null ? '$' + (+r.price).toFixed(r.price < 0.1 ? 4 : 2) : ''}</td></tr>`;
     }).join('');
     $('#lpCount').textContent = rows.length ? `${v.length} of ${rows.length} parts${loading ? '…' : ''}` : '';
-    $('#lpMsg').innerHTML = loading ? 'Searching JLCPCB, the EasyEDA library and the community library… <span class="spin"></span>' : error ? `<span class="bad">${esc(error)}</span>` : !v.length && $('#lpQ').value.trim().length >= 2 ? 'No parts with a footprint found here. Try another source tab or fewer words.' : '';
+    const more = !loading && full && lim < 100 ? ' <button id="lpMore">More results</button>' : '';
+    $('#lpMsg').innerHTML = (loading ? 'Searching JLCPCB, the EasyEDA library and the community library… <span class="spin"></span>' : error ? `<span class="bad">${esc(error)}</span>` : !v.length && $('#lpQ').value.trim().length >= 2 ? (filter === 'archive' ? 'Nothing in your parts archive. The Basic Parts Archive only has Basic + Preferred parts: download the full Parts Archive in ⚙ Settings → Parts archives.' : 'No parts with a footprint found here. Try another source tab or fewer words.') : '') + more;
+    const mb = $('#lpMore'); if (mb) mb.onclick = () => { lim = 100; search(0); };
   }
 
   // ---------- preview: symbol + footprint ----------

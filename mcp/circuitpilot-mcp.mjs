@@ -29,10 +29,12 @@ const ctx = vm.createContext({
   console: { log, info: log, warn: log, error: log }, fetch, TextEncoder, TextDecoder, Blob, URL, URLSearchParams,
   setTimeout, clearTimeout, AbortController, AbortSignal,
 });
-for (const [file, name] of [['lib.js', 'Lib'], ['model.js', 'Model'], ['pcb.js', 'Pcb'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['engine.js', 'Engine']]) {
+for (const [file, name] of [['lib.js', 'Lib'], ['model.js', 'Model'], ['pcb.js', 'Pcb'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['kicad.js', 'KiCad'], ['openlib.js', 'OpenLib'], ['engine.js', 'Engine']]) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', file), 'utf8') + `\n;globalThis.${name} = ${name};`, ctx, { filename: file });
 }
 const { Engine, Model, Pcb } = ctx;
+// open-library part list straight from the app folder
+ctx.OpenLib.readIndex = async () => fs.readFileSync(path.join(ROOT, 'data', 'open-parts.txt'), 'utf8');
 const headers = PASSWORD ? { authorization: 'Bearer ' + PASSWORD } : {};
 let myLib = [];
 Object.assign(Engine.env, {

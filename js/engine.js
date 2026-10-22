@@ -28,7 +28,7 @@ const Engine = (() => {
   const pinDefs = { type: 'array', items: { type: 'object', required: ['num', 'name'], properties: { num: { type: 'string' }, name: { type: 'string' }, side: { type: 'string', enum: ['L', 'R', 'T', 'B'], description: 'Symbol side (default alternates L/R)' } } } };
   const fpSpec = { description: 'Footprint: a generator name (' + Lib.FOOTPRINT_PATTERNS.join(', ') + ') or {"pads":[{"num","x","y","w","h","shape":"rect|round|oval","drill"?}]} in mm, centred on the part.', anyOf: [{ type: 'string' }, { type: 'object', properties: { name: { type: 'string' }, pads: { type: 'array', items: { type: 'object' } } } }] };
   const TOOLS = [
-    { name: 'search_parts', ro: true, description: 'Search real components by part number or keywords, e.g. "ESP32-C3", "AMS1117 3.3", "USB-C 16pin", "10k 0603". Searches the JLCPCB catalogue (stock, price, Basic/Extended), the EasyEDA official library (about 1.6 million LCSC parts incl. modules), the EasyEDA community library (user-made parts, keys EE-…, placed as custom parts: check their footprint) and My Library at once; only parts that have a footprint are returned. Returns LCSC codes (Cxxxx) / library keys. Prefer in-stock JLCPCB parts and Basic parts; source "easyeda" parts have no stock data (C99… codes are library placeholders, not orderable).', input_schema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, limit: { type: 'number', description: 'default 10, max 30' } } } },
+    { name: 'search_parts', ro: true, description: 'Search real components by part number or keywords, e.g. "ESP32-C3", "AMS1117 3.3", "USB-C 16pin", "10k 0603". Searches the JLCPCB catalogue (stock, price, Basic/Extended), the EasyEDA official library (about 1.6 million LCSC parts incl. modules), the EasyEDA community library (user-made parts, keys EE-…), the open KiCad-format libraries — KiCad official, SparkFun, Digi-Key (keys OL:…; custom parts without LCSC number, check the footprint) — and My Library at once; only parts that have a footprint are returned. Returns LCSC codes (Cxxxx) / library keys. Prefer in-stock JLCPCB parts and Basic parts; source "easyeda" parts have no stock data (C99… codes are library placeholders, not orderable).', input_schema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, limit: { type: 'number', description: 'default 10, max 30' } } } },
     { name: 'get_part', ro: true, description: 'Load a database part (LCSC code) or a My Library part (key): returns its exact pin list (number:name) and PCB footprint. Call before adding it with add_components {lcsc}.', input_schema: { type: 'object', required: ['lcsc'], properties: { lcsc: { type: 'string', description: 'LCSC code (e.g. C2838502) or library key (LIB_...)' } } } },
     { name: 'get_design', ro: true, description: 'Return the full current design: every component (type, value, position, footprint, pins as num:name=net) and all nets.', input_schema: { type: 'object', properties: {} } },
     { name: 'list_parts', ro: true, description: 'List the built-in component types with their pins (number:name), default value and footprints.', input_schema: { type: 'object', properties: {} } },
@@ -113,7 +113,8 @@ const Engine = (() => {
     for (const k of [raw, up]) if (Model.S.lib[k]) return Model.S.lib[k];
     const mine = env.myLib().find(p => p.key === raw || p.key === up);
     if (mine) return mine;
-    if (!/^(C\d+|EE-[0-9A-F]{32})$/.test(up)) throw new Error(`Unknown part "${raw}" — use an LCSC code (C1234), an EasyEDA community key (EE-…) or a My Library key`);
+    if (typeof OpenLib !== 'undefined' && OpenLib.isKey(raw)) { if (!partCache[raw]) partCache[raw] = await OpenLib.load(raw).catch(e => { throw e; }); return partCache[raw]; }
+    if (!/^(C\d+|EE-[0-9A-F]{32})$/.test(up)) throw new Error(`Unknown part "${raw}" — use an LCSC code (C1234), an EasyEDA community key (EE-…), an open-library key (OL:…) or a My Library key`);
     if (!partCache[up]) partCache[up] = await partsApi('get/' + encodeURIComponent(up));
     return partCache[up];
   }
@@ -189,12 +190,15 @@ const Engine = (() => {
         const mine = env.myLib().filter(p => q.split(/\s+/).every(w => `${p.name} ${p.value} ${p.key} ${p.mfr_part || ''}`.toLowerCase().includes(w))).slice(0, 5)
           .map(p => ({ lcsc: p.key, part: p.name, package: p.footprint && p.footprint.name, source: 'my-library' }));
         let j = { results: [], source: 'none' };
+        // open KiCad-format libraries (KiCad official, SparkFun, Digi-Key): symbol + footprint, no LCSC number
+        const open = typeof OpenLib !== 'undefined' ? OpenLib.search(input.query, 6).catch(() => []) : Promise.resolve([]);
         try { j = await partsApi('search?q=' + encodeURIComponent(input.query || '') + '&limit=' + Math.min(30, +input.limit || 10)); }
-        catch (e) { if (!mine.length) throw e; }
+        catch (e) { if (!mine.length && !(await open).length) throw e; }
+        const ol = (await open).map(r => ({ lcsc: r.key, part: r.name, mpn: r.mpn || undefined, footprint: r.footprint, source: r.source, desc: r.description.slice(0, 120), note: r.sourceName + ': custom part (no LCSC number), check the footprint' }));
         const db = j.results.slice().sort((a, b) => (b.stock > 0) - (a.stock > 0)).map(r => Object.assign({ lcsc: r.lcsc, part: r.mfr_part, brand: r.brand, package: r.package, footprint: r.footprint || undefined, stock: r.stock, basic: !!r.basic, price_usd: r.price, desc: (r.description || '').slice(0, 140) },
           r.sources && !r.sources.includes('jlcpcb') ? { source: r.sources[0], note: r.note } : {}));
-        if (!mine.length && !db.length) return `No parts found for "${input.query}"` + (j.error ? ` (online search failed: ${j.error})` : '');
-        return { source: j.source, results: [...mine, ...db] };
+        if (!mine.length && !db.length && !ol.length) return `No parts found for "${input.query}"` + (j.error ? ` (online search failed: ${j.error})` : '');
+        return { source: j.source + (ol.length ? '+open' : ''), results: [...mine, ...db, ...ol] };
       }
       case 'get_part': return partSummary(await loadPart(input.lcsc || input.key));
       case 'get_design': return Model.summary();

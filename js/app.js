@@ -57,8 +57,10 @@ const App = (() => {
     if (q.trim().length < 2) { db.q = ''; db.results = []; db.error = null; renderParts(); return; }
     dbTimer = setTimeout(async () => {
       const seq = ++dbSeq; db.q = q; db.loading = true; db.error = null; renderParts();
+      const open = OpenLib.search(q, 12).catch(() => []);
       try { const j = await AI.partsApi('search?q=' + encodeURIComponent(q) + '&limit=25'); if (seq !== dbSeq) return; db.results = j.results; db.source = j.source; db.error = j.source === 'local' && j.error ? 'Offline — showing cached parts' : null; }
       catch (e) { if (seq !== dbSeq) return; db.results = []; db.error = e.message; }
+      db.open = await open; if (seq !== dbSeq) return;
       db.loading = false; renderParts();
     }, 350);
   }
@@ -116,6 +118,9 @@ const App = (() => {
       <div class="dbt"><b>${esc(r.mfr_part || r.lcsc)}</b>${r.basic ? '<span class="badge basic">Basic</span>' : ''}${lib(r) ? `<span class="badge">${r.sources.includes('community') ? 'community' : 'EasyEDA lib'}</span>` : ''}</div>
       <div class="dbs">${esc(r.package || '')}${r.brand ? ' · ' + esc(r.brand) : ''}</div>
       <div class="dbs">${r.sources && r.sources.includes('community') ? 'EasyEDA user part' : esc(r.lcsc)} · ${lib(r) ? `<span class="muted">${r.sources.includes('community') ? 'by ' + esc(r.author || 'a user') + (r.supplier_part ? ' · ' + esc(r.supplier_part) : '') : /^C99/.test(r.lcsc) ? 'not sold by LCSC' : 'stock: check LCSC'}</span>` : `<span class="${r.stock > 0 ? 'good' : 'bad'}">${(r.stock || 0).toLocaleString()} in stock</span>`}${r.price != null ? ' · $' + (+r.price).toFixed(r.price < 0.1 ? 4 : 2) : ''}</div></button>`).join('');
+    if (db.open && db.open.length) h += `<div class="pcat">Open libraries · KiCad, SparkFun, Digi-Key</div>` + db.open.map(r => `<button class="dbpart" draggable="true" data-lcsc="${esc(r.key)}" title="${esc([r.description, 'Footprint: ' + r.footprint, r.sourceName + ': custom part, no LCSC number — check the footprint'].filter(Boolean).join('\n'))}">
+      <div class="dbt"><b>${esc(r.name)}</b><span class="badge">${esc(r.source === 'kicad' ? 'KiCad' : r.source === 'sparkfun' ? 'SparkFun' : 'Digi-Key')}</span></div>
+      <div class="dbs">${esc(r.footprint.split(':').pop())}</div><div class="dbs muted">${esc((r.description || r.library).slice(0, 60))}</div></button>`).join('');
     return h;
   }
   function renderParts() {

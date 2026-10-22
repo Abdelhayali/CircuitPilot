@@ -92,6 +92,50 @@ const KiCad = (() => {
     return { name: String(root[1]), pads, body: body.map(r4), description: descr ? String(descr[1]) : '', skipped };
   }
 
-  return { index, search, load, parse };
+  // a footprint file from any URL (other KiCad-format libraries)
+  async function loadUrl(url, name) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('Could not download footprint ' + name + ' (' + r.status + ')');
+    const fp = parse(await r.text()); fp.name = name; return fp;
+  }
+
+  // ---------- symbols ----------
+  // KiCad 6+ (.kicad_sym): the named top-level symbol of a library file → { props, pins: [{ num, name, side }], extends }
+  // pin (at x y angle): angle 0 points right, so the pin sits on the left of the body (side L); 180 → R, 90 → B, 270 → T
+  function parseSymbol(text, name) {
+    const root = sexpr(text);
+    const syms = kids(root, 'symbol'), sym = syms.find(x => x[1] === name) || (syms.length === 1 ? syms[0] : null);
+    if (!sym) throw new Error('Symbol ' + name + ' not found in its library file');
+    const props = {}; for (const p of kids(sym, 'property')) props[p[1]] = p[2];
+    const ext = kid(sym, 'extends'), pins = [], seen = new Set();
+    const walk = node => {
+      for (const pin of kids(node, 'pin')) {
+        const num = String((kid(pin, 'number') || [])[1] || '').trim(), nm = String((kid(pin, 'name') || [])[1] || '').trim(), at = nums(kid(pin, 'at'));
+        if (!num || seen.has(num)) continue; seen.add(num);
+        const a = ((Math.round(at[2] || 0) % 360) + 360) % 360;
+        pins.push({ num, name: nm && nm !== '~' ? nm : num, side: a === 0 ? 'L' : a === 180 ? 'R' : a === 90 ? 'B' : 'T', type: pin[1] });
+      }
+      for (const sub of kids(node, 'symbol')) walk(sub);
+    };
+    walk(sym);
+    return { props, pins, extends: ext ? ext[1] : null };
+  }
+  // KiCad 5 (.lib + .dcm): DEF name … F0 ref … F2 "footprint" … X name num x y len orient … ENDDEF
+  function parseLegacySymbol(text, name) {
+    const re = new RegExp('^DEF\\s+' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s[\\s\\S]*?^ENDDEF', 'm'), m = re.exec(text);
+    if (!m) throw new Error('Symbol ' + name + ' not found in its library file');
+    const props = {}, pins = [], seen = new Set();
+    for (const line of m[0].split('\n')) {
+      let f;
+      if ((f = /^F(\d+)\s+"([^"]*)"(?:.*"([^"]+)")?/.exec(line))) props[{ 0: 'Reference', 1: 'Value', 2: 'Footprint', 3: 'Datasheet' }[f[1]] || f[3] || 'F' + f[1]] = f[2];
+      else if ((f = /^X\s+(\S+)\s+(\S+)\s+-?\d+\s+-?\d+\s+\d+\s+([RLUD])/.exec(line))) {
+        if (seen.has(f[2])) continue; seen.add(f[2]);
+        pins.push({ num: f[2], name: f[1] !== '~' ? f[1] : f[2], side: { R: 'L', L: 'R', U: 'B', D: 'T' }[f[3]] });
+      }
+    }
+    return { props, pins, extends: null };
+  }
+
+  return { index, search, load, loadUrl, parse, parseSymbol, parseLegacySymbol };
 })();
 if (typeof module !== 'undefined') module.exports = KiCad;

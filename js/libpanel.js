@@ -5,7 +5,7 @@
 const LibPanel = (() => {
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const SOURCES = [['all', 'All'], ['jlcpcb', 'JLCPCB'], ['easyeda', 'EasyEDA lib'], ['community', 'Community'], ['mine', 'My Library'], ['builtin', 'Built-in']];
+  const SOURCES = [['all', 'All'], ['jlcpcb', 'JLCPCB'], ['easyeda', 'EasyEDA lib'], ['community', 'Community'], ['open', 'KiCad / open libs'], ['mine', 'My Library'], ['builtin', 'Built-in']];
   let el = null, rows = [], sel = -1, filter = 'all', timer = null, seq = 0, loading = false, error = '';
   const models = new Map();   // preview cache: row id -> part definition (or a promise)
 
@@ -70,6 +70,7 @@ const LibPanel = (() => {
       for (const t of Lib.types()) { const d = Lib.type(t); if (words.length && words.every(w => `${d.name} ${t}`.toLowerCase().includes(w))) { const db = Lib.dbDefault(t, null); local.push({ kind: 'type', id: t, src: 'builtin', name: d.name, pkg: db ? db.pkg : '', code: db ? db.lcsc : '' }); } }
       rows = local; sel = -1; error = ''; loading = q.length >= 2; renderRows();
       if (q.length < 2) return;
+      const openP = OpenLib.search(q, 30).catch(() => []);
       try {
         const j = await AI.partsApi('search?q=' + encodeURIComponent(q) + '&limit=40');
         if (my !== seq) return;
@@ -77,13 +78,14 @@ const LibPanel = (() => {
           stock: r.stock, price: r.price, basic: r.basic, desc: r.description, note: r.note, author: r.author, datasheet: r.datasheet })));
         if (j.error) error = j.source === 'local' ? 'Offline: showing cached parts' : j.error;
       } catch (e) { if (my === seq) error = e.message; }
-      if (my !== seq) return;
+      const open = await openP; if (my !== seq) return;
+      rows = rows.concat(open.map(r => ({ kind: 'db', id: r.key, src: 'open', name: r.name, brand: r.sourceName, pkg: r.footprint.split(':').pop(), code: r.mpn || '', desc: r.description, note: r.sourceName + ': custom part (no LCSC number) — check the footprint' })));
       loading = false; renderRows();
       const v = visible(); if (v.length) select(v[0]);
     }, delay);
   }
   const visible = () => rows.map((r, i) => i).filter(i => filter === 'all' || rows[i].src === filter);
-  const SRC_NAME = { jlcpcb: 'JLCPCB', easyeda: 'EasyEDA lib', community: 'Community', mine: 'My Library', builtin: 'Built-in' };
+  const SRC_NAME = { jlcpcb: 'JLCPCB', easyeda: 'EasyEDA lib', community: 'Community', open: 'Open lib', mine: 'My Library', builtin: 'Built-in' };
   function renderRows() {
     if (!el) return;
     const v = visible();

@@ -47,17 +47,31 @@
   const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
 
   // ---------- IndexedDB ----------
-  let dbp = null;
-  function db() {
-    if (!dbp) dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('circuitpilot', 3);
-      r.onupgradeneeded = () => { const d = r.result; for (const [s, k] of [['projects', 'id'], ['library', 'key'], ['parts', 'lcsc'], ['models', 'lcsc'], ['footprints', 'lcsc'], ['archive', 'kind']]) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: k }); };
-      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error || new Error('Browser storage is unavailable'));
-    });
-    return dbp;
+  // Opened at whatever version exists (never forcing an upgrade an older CircuitPilot tab could block), upgraded only
+  // when a store is missing; a blocked or broken open gives up after a few seconds instead of hanging every request.
+  // The parts archive lives in its own database, so adding it never needs an upgrade here.
+  const DBS = { circuitpilot: [['projects', 'id'], ['library', 'key'], ['parts', 'lcsc'], ['models', 'lcsc'], ['footprints', 'lcsc']], 'circuitpilot-archive': [['archive', 'kind']] };
+  const dbps = {};
+  function openDb(name) {
+    if (!dbps[name]) dbps[name] = new Promise((res, rej) => {
+      const go = ver => {
+        const r = ver ? indexedDB.open(name, ver) : indexedDB.open(name);
+        const timer = setTimeout(() => rej(new Error('Browser storage is busy — close other CircuitPilot tabs (or reload them), then reload this page')), 4000);
+        r.onupgradeneeded = () => { const d = r.result; for (const [s, k] of DBS[name]) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: k }); };
+        r.onsuccess = () => {
+          clearTimeout(timer); const d = r.result;
+          if (DBS[name].some(([s]) => !d.objectStoreNames.contains(s))) { const v = d.version + 1; d.close(); go(v); return; }
+          d.onversionchange = () => { d.close(); delete dbps[name]; };   // let a newer CircuitPilot tab upgrade
+          res(d);
+        };
+        r.onerror = () => { clearTimeout(timer); rej(r.error || new Error('Browser storage is unavailable')); };
+      };
+      go(0);
+    }).catch(e => { delete dbps[name]; throw e; });
+    return dbps[name];
   }
   async function tx(store, fn, write) {
-    const d = await db();
+    const d = await openDb(store === 'archive' ? 'circuitpilot-archive' : 'circuitpilot');
     return new Promise((res, rej) => {
       const t = d.transaction(store, write ? 'readwrite' : 'readonly'), s = t.objectStore(store);
       let out; const req = fn(s); if (req) req.onsuccess = () => { out = req.result; };
@@ -121,14 +135,15 @@
       datasheet: a.Datasheet, footprint: a.Footprint ? fp : '' };
   }
   const form = pairs => pairs.map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
-  const postForm = (path, pairs) => realFetch(needRelay() + path, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(pairs) })
+  const postForm = (path, pairs) => realFetch(needRelay() + path, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(pairs), signal: AbortSignal.timeout(12000) })
     .then(r => { if (!r.ok) throw new Error('EasyEDA library request failed (' + r.status + ')'); return r.json(); });
   const NO_FP_TTL = 7 * 86400;
   // {code: footprint name, '' = none in the library, null = could not be checked}
   async function footprints(codes) {
     codes = [...new Set(codes.filter(Boolean))];
     const out = {}, now = Date.now() / 1000;
-    for (const c of codes) { const r = await dbGet('footprints', c).catch(() => null); if (r && (r.footprint || now - r.updated < NO_FP_TTL)) out[c] = r.footprint; }
+    const known = await Promise.all(codes.map(c => dbGet('footprints', c).catch(() => null)));
+    codes.forEach((c, i) => { const r = known[i]; if (r && (r.footprint || now - r.updated < NO_FP_TTL)) out[c] = r.footprint; });
     const todo = codes.filter(c => !(c in out));
     for (let i = 0; i < todo.length; i += 50) {
       const part = todo.slice(i, i + 50);
@@ -331,7 +346,7 @@
   }
   // EasyEDA community part: symbol document + its footprint document (same EasyEDA Standard format as LCSC parts)
   async function getCommunity(key) {
-    const get = async u => { const r = await realFetch(needRelay() + '/easyeda/doc/' + u); const j = await r.json().catch(() => ({})); return j && j.success ? j.result : null; };
+    const get = async u => { const r = await realFetch(needRelay() + '/easyeda/doc/' + u, { signal: AbortSignal.timeout(15000) }); const j = await r.json().catch(() => ({})); return j && j.success ? j.result : null; };
     const r = await get(key.slice(3).toLowerCase());
     if (!r) throw httpError(404, `EasyEDA community part ${key} not found`);
     const ds = r.dataStr || {}, head = ds.head || {}, para = head.c_para || {};
@@ -355,7 +370,7 @@
     const cached = await dbGet('models', lcsc).catch(() => null);
     if (community) { if (cached) return cached.data; return getCommunity(lcsc); }
     if (cached && cached.data && (cached.data.uuid || cached.data.no_uuid) && (!cached.data.footprint || 'model3d' in cached.data.footprint)) return cached.data;
-    const res = await realFetch(needRelay() + '/easyeda/components/' + lcsc);
+    const res = await realFetch(needRelay() + '/easyeda/components/' + lcsc, { signal: AbortSignal.timeout(15000) });
     const j = await res.json().catch(() => ({}));
     const r = j && j.success ? j.result : null;
     if (!r) { if (cached) return cached.data; throw httpError(404, `No symbol/footprint found for ${lcsc}`); }

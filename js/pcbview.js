@@ -336,6 +336,7 @@ const PcbView = (() => {
     }
     // select
     const el = e.target.closest('[data-k],[data-ref]');
+    ui.hlAt = [pt.x, pt.y];
     if (el && el.dataset.k === 't') {
       const i = +el.dataset.i, sg = +el.dataset.s, t = Model.S.pcb.traces[i];
       // grab a corner if the click is on one, otherwise the whole segment
@@ -384,6 +385,32 @@ const PcbView = (() => {
   }
   const labelSelected = l => { const s = selectedLabel(); return !!s && s.lk === l.kind && (l.kind === 'part' ? s.ref === l.ref : l.kind === 'text' ? s.i === l.i : true); };
   function setLabel(t, o) { if (t.lk === 'part') Pcb.setSilkLabel(t.ref, o); else if (t.lk === 'board') Pcb.setSilkLabel('board', o); else Pcb.updateText(t.i, o); }
+  // the selected net at a glance: the whole route glows, its vias and pads get rings, the parts on it are outlined,
+  // and a tag shows the net name, pads / parts and the routed length
+  function netInfo(net) {
+    const S = Model.S, tr = S.pcb.traces.filter(t => t.net === net);
+    let len = 0; for (const t of tr) for (let i = 1; i < t.pts.length; i++) len += Math.hypot(t.pts[i][0] - t.pts[i - 1][0], t.pts[i][1] - t.pts[i - 1][1]);
+    const pads = cache.pads.filter(p => p.net === net), refs = [...new Set(pads.map(p => p.ref))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return { tr, vias: S.pcb.vias.filter(v => v.net === net), pads, refs, len };
+  }
+  function netHighlight(net) {
+    const n = netInfo(net), o = [], g = 1 / vp.s;   // g: one screen pixel in mm
+    o.push('<g class="nethl" pointer-events="none">');
+    for (const t of n.tr) o.push(`<polyline points="${t.pts.map(q => q.join(',')).join(' ')}" fill="none" stroke="#ffe14a" stroke-opacity="0.55" stroke-width="${t.w + 6 * g}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    for (const v of n.vias) o.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2 + 2 * g}" fill="none" stroke="#ffe14a" stroke-width="${2.5 * g}"/>`);
+    for (const p of n.pads) o.push(p.shape === 'round' ? `<circle cx="${p.x}" cy="${p.y}" r="${p.w / 2 + 2 * g}" fill="none" stroke="#ffe14a" stroke-width="${2.5 * g}"/>` : `<rect x="${p.x - p.w / 2 - 2 * g}" y="${p.y - p.h / 2 - 2 * g}" width="${p.w + 4 * g}" height="${p.h + 4 * g}" fill="none" stroke="#ffe14a" stroke-width="${2.5 * g}"/>`);
+    for (const r of n.refs) { const c = Model.comp(r); if (!c || !c.pcb) continue; const b = Pcb.fpBox(c, 0.25); o.push(`<rect x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="#ffe14a" stroke-width="${2 * g}" stroke-dasharray="${6 * g} ${4 * g}"/>`); }
+    // name tag at the picked point (constant size on screen)
+    const at = ui.hlAt || (n.pads[0] ? [n.pads[0].x, n.pads[0].y] : null);
+    if (at) {
+      const fs = 13 * g, line2 = `${n.pads.length} pads · ${n.refs.length} parts · ${n.len.toFixed(1)} mm routed`, w = Math.max(net.length * fs * 0.62, line2.length * fs * 0.48) + 12 * g, x = at[0] + 12 * g, y = at[1] - 46 * g;
+      o.push(`<rect x="${x}" y="${y}" width="${w}" height="${36 * g}" rx="${5 * g}" fill="#111827" fill-opacity="0.92" stroke="#ffe14a" stroke-width="${1.5 * g}"/>`);
+      o.push(`<text x="${x + 6 * g}" y="${y + 15 * g}" fill="#ffe14a" style="font:700 ${fs}px sans-serif">${esc(net)}</text>`);
+      o.push(`<text x="${x + 6 * g}" y="${y + 29 * g}" fill="#e5e7eb" style="font:${fs * 0.8}px sans-serif">${esc(line2)}</text>`);
+    }
+    o.push('</g>');
+    return o.join('');
+  }
   function selectItem(it) {
     ui.sel = null; ui.item = it;
     const S = Model.S; ui.hlNet = it.k === 'v' ? S.pcb.vias[it.i].net : S.pcb.traces[it.i].net;
@@ -605,6 +632,7 @@ const PcbView = (() => {
       if (ui.item.k === 'v') { const v = S.pcb.vias[ui.item.i]; if (v) out.push(`<circle class="selbox" cx="${v.x}" cy="${v.y}" r="${v.d / 2 + 0.15}"/>`); }
       else { const t = S.pcb.traces[ui.item.i]; if (t) { const pts = ui.item.k === 'T' ? t.pts : [t.pts[ui.item.s - 1], t.pts[ui.item.s]]; out.push(`<polyline class="selline" points="${pts.map(p => p.join(',')).join(' ')}" stroke-width="${t.w + 0.2}"/>`); const a = pts[0], b = pts[pts.length - 1], fs = Math.min(1.2, Math.max(0.5, 14 / (vp.s || 10))); if (t.net) out.push(`<text class="netlabel-pcb" x="${(a[0] + b[0]) / 2}" y="${(a[1] + b[1]) / 2 - t.w / 2 - fs * 0.4}" text-anchor="middle" style="font-size:${fs}px">${esc(t.net)} · ${t.w} mm</text>`); } }
     }
+    if (hl) out.push(netHighlight(hl));
     out.push(...lblHits);   // text grab areas on top of everything (DRC marks, selection outlines)
     out.push('<g id="pcbLive"></g>');
     world.innerHTML = out.join('');
@@ -740,6 +768,7 @@ const PcbView = (() => {
       const pins = t.net ? (S.nets[t.net] || []) : [], widths = [...new Set(netT.map(q => q.w))].sort((a, b) => a - b);
       el.innerHTML = `<div class="ph">Net <span class="pnet">${esc(t.net || '(no net)')}</span></div>
         <div class="muted small">${netT.length} track${netT.length > 1 ? 's' : ''}${netV ? ` · ${netV} via${netV > 1 ? 's' : ''}` : ''} · ${pins.length} pin${pins.length === 1 ? '' : 's'}${widths.length > 1 ? ` · widths ${widths.join(' / ')} mm` : ''}</div>
+        ${(() => { const refs = [...new Set(pins.map(k => k.slice(0, k.lastIndexOf('.'))))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })); return refs.length ? `<div class="ph small">Connected parts (${refs.length})</div><div class="pinlist">${refs.map(r => `<span data-goref="${esc(r)}" title="Select ${esc(r)}">${esc(r)}</span>`).join('')}</div><div class="ph small">Pins</div>` : ''; })()}
         ${pins.length ? `<div class="pinlist">${pins.map(k => `<span>${esc(k)}</span>`).join('')}</div>` : ''}
         <div class="ph small">This track ${it.k === 'T' ? '' : `<span class="muted">· segment ${it.s}</span>`}</div>
         <label>Net${netSel(t.net)}</label>
@@ -754,6 +783,7 @@ const PcbView = (() => {
       const setW = (pick, what) => { const w = wOk(); if (!w) return; let n = 0; Model.mutate(() => { for (const q of Model.S.pcb.traces) if (pick(q)) { q.w = w; n++; } }); const cl = Pcb.drc().violations.filter(v => /^Clearance|short/i.test(v.msg)).length; App.toast(`${n} track${n === 1 ? '' : 's'} (${what}) set to ${w} mm${cl ? ` · ⚠ ${cl} clearance problem${cl > 1 ? 's' : ''} — a track no longer fits somewhere (Ctrl+Z to undo, or Route again)` : ' · clearances OK'}`, 8000); };
       $('#ppNet').onchange = e => upd(t => t.net = e.target.value || null);
       $('#ppL').onchange = e => upd(t => t.layer = e.target.value);
+      el.querySelectorAll('[data-goref]').forEach(b => b.onclick = () => { const c = Model.comp(b.dataset.goref); setSelection([b.dataset.goref]); if (c && c.pcb && vp.reveal) vp.reveal(Pcb.fpBox(c), 4); });
       $('#ppW').onchange = e => { const w = wOk(); if (w) upd(t => t.w = w); };
       $('#ppWNet').onclick = () => setW(q => t.net ? q.net === t.net : q === t, t.net || 'this track');
       $('#ppWAll').onclick = () => setW(() => true, 'all');
@@ -770,7 +800,7 @@ const PcbView = (() => {
   const fit = () => { const S = Model.S; vp && vp.fit(S.board.w ? [0, 0, S.board.w, S.board.h] : [-30, -20, 30, 20], 4); };
   function exportSVG() {
     const S = Model.S;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 ${S.board.w + 4} ${S.board.h + 4}" width="${(S.board.w + 4) * 10}" height="${(S.board.h + 4) * 10}" style="background:#000"><style>.fphit{fill:none}.trk{stroke-linecap:round}.selbox,.selline{display:none}</style><rect x="-2" y="-2" width="${S.board.w + 4}" height="${S.board.h + 4}" fill="#000"/>${world.innerHTML.replace(/<g id="pcbLive">.*?<\/g>$/, '')}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 ${S.board.w + 4} ${S.board.h + 4}" width="${(S.board.w + 4) * 10}" height="${(S.board.h + 4) * 10}" style="background:#000"><style>.fphit{fill:none}.trk{stroke-linecap:round}.selbox,.selline,.lblhit,.lblsize,.nethl{display:none}</style><rect x="-2" y="-2" width="${S.board.w + 4}" height="${S.board.h + 4}" fill="#000"/>${world.innerHTML.replace(/<g id="pcbLive">.*?<\/g>$/, '')}</svg>`;
   }
   // keep the item selection valid after undo/redo or external edits
   function validate() {

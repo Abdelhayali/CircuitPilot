@@ -266,16 +266,25 @@ const App = (() => {
 
   // ---------- screenshots for the AI (view_design): schematic, 2D PCB, 3D board, enclosure ----------
   // Longest side at most 1400 px (enough for a model to read labels, without wasting context); 3D views as JPEG.
-  async function toAIImage(r, jpeg) {
+  async function toAIImage(r, jpeg, max = 1400) {
     const img = new Image(); await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('could not draw the image')); img.src = r.url; });
-    const s = Math.min(1, 1400 / Math.max(r.w, r.h)), c = document.createElement('canvas');
+    const s = Math.min(1, max / Math.max(r.w, r.h)), c = document.createElement('canvas');
     c.width = Math.round(r.w * s); c.height = Math.round(r.h * s);
     const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
     const url = jpeg ? c.toDataURL('image/jpeg', 0.85) : c.toDataURL('image/png');
     return { mime: jpeg ? 'image/jpeg' : 'image/png', data: url.slice(url.indexOf(',') + 1), w: c.width, h: c.height };
   }
+  const blob64 = async b => { const u = new Uint8Array(await b.arrayBuffer()); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
   async function renderForAI(a = {}) {
-    const v = a.view;
+    const v = a.view, big = a.full ? 3000 : 1400;   // full: export-quality images (PNG, up to 3000 px)
+    if (v === 'pdf_pcb') { const r = await PcbPdf.export({ blob: true }); return { mime: 'application/pdf', data: await blob64(r.blob), pages: r.pages }; }
+    if (v === 'pdf_doc') { const b = await DocView.pdf({ blob: true }); if (!b) throw new Error('The datasheet PDF is already being built — try again'); return { mime: 'application/pdf', data: await blob64(b) }; }
+    if (a.full) {
+      if (v === 'schematic') { const i = Math.max(0, Math.min(Sch.sheets().length - 1, (+a.sheet || 1) - 1)); return toAIImage(await DocView.svgToPng(Sch.exportSVG(i), 3000, '#ffffff', 20), false, big); }
+      if (v === 'pcb') { Pcb.render(); return toAIImage(await DocView.svgToPng(Pcb.exportSVG(), 3000, '#000', 20), false, big); }
+      if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', 2400, 1600); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, false, big); }
+      if (v === 'enclosure') { const r = await EncView.snapshot({ w: 2400, h: 1600, explode: !!a.exploded }); if (!r) throw new Error('No enclosure yet'); return toAIImage(r, false, big); }
+    }
     if (v === 'schematic') { const i = Math.max(0, Math.min(Sch.sheets().length - 1, (+a.sheet || 1) - 1)); return toAIImage(await DocView.svgToPng(Sch.exportSVG(i), 2000)); }
     if (v === 'pcb') { Pcb.render(); return toAIImage(await DocView.svgToPng(Pcb.exportSVG(), 2000, '#000')); }
     if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', 1400, 940); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, true); }
@@ -437,25 +446,10 @@ const App = (() => {
     download(fname('-BOM-JLCPCB.csv'), bomCsv(), 'text/csv');
     toast(`JLCPCB BOM: ${r.matched}/${r.total} parts have LCSC numbers${r.matched < r.total ? ' — the rest need a part chosen (connectors / custom ICs)' : ''}`, 7000);
   }
-  function bomCsv() {
-    const S = Model.S, g = {};
-    for (const c of S.components) {
-      const lib = (c.lcsc && S.lib[c.lcsc]) || (c.dbfp && c.footprint === 'LCSC:' + c.dbfp && S.lib[c.dbfp]), fpn = (lib && lib.footprint && lib.footprint.name) || c.footprint;
-      const code = Model.lcscOf(c);
-      const k = [c.value, fpn, code].join('|'); (g[k] = g[k] || []).push(c.ref);
-    }
-    const q = s => '"' + String(s).replace(/"/g, '""') + '"';
-    return 'Comment,Designator,Footprint,LCSC Part #\n' + Object.entries(g).map(([k, refs]) => { const [v, f, code] = k.split('|'); return [q(v), q(refs.join(',')), q(f), q(code)].join(','); }).join('\n');
-  }
+  const bomCsv = () => Exports.bomJlc(), cplCsv = () => Exports.cpl();
+
   // pick-and-place file in JLCPCB's CPL format: Gerber coordinates (origin bottom-left, mm), part centre = centre of its pads
-  function cplCsv() {
-    const S = Model.S, idx = Model.pinIndex(), H = S.board.h, f = v => (Math.round(v * 1000) / 1000).toFixed(3) + 'mm';
-    const rows = Pcb.placed().map(c => {
-      const pads = Pcb.padsOf(c, idx), x = pads.length ? pads.reduce((a, p) => a + p.x, 0) / pads.length : c.pcb.x, y = pads.length ? pads.reduce((a, p) => a + p.y, 0) / pads.length : c.pcb.y;
-      return [c.ref, f(x), f(H - y), Pcb.isBottom(c) ? 'Bottom' : 'Top', ((c.pcb.rot || 0) % 360 + 360) % 360].join(',');
-    });
-    return 'Designator,Mid X,Mid Y,Layer,Rotation\n' + rows.join('\n');
-  }
+
   // ---------- one-click order at JLCPCB: DRC → Gerbers + BOM + CPL → quote page ----------
   // The tab is opened inside the click (popup blockers) and sent to JLCPCB once the files are saved.
   let orderAfter = false, orderTab = null;
@@ -1047,6 +1041,32 @@ const App = (() => {
     delete d.id; if (!d.name) d.name = name;
     Model.load(d); Projects.markLoaded(); await Projects.saveNow(); Projects.close(); Sch.fit();
   }
+  // ---------- everything at once: one zip with every file of the project, sorted in folders ----------
+  async function exportAll(opts = {}) {
+    const S = Model.S, base = Exports.slug(S.name), files = {}, skipped = [], hasPcb = !!(S.board.w && Pcb.placed().length);
+    const add = (n, d) => { files[base + '/' + n] = d; };
+    const b64bytes = d => Uint8Array.from(atob(d), ch => ch.charCodeAt(0));
+    toast('Exporting everything…', 30000);
+    add(base + '.circuit.json', Exports.project()); add(base + '-bom.csv', Exports.bom()); add(base + '.net', Exports.netlist());
+    if (S.components.length) add(base + '-schematic.svg', Sch.exportSVG());
+    if (hasPcb) {
+      for (const [n, t] of Object.entries(Pcb.gerbers())) add('gerbers/' + n, t);
+      add('jlcpcb/' + base + '-BOM-JLCPCB.csv', Exports.bomJlc()); add('jlcpcb/' + base + '-CPL-JLCPCB.csv', Exports.cpl());
+      add(base + '-pcb.svg', Pcb.exportSVG());
+      try { const e = Enclosure.exportFiles(); for (const [n, d] of Object.entries(e.files)) add('enclosure/' + n, d); } catch (e) { skipped.push('enclosure: ' + e.message); }
+      try { const sch = EasyEDA.exportSchematic({}), pcb = EasyEDA.exportPcb(); add('easyeda/SCH_' + base + '.json', sch); add('easyeda/PCB_' + base + '.json', pcb); } catch (e) { skipped.push('EasyEDA: ' + e.message); }
+    } else skipped.push('PCB files (no PCB yet)');
+    const shots = [['schematic', 'schematic.png', { sheet: 1 }]].concat(Sch.sheets().slice(1).map((_, i) => ['schematic', `schematic-sheet${i + 2}.png`, { sheet: i + 2 }]))
+      .concat(hasPcb ? [['pcb', 'pcb-2d.png', {}], ['pcb_3d', 'pcb-3d.png', { side: 'iso' }], ['pcb_3d', 'pcb-3d-top.png', { side: 'top' }], ['pcb_3d', 'pcb-3d-bottom.png', { side: 'bottom' }], ['enclosure', 'enclosure.png', {}]] : []);
+    if (opts.images !== false) for (const [view, name, a] of shots) { try { const r = await renderForAI(Object.assign({ view, full: true }, a)); add('images/' + name, b64bytes(r.data)); } catch (e) { skipped.push(name + ': ' + e.message); } }
+    if (opts.pdf !== false) {
+      if (hasPcb) try { const r = await PcbPdf.export({ blob: true }); add(base + '-pcb-drawing.pdf', new Uint8Array(await r.blob.arrayBuffer())); } catch (e) { skipped.push('PCB drawing PDF: ' + e.message); }
+      try { const b = await DocView.pdf({ blob: true }); if (b) add(base + '-datasheet.pdf', new Uint8Array(await b.arrayBuffer())); } catch (e) { skipped.push('datasheet PDF: ' + e.message); }
+    }
+    download(base + '-all.zip', makeZip(files));
+    toast(`Exported ${Object.keys(files).length} files in ${base}-all.zip${skipped.length ? ' · skipped: ' + skipped.join('; ') : ''}`, 12000);
+    return { zip: base + '-all.zip', files: Object.keys(files).map(n => n.slice(base.length + 1)), skipped };
+  }
   function exportAs(kind) {
     const S = Model.S;
     try {
@@ -1058,6 +1078,7 @@ const App = (() => {
         easyedaExport(kind === 'easyedaproj' ? 'project' : kind === 'easyedapcb' ? 'pcb' : 'sch');
         return;
       }
+      if (kind === 'all') { exportAll().catch(e => toast('Export failed: ' + e.message, 8000)); return; }
       if (kind === 'pcbpdf') { toast('Making the PCB drawing…', 8000); PcbPdf.export().then(r => toast(`PCB drawing saved: ${r.pages} pages, ${r.scale === 1 ? 'true scale 1:1 — print at 100% (actual size)' : 'scaled to fit the page'}`, 9000)).catch(e => toast('PDF failed: ' + e.message, 8000)); return; }
       if (kind === 'pcbsvg') { if (!S.board.w) throw new Error('No PCB yet'); if (view !== 'pcb') Pcb.render(); download(fname('-pcb.svg'), Pcb.exportSVG(), 'image/svg+xml'); }
       if (kind === 'bomjlc') { jlcBom(); return; }
@@ -1111,6 +1132,7 @@ const App = (() => {
     Engine.env.shape = code => EncView.runScript(code);
     Engine.env.searchKey = () => AI.settings.braveKey;
     Engine.env.render = renderForAI;
+    Engine.env.exportAll = exportAll;
     Engine.env.ui = what => { if (what === 'fit-sch') Sch.fit(); if (what === 'show-pcb') { showView('pcb'); Pcb.fit(); } if (what === 'show-enc') { showView('enc'); EncView.rebuild(); } if (what === 'show-doc') showView('doc'); };
     EncView.init(); Pcb3D.init(); DocView.init();
     $('#btn3d').onclick = () => { const on = !Pcb3D.ui.on; PcbView.setVisible(!on); Pcb3D.setOn(on); };

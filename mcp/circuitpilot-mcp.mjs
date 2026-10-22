@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import http from 'node:http';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -29,7 +30,7 @@ const ctx = vm.createContext({
   console: { log, info: log, warn: log, error: log }, fetch, TextEncoder, TextDecoder, Blob, URL, URLSearchParams,
   setTimeout, clearTimeout, AbortController, AbortSignal,
 });
-for (const [file, name] of [['lib.js', 'Lib'], ['model.js', 'Model'], ['pcb.js', 'Pcb'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['kicad.js', 'KiCad'], ['openlib.js', 'OpenLib'], ['engine.js', 'Engine']]) {
+for (const [file, name] of [['lib.js', 'Lib'], ['model.js', 'Model'], ['pcb.js', 'Pcb'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['kicad.js', 'KiCad'], ['openlib.js', 'OpenLib'], ['easyeda.js', 'EasyEDA'], ['exports.js', 'Exports'], ['engine.js', 'Engine']]) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', file), 'utf8') + `\n;globalThis.${name} = ${name};`, ctx, { filename: file });
 }
 const { Engine, Model, Pcb } = ctx;
@@ -185,6 +186,66 @@ async function callTool(name, input = {}) {
       const zipPath = path.join(dir, (Model.S.name || 'board').replace(/[^\w.-]+/g, '_') + '-enclosure.zip');
       fs.writeFileSync(zipPath, Buffer.from(await ctx.makeZip(files).arrayBuffer()));
       return { folder: dir, files: Object.keys(files), zip: zipPath, mode: info.mode || 'box', outer_mm: info.outer_mm, parts: info.parts, collisions: info.collisions, cutouts: info.cutouts.length };
+    });
+    case 'export_project': return withProject(async () => {
+      // everything of the project in its own folder; PDFs and images are drawn by the CircuitPilot window
+      const S = Model.S, X = ctx.Exports, base = X.slug(S.name), hasPcb = !!(S.board.w && Pcb.placed().length);
+      const root = path.resolve(String(input.out_dir || path.join(os.homedir(), 'Documents', 'CircuitPilot exports'))), dir = path.join(root, base);
+      const all = ['project', 'gerbers', 'jlcpcb', 'bom', 'netlist', 'enclosure', 'easyeda', 'pdf', 'images'];
+      const inc = new Set(Array.isArray(input.include) && input.include.length ? input.include : all);
+      const written = [], skipped = [];
+      const put = (rel, data) => { const p = path.join(dir, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, data instanceof Uint8Array ? Buffer.from(data) : data); written.push(rel.replace(/\\/g, '/')); };
+      fs.mkdirSync(dir, { recursive: true });
+      if (inc.has('project')) put(base + '.circuit.json', X.project());
+      if (inc.has('bom')) put(base + '-bom.csv', X.bom());
+      if (inc.has('netlist')) put(base + '.net', X.netlist());
+      let drc = null;
+      if (hasPcb) {
+        if (inc.has('gerbers')) {
+          const d = Pcb.drc(); drc = d.summary;
+          const files = Pcb.gerbers(); for (const [n, t] of Object.entries(files)) put(path.join('gerbers', n), t);
+          put(base + '-gerbers.zip', new Uint8Array(await ctx.makeZip(files).arrayBuffer()));
+        }
+        if (inc.has('jlcpcb')) { put(path.join('jlcpcb', base + '-BOM-JLCPCB.csv'), X.bomJlc()); put(path.join('jlcpcb', base + '-CPL-JLCPCB.csv'), X.cpl()); }
+        if (inc.has('enclosure')) {
+          try {
+            if (ctx.Enclosure.mode() === 'custom') {
+              const sc = (() => { try { return ctx.Shape3D.context(ctx.Enclosure.layout()); } catch { return { pcb: null }; } })(), r = ctx.Shape3D.run(ctx.Enclosure.script(), sc, { mesh: false });
+              for (const p of r.parts) put(path.join('enclosure', base + '-' + p.name + '.stl'), p.stl);
+              put(path.join('enclosure', base + '-enclosure.scad'), r.scad);
+            } else { const { files } = ctx.Enclosure.exportFiles(); for (const [n, d] of Object.entries(files)) put(path.join('enclosure', n), d); }
+          } catch (e) { skipped.push('enclosure: ' + e.message); }
+        }
+        if (inc.has('easyeda')) {
+          try {
+            const sch = ctx.EasyEDA.exportSchematic({}), pcb = ctx.EasyEDA.exportPcb(), files = { [`SCH_${base}.json`]: sch, [`PCB_${base}.json`]: pcb };
+            put(path.join('easyeda', `SCH_${base}.json`), sch); put(path.join('easyeda', `PCB_${base}.json`), pcb);
+            put(path.join('easyeda', base + '-easyeda.zip'), new Uint8Array(await ctx.makeZip(files).arrayBuffer()));
+          } catch (e) { skipped.push('EasyEDA: ' + e.message); }
+        }
+      } else for (const k of ['gerbers', 'jlcpcb', 'enclosure', 'easyeda']) if (inc.has(k)) skipped.push(k + ': no PCB yet (generate_pcb)');
+      // drawn by the browser tab (render bridge); open one if none is connected
+      const jobs = [];
+      if (inc.has('pdf')) { if (hasPcb) jobs.push([{ view: 'pdf_pcb' }, base + '-pcb-drawing.pdf']); jobs.push([{ view: 'pdf_doc' }, base + '-datasheet.pdf']); }
+      if (inc.has('images') && S.components.length) {
+        const sheets = Math.max(1, (S.sheets || []).length);
+        for (let i = 1; i <= sheets; i++) jobs.push([{ view: 'schematic', sheet: i, full: true }, path.join('images', sheets > 1 ? `schematic-sheet${i}.png` : 'schematic.png')]);
+        if (hasPcb) for (const [a, n] of [[{ view: 'pcb' }, 'pcb-2d.png'], [{ view: 'pcb_3d', side: 'iso' }, 'pcb-3d.png'], [{ view: 'pcb_3d', side: 'top' }, 'pcb-3d-top.png'], [{ view: 'pcb_3d', side: 'bottom' }, 'pcb-3d-bottom.png'], [{ view: 'enclosure' }, 'enclosure.png']])
+          jobs.push([Object.assign({ full: true }, a), path.join('images', n)]);
+      }
+      if (jobs.length) {
+        let tab = false;
+        for (let i = 0; i < 20 && !tab; i++) { try { const t = await api('GET', '/api/render/tabs'); tab = !!(t.projects || []).includes(currentId); } catch { } if (!tab) { if (i === 0) await showProject(currentId); await new Promise(r => setTimeout(r, 1000)); } }
+        if (!tab) skipped.push('PDFs and images: the CircuitPilot window is not open on this project (open ' + BASE + ' and run export_project again)');
+        else for (const [args, rel] of jobs) {
+          try { const r = await Engine.env.render(args); if (!r || !r.data) throw new Error('nothing drawn'); put(rel, new Uint8Array(Buffer.from(r.data, 'base64'))); }
+          catch (e) { skipped.push(rel.replace(/\\/g, '/') + ': ' + e.message); }
+        }
+      }
+      fs.writeFileSync(path.join(dir, 'README.txt'), `${S.name || 'Untitled'} — exported by CircuitPilot ${new Date().toISOString().slice(0, 16).replace('T', ' ')}\n\n` +
+        written.map(w => '  ' + w).join('\n') + (skipped.length ? '\n\nNot exported:\n' + skipped.map(s => '  ' + s).join('\n') : '') +
+        '\n\nJLCPCB order: upload ' + base + '-gerbers.zip, then for assembly the BOM and CPL files in jlcpcb/.\n');
+      return { folder: dir, files: written, skipped, drc };
     });
     case 'get_bom': return withProject(() => {
       const g = {};

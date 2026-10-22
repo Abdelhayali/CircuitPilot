@@ -46,11 +46,11 @@ const DocView = (() => {
   }
 
   // ---------- images ----------
-  function svgToPng(svg, maxW = 2400, bg = '#ffffff') {
+  function svgToPng(svg, maxW = 2400, bg = '#ffffff', maxScale = 4) {
     return new Promise((res, rej) => {
       const img = new Image(), url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
       img.onload = () => {
-        const w0 = img.naturalWidth || 1200, h0 = img.naturalHeight || 800, s = Math.min(4, maxW / w0, 3000 / h0);
+        const w0 = img.naturalWidth || 1200, h0 = img.naturalHeight || 800, s = Math.min(maxScale, maxW / w0, 3000 / h0);
         const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w0 * s)); c.height = Math.max(1, Math.round(h0 * s));
         const g = c.getContext('2d'); g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url); res({ url: c.toDataURL('image/png'), w: c.width, h: c.height });
@@ -130,7 +130,8 @@ const DocView = (() => {
     libs.catch(() => { libs = null; });
     return libs;
   }
-  async function pdf() {
+  // opts.blob: return the PDF instead of saving it (exports for the copilots)
+  async function pdf(opts = {}) {
     if (building) return; building = true;
     try {
       App.toast('Building the PDF datasheet…', 20000);
@@ -193,6 +194,7 @@ const DocView = (() => {
       // footers
       const n = P.getNumberOfPages();
       for (let i = 1; i <= n; i++) { P.setPage(i); P.setFontSize(8); P.setTextColor(140); P.text(`${d.company ? d.company + ' · ' : ''}${d.title} · Rev ${d.version} · ${date}`, M, PH - 8); P.text(`Page ${i} of ${n}`, PW - M, PH - 8, { align: 'right' }); }
+      if (opts.blob) return P.output('blob');
       P.save(`${(d.title || 'datasheet').replace(/[^\w.-]+/g, '_')}-datasheet.pdf`);
       App.toast(`✓ PDF datasheet saved (${n} pages)`, 5000);
     } catch (e) { App.toast('PDF: ' + e.message, 7000); }

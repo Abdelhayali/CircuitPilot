@@ -16,7 +16,8 @@ const PcbPdf = (() => {
   }
   const COL = { top: [200, 40, 40], bot: [40, 80, 200], topPour: [244, 205, 205], botPour: [205, 215, 245], pad: [150, 150, 150], padTop: [200, 120, 60], hole: [255, 255, 255], silk: [20, 20, 20], edge: [0, 0, 0], faint: [200, 200, 200] };
 
-  async function exportPdf() {
+  // opts.blob: return the PDF instead of downloading it (exports for the copilots)
+  async function exportPdf(opts = {}) {
     const S = Model.S, cs = Pcb.placed();
     if (!cs.length || !S.board.w) throw new Error('No PCB yet: create the PCB first (PCB tab)');
     await loadLibs();
@@ -110,7 +111,9 @@ const PcbPdf = (() => {
       return [c.ref, String(c.value || ''), fp, Model.lcscOf(c) || '', Pcb.isBottom(c) ? 'bottom' : 'top', c.pcb.x.toFixed(2), c.pcb.y.toFixed(2), String(c.pcb.rot || 0)];
     });
     P.autoTable({ startY: M + 8, head: [['Ref', 'Value', 'Footprint', 'LCSC', 'Side', 'X (mm)', 'Y (mm)', 'Rot']], body: rows, styles: { fontSize: 7, cellPadding: 1 }, headStyles: { fillColor: [60, 60, 60] }, margin: { left: M, right: M } });
-    App.download((S.name || 'board').replace(/[^\w.-]+/g, '_') + '-pcb.pdf', P.output('blob'));
+    const blob = P.output('blob');
+    if (opts.blob) return { blob, pages: pageNo, scale: k };
+    App.download((S.name || 'board').replace(/[^\w.-]+/g, '_') + '-pcb.pdf', blob);
     return { pages: pageNo, scale: k };
   }
   return { export: exportPdf };

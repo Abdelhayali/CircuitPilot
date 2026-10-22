@@ -84,6 +84,9 @@ def main():
     args = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--name", "CircuitPilot", "--icon", ico,
             "--distpath", DIST, "--workpath", os.path.join(BUILD, "pyinstaller"), "--specpath", BUILD, "--paths", ROOT,
             "--hidden-import", "server", "--hidden-import", "desktop_link"]
+    # packages on the build PC that CircuitPilot does not use (pypdf / python-docx / lxml / cryptography stay: datasheets)
+    for mod in ("numpy", "PIL", "pygame", "matplotlib", "scipy", "pandas", "tkinter", "IPython", "jupyter"):
+        args += ["--exclude-module", mod]
     for src, dst in data:
         p = os.path.join(ROOT, src)
         if os.path.exists(p):

@@ -21,7 +21,7 @@ import urllib.request
 
 FROZEN = bool(getattr(sys, "frozen", False))
 APP_DIR = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "CircuitPilot")
+DATA = os.environ.get("CP_DATA_DIR") or os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "CircuitPilot")
 os.makedirs(DATA, exist_ok=True)
 os.environ.setdefault("CP_DATA_DIR", DATA)
 # the Node.js bundled next to the exe runs the Claude Desktop connection (MCP server)
@@ -32,6 +32,16 @@ if not FROZEN:
     sys.path.insert(0, APP_DIR)
 
 LOG = os.path.join(DATA, "circuitpilot.log")
+# a windowed exe has no console (sys.stdout / stderr are None): the server's request log would fail — write it to a file
+if sys.stdout is None or sys.stderr is None:
+    try:
+        if os.path.exists(LOG) and os.path.getsize(LOG) > 5_000_000:
+            os.replace(LOG, LOG + ".old")
+        _logf = open(LOG, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        _logf = open(os.devnull, "w")
+    sys.stdout = sys.stdout or _logf
+    sys.stderr = sys.stderr or _logf
 
 
 def log(*a):

@@ -50,8 +50,8 @@
   let dbp = null;
   function db() {
     if (!dbp) dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('circuitpilot', 2);
-      r.onupgradeneeded = () => { const d = r.result; for (const [s, k] of [['projects', 'id'], ['library', 'key'], ['parts', 'lcsc'], ['models', 'lcsc'], ['footprints', 'lcsc']]) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: k }); };
+      const r = indexedDB.open('circuitpilot', 3);
+      r.onupgradeneeded = () => { const d = r.result; for (const [s, k] of [['projects', 'id'], ['library', 'key'], ['parts', 'lcsc'], ['models', 'lcsc'], ['footprints', 'lcsc'], ['archive', 'kind']]) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: k }); };
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error || new Error('Browser storage is unavailable'));
     });
     return dbp;
@@ -162,6 +162,51 @@
     return all.filter(p => { if (none.has(p.lcsc)) return false; const t = [p.lcsc, p.mfr_part, p.description, p.package, p.category].join(' ').toLowerCase(); return words.every(w => t.includes(w)); })
       .sort((a, b) => (b.stock || 0) - (a.stock || 0)).slice(0, limit);
   }
+  // ---------- Basic Parts Archive: basic + preferred JLCPCB parts (~1.3 MB CSV, daily snapshot by
+  // github.com/CDFER/jlcpcb-parts-database from github.com/yaqwsx/jlcparts), kept in this browser so part search
+  // still works when the live JLCPCB search does not. The full Parts Archive (~360 MB) is desktop only.
+  const ARCH_URL = 'https://cdfer.github.io/jlcpcb-parts-database/jlcpcb-components-basic-preferred.csv';
+  let archRows = null;
+  function parseCsv(text) {
+    const rows = []; let row = [], f = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) { if (ch === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === ',') { row.push(f); f = ''; }
+      else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(f); f = ''; if (row.length > 1) rows.push(row); row = []; }
+      else f += ch;
+    }
+    if (f || row.length) { row.push(f); rows.push(row); }
+    const head = rows.shift() || [];
+    return rows.map(r => Object.fromEntries(head.map((h, i) => [h, r[i] || ''])));
+  }
+  async function archiveRows() {
+    if (archRows) return archRows;
+    const rec = await dbGet('archive', 'basic').catch(() => null); if (!rec) return null;
+    archRows = parseCsv(rec.text).map(r => Object.assign(r, { _text: [r.lcsc, 'c' + r.lcsc, r.mfr, r.package, r.manufacturer, r.description, r.category, r.subcategory].join(' ').toLowerCase() }));
+    return archRows;
+  }
+  async function archiveDownload(kind) {
+    if (kind !== 'basic') throw httpError(400, 'The full Parts Archive (~360 MB) is only available in the desktop version (server.py). The web version keeps the Basic Parts Archive.');
+    const r = await realFetch(ARCH_URL); if (!r.ok) throw httpError(502, 'Could not download the Basic Parts Archive (' + r.status + ')');
+    const text = await r.text(); await dbPut('archive', { kind: 'basic', text, updated: Date.now() }); archRows = null;
+    return { started: true, done: true, parts: (await archiveRows()).length };
+  }
+  async function archiveStatus() {
+    const rec = await dbGet('archive', 'basic').catch(() => null);
+    return { basic: Object.assign({ name: 'Basic Parts Archive', size_about: '~1.3 MB', present: !!rec }, rec ? { size: rec.text.length, updated: new Date(rec.updated).toISOString().slice(0, 16).replace('T', ' '), parts: (await archiveRows()).length } : {}),
+      full: { name: 'Parts Archive', size_about: '~360 MB', present: false, desktop_only: true } };
+  }
+  const priceOf = s => { const m = /^\s*\d+-\d*:([\d.]+)/.exec(s || ''); return m ? +m[1] : null; };
+  async function archiveSearch(q, limit) {
+    const rows = await archiveRows(); if (!rows) return [];
+    const words = String(q || '').toLowerCase().split(/[\s,]+/).filter(Boolean); if (!words.length) return [];
+    return rows.filter(r => words.every(w => r._text.includes(w))).sort((a, b) => (a.library_type !== 'base') - (b.library_type !== 'base') || (+b.stock || 0) - (+a.stock || 0)).slice(0, limit)
+      .map(r => ({ lcsc: 'C' + r.lcsc, mfr_part: r.mfr, brand: r.manufacturer, package: r.package, category: [r.category, r.subcategory].filter(Boolean).join(' / '), description: String(r.description || '').slice(0, 300), stock: +r.stock || 0,
+        basic: r.library_type === 'base' ? 1 : 0, preferred: +r.preferred ? 1 : 0, price: priceOf(r.price), datasheet: r.datasheet, sources: ['archive-basic'] }));
+  }
+
   // JLCPCB catalogue + EasyEDA library + community, merged by LCSC number; parts without a footprint are left out
   const SLOW_SOURCE = 3500, recent = new Map();   // a database that has not answered in 3.5 s is skipped; repeats come from memory for 10 min
   async function partsSearch(q, limit) {
@@ -181,14 +226,21 @@
       .then(j => ((((j || {}).result || {}).lists || {}).lcsc || []).map(eeRow).filter(r => /^C\d{1,12}$/.test(r.lcsc)));
     const pc = searchCommunity(q, limit);
     // the footprint check of the JLCPCB results starts as soon as they arrive, while the libraries are still answering
-    const jlcP = within(pj, 'JLCPCB', 4000), fpP = jlcP.then(rows => footprints(rows.map(r => r.lcsc)));
-    const [jlc, ee, com] = await Promise.all([jlcP, within(pe, 'EasyEDA'), within(pc, 'EasyEDA community')]);
+    const jlcP = within(pj, 'JLCPCB', 4000);
+    let fpP = jlcP.then(rows => footprints(rows.map(r => r.lcsc)));
+    let [jlc, ee, com] = await Promise.all([jlcP, within(pe, 'EasyEDA'), within(pc, 'EasyEDA community')]);
+    // Basic Parts Archive: when the live search failed and there is no copy yet, fetch one now (if reachable)
+    if (!jlc.length && !(await archiveRows())) await archiveDownload('basic').catch(() => null);
+    const seenJ = new Set(jlc.map(r => r.lcsc));
+    const arch = (await archiveSearch(q, limit).catch(() => [])).filter(r => !seenJ.has(r.lcsc)).slice(0, jlc.length ? Math.max(Math.floor(limit / 3), limit - jlc.length) : limit);
+    jlc = jlc.concat(arch);
+    if (arch.length) { const base = fpP; fpP = Promise.all([base, footprints(arch.map(r => r.lcsc))]).then(([a, b]) => Object.assign({}, a, b)); }
     if (!jlc.length && !ee.length && !com.length && errors.length) return { source: 'local', error: errors.join('; '), results: await searchLocal(q, limit) };
     const inEe = new Map(ee.map(r => [r.lcsc, r.footprint]));
     const fp = Object.assign(await fpP, Object.fromEntries(inEe));
     let dropped = 0;
     const keep = [];
-    for (const r of jlc) { const f = fp[r.lcsc]; if (f === '') { dropped++; continue; } keep.push(Object.assign({}, r, { footprint: f, sources: inEe.has(r.lcsc) ? ['jlcpcb', 'easyeda'] : ['jlcpcb'] })); }
+    for (const r of jlc) { const f = fp[r.lcsc]; if (f === '') { dropped++; continue; } const src = r.sources || ['jlcpcb']; keep.push(Object.assign({}, r, { footprint: f, sources: inEe.has(r.lcsc) ? src.concat('easyeda') : src })); }
     const seen = new Set(jlc.map(r => r.lcsc)), norm = t => String(t || '').toLowerCase().replace(/[^0-9a-z.]+/g, ''), words = q.split(/\s+/).map(norm).filter(Boolean), extra = [];
     for (const r of ee) {
       if (seen.has(r.lcsc)) continue;
@@ -205,7 +257,7 @@
     const rows = keep.slice(0, limit - nExtra - nCom).concat(extra.slice(0, nExtra), community.slice(0, nCom)), now = Date.now() / 1000;
     dbPutMany('footprints', ee.map(r => ({ lcsc: r.lcsc, footprint: r.footprint, updated: now }))).catch(() => { });
     dbPutMany('parts', keep.map(x => Object.assign({ updated: now }, x))).catch(() => { });
-    const out = { source: [jlc.length && 'jlcpcb', ee.length && 'easyeda', com.length && 'community'].filter(Boolean).join('+'), results: rows, removed_without_footprint: dropped };
+    const out = { source: [jlc.some(r => !r.sources) && 'jlcpcb', arch.length && 'archive', ee.length && 'easyeda', com.length && 'community'].filter(Boolean).join('+'), results: rows, removed_without_footprint: dropped };
     if (errors.length) out.error = errors.join('; ');
     else { recent.set(ck, { t: Date.now(), out }); if (recent.size > 200) recent.delete(recent.keys().next().value); }
     return out;
@@ -456,6 +508,8 @@
     if (seg[0] === 'library') return json(await library(method, seg[1], method === 'PUT' || method === 'POST' ? await bodyJson() : null));
     if (p === '/api/parts/search') return json(await partsSearch(q.get('q'), q.get('limit')));
     if (p === '/api/parts/local') return json({ source: 'local', results: await searchLocal(q.get('q'), +q.get('limit') || 50) });
+    if (p === '/api/parts/archive' && method !== 'POST') return json(await archiveStatus());
+    if (p === '/api/parts/archive/download') return json(await archiveDownload(q.get('kind') || 'basic'));
     if (p === '/api/parts/stats') return json({ parts: (await dbAll('parts')).length, models: (await dbAll('models')).length, path: 'this browser (IndexedDB)' });
     if (p.startsWith('/api/parts/get/')) return json(await getPart(seg[seg.length - 1]));
     if (p === '/api/web/search') return json(await webSearch(q.get('q'), q.get('n'), header('x-brave-key')));

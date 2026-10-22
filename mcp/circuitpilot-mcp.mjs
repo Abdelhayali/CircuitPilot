@@ -35,6 +35,7 @@ for (const [file, name] of [['lib.js', 'Lib'], ['model.js', 'Model'], ['pcb.js',
 const { Engine, Model, Pcb } = ctx;
 // open-library part list straight from the app folder
 ctx.OpenLib.readIndex = async () => fs.readFileSync(path.join(ROOT, 'data', 'open-parts.txt'), 'utf8');
+ctx.KiCad.readIndex = async () => fs.readFileSync(path.join(ROOT, 'data', 'kicad-footprints.txt'), 'utf8');
 const headers = PASSWORD ? { authorization: 'Bearer ' + PASSWORD } : {};
 let myLib = [];
 Object.assign(Engine.env, {

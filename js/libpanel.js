@@ -5,7 +5,7 @@
 const LibPanel = (() => {
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const SOURCES = [['all', 'All'], ['jlcpcb', 'JLCPCB'], ['easyeda', 'EasyEDA lib'], ['community', 'Community'], ['open', 'KiCad / open libs'], ['mine', 'My Library'], ['builtin', 'Built-in']];
+  const SOURCES = [['all', 'All'], ['jlcpcb', 'JLCPCB'], ['easyeda', 'EasyEDA lib'], ['community', 'Community'], ['archive', 'Archive'], ['open', 'KiCad / open libs'], ['mine', 'My Library'], ['builtin', 'Built-in']];
   let el = null, rows = [], sel = -1, filter = 'all', timer = null, seq = 0, loading = false, error = '';
   const models = new Map();   // preview cache: row id -> part definition (or a promise)
 
@@ -84,13 +84,13 @@ const LibPanel = (() => {
       const v = visible(); if (v.length) select(v[0]);
     }, delay);
   }
-  const visible = () => rows.map((r, i) => i).filter(i => filter === 'all' || rows[i].src === filter);
-  const SRC_NAME = { jlcpcb: 'JLCPCB', easyeda: 'EasyEDA lib', community: 'Community', open: 'Open lib', mine: 'My Library', builtin: 'Built-in' };
+  const visible = () => rows.map((r, i) => i).filter(i => filter === 'all' || rows[i].src === filter || (filter === 'archive' && /^archive/.test(rows[i].src)));
+  const SRC_NAME = { archive: 'Archive', 'archive-basic': 'Archive', jlcpcb: 'JLCPCB', easyeda: 'EasyEDA lib', community: 'Community', open: 'Open lib', mine: 'My Library', builtin: 'Built-in' };
   function renderRows() {
     if (!el) return;
     const v = visible();
     $('#lpRows').innerHTML = v.map(i => {
-      const r = rows[i], stock = r.src === 'jlcpcb' ? `<span class="${r.stock > 0 ? 'good' : 'bad'}">${(r.stock || 0).toLocaleString()}</span>` : '<span class="muted">—</span>';
+      const r = rows[i], stock = r.src === 'jlcpcb' || /^archive/.test(r.src) ? `<span class="${r.stock > 0 ? 'good' : 'bad'}">${(r.stock || 0).toLocaleString()}</span>` : '<span class="muted">—</span>';
       return `<tr data-i="${i}" draggable="true" class="${i === sel ? 'on' : ''}" title="${esc([r.desc, r.note].filter(Boolean).join('\n'))}">
         <td><b>${esc(r.name)}</b>${r.basic ? ' <span class="badge basic">Basic</span>' : ''}${r.brand ? `<div class="muted small">${esc(r.brand)}</div>` : ''}</td>
         <td>${esc(r.pkg)}</td><td><span class="lp-tag lp-${r.src}">${SRC_NAME[r.src] || r.src}</span></td><td class="mono">${esc(r.code || '')}</td><td>${stock}</td>

@@ -9,3 +9,6 @@ relay/.wrangler/
 
 # JLCPCB Open Platform keys (never commit)
 jlcapi-keys.json
+
+# downloaded parts archives (Settings → Parts archives)
+archive/

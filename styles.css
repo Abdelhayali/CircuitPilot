@@ -505,3 +505,7 @@ body:not(.static-web) #modal .webonly { display: none; }
 #pcbSvg .lblsize { fill: #7fb0ff; stroke: #ffffff; stroke-width: 0.04; cursor: nwse-resize; }
 /* DRC markers only react on their ring, so they never block grabbing what is under them */
 #pcbSvg .drcmark { pointer-events: none; } #pcbSvg .drcmark circle { pointer-events: stroke; }
+
+.archlist { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.archrow { align-items: center; gap: 10px; }
+.lp-tag.lp-archive, .lp-tag.lp-archive-basic { color: var(--warn); }

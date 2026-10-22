@@ -21,6 +21,8 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
+import archive
+
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts.db")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CircuitPilot"
@@ -174,6 +176,8 @@ def search(q, limit=20):
     jlc, ee, com, errors = [], [], [], []
     # the three databases are asked at once; the footprint check of the JLCPCB results starts as soon as they arrive
     fj, fe, fc = _pool.submit(_search_jlc, q, limit), _pool.submit(_search_ee, q, limit), _pool.submit(_search_community, q, limit)
+    # local parts archive (if downloaded): keeps search working when the live JLCPCB search is down
+    fa = _pool.submit(archive.search, q, limit) if archive.available() else None
 
     def wait(f, name, extra=0):
         try:
@@ -184,6 +188,10 @@ def search(q, limit=20):
             errors.append(f"{name}: {e}")
         return []
     jlc = wait(fj, "JLCPCB", 4)   # the catalogue with stock and prices is worth a little longer
+    arch = wait(fa, "Parts archive") if fa else []
+    seen_jlc = {r["lcsc"] for r in jlc}
+    arch = [r for r in arch if r["lcsc"] not in seen_jlc][: (limit if not jlc else max(limit // 3, limit - len(jlc)))]
+    jlc = jlc + arch   # archive parts take the place of JLCPCB results (same fields: stock, price, Basic)
     ffp = _pool.submit(footprints, [r["lcsc"] for r in jlc])
     ee = wait(fe, "EasyEDA")
     com = wait(fc, "EasyEDA community")
@@ -198,7 +206,8 @@ def search(q, limit=20):
         if f == "":
             dropped += 1
             continue
-        keep.append(dict(r, footprint=f, sources=["jlcpcb", "easyeda"] if r["lcsc"] in in_ee else ["jlcpcb"]))
+        src = r.get("sources") or ["jlcpcb"]
+        keep.append(dict(r, footprint=f, sources=src + ["easyeda"] if r["lcsc"] in in_ee else src))
     seen = {r["lcsc"] for r in jlc}
     norm = lambda t: re.sub(r"[^0-9a-z.]+", "", (t or "").lower())
     words = [norm(w) for w in q.split() if norm(w)]
@@ -230,7 +239,7 @@ def search(q, limit=20):
         sql = f"INTO parts({COLS},updated) VALUES(:{',:'.join(COLS.split(','))},{now})"
         con.executemany("INSERT OR REPLACE " + sql, [r for r in jlc if fp.get(r["lcsc"]) != ""])
         con.executemany("INSERT OR IGNORE " + sql, [dict(r, stock=0) for r in extra])
-    out = {"source": "+".join(n for n, l in (("jlcpcb", jlc), ("easyeda", ee), ("community", com)) if l), "results": rows, "removed_without_footprint": dropped}
+    out = {"source": "+".join(n for n, l in (("jlcpcb", [r for r in jlc if not r.get("sources")]), ("archive", arch), ("easyeda", ee), ("community", com)) if l), "results": rows, "removed_without_footprint": dropped}
     if errors:
         out["error"] = "; ".join(errors)
     else:

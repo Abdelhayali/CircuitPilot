@@ -24,6 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import archive
 import partsdb
 import store
 import knowledge
@@ -214,6 +215,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 out = {"source": "local", "results": partsdb.search_local(arg("q"), int(arg("limit", "50")))}
             elif path == "/api/parts/stats":
                 out = partsdb.stats()
+            elif path == "/api/parts/archive":
+                out = archive.status()
             elif path.startswith("/api/parts/get/"):
                 out = partsdb.get_part(path.rsplit("/", 1)[1])
             else:
@@ -225,6 +228,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        if path == "/api/parts/archive/download":   # start downloading a parts archive (progress: GET /api/parts/archive)
+            if not self._authed():
+                return self._send(401, b'{"error":"login required"}', "application/json")
+            kind = (urllib.parse.parse_qs(self.path.partition("?")[2]).get("kind") or ["basic"])[0]
+            try:
+                return self._send(200, json.dumps(archive.download(kind)).encode(), "application/json")
+            except ValueError as e:
+                return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
         if PROXY_RE.match(path):
             return self._proxy()
         if CLOUD_RE.match(path):

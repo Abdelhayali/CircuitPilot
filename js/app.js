@@ -113,9 +113,10 @@ const App = (() => {
     let h = `<div class="pcat">Database · JLCPCB + EasyEDA library + community${db.loading ? ' <span class="spin"></span>' : ''}</div>`;
     if (db.error) h += `<div class="dberr">${esc(db.error)}</div>`;
     if (!db.loading && !db.results.length && !db.error) h += '<div class="muted small">No parts with a footprint found</div>';
-    const lib = r => r.sources && !r.sources.includes('jlcpcb');   // found only in the EasyEDA library (no JLCPCB stock data)
+    const arc = r => !!r.sources && r.sources.some(s => /^archive/.test(s));   // from a local parts archive (snapshot stock / price)
+    const lib = r => r.sources && !r.sources.includes('jlcpcb') && !arc(r);   // found only in the EasyEDA library (no JLCPCB stock data)
     h += db.results.map(r => `<button class="dbpart" draggable="true" data-lcsc="${esc(r.lcsc)}" title="${esc([r.description, r.footprint && 'Footprint: ' + r.footprint, r.note].filter(Boolean).join('\n'))}">
-      <div class="dbt"><b>${esc(r.mfr_part || r.lcsc)}</b>${r.basic ? '<span class="badge basic">Basic</span>' : ''}${lib(r) ? `<span class="badge">${r.sources.includes('community') ? 'community' : 'EasyEDA lib'}</span>` : ''}</div>
+      <div class="dbt"><b>${esc(r.mfr_part || r.lcsc)}</b>${r.basic ? '<span class="badge basic">Basic</span>' : ''}${arc(r) ? '<span class="badge" title="From your local parts archive (snapshot stock and price)">Archive</span>' : ''}${lib(r) ? `<span class="badge">${r.sources.includes('community') ? 'community' : 'EasyEDA lib'}</span>` : ''}</div>
       <div class="dbs">${esc(r.package || '')}${r.brand ? ' · ' + esc(r.brand) : ''}</div>
       <div class="dbs">${r.sources && r.sources.includes('community') ? 'EasyEDA user part' : esc(r.lcsc)} · ${lib(r) ? `<span class="muted">${r.sources.includes('community') ? 'by ' + esc(r.author || 'a user') + (r.supplier_part ? ' · ' + esc(r.supplier_part) : '') : /^C99/.test(r.lcsc) ? 'not sold by LCSC' : 'stock: check LCSC'}</span>` : `<span class="${r.stock > 0 ? 'good' : 'bad'}">${(r.stock || 0).toLocaleString()} in stock</span>`}${r.price != null ? ' · $' + (+r.price).toFixed(r.price < 0.1 ? 4 : 2) : ''}</div></button>`).join('');
     if (db.open && db.open.length) h += `<div class="pcat">Open libraries · KiCad, SparkFun, Digi-Key</div>` + db.open.map(r => `<button class="dbpart" draggable="true" data-lcsc="${esc(r.key)}" title="${esc([r.description, 'Footprint: ' + r.footprint, r.sourceName + ': custom part, no LCSC number — check the footprint'].filter(Boolean).join('\n'))}">
@@ -971,6 +972,29 @@ const App = (() => {
     $('#sMax').value = s.maxTokens; $('#sCtxWin').value = +s.contextWindow > 0 ? s.contextWindow : ''; $('#sCtx').checked = !!s.includeContext; $('#sWeb').checked = s.webAccess !== false; $('#sBrave').value = s.braveKey || ''; $('#sRelay').value = s.relayUrl || '';
     $('#presets').innerHTML = Object.entries(AI.PRESETS).map(([n, u]) => `<button data-u="${esc(u)}">${esc(n)}</button>`).join('');
     $('#modal').classList.remove('hidden');
+    archiveUi();
+  }
+  // Settings → Parts archives: status, download / update, progress
+  let archTimer = null;
+  async function archiveUi() {
+    clearTimeout(archTimer);
+    const box = $('#sArch'); if (!box || $('#modal').classList.contains('hidden')) return;
+    let st; try { st = await AI.partsApi('archive'); } catch (e) { box.innerHTML = `<div class="dberr">${esc(e.message)}</div>`; return; }
+    let busy = false;
+    box.innerHTML = ['basic', 'full'].map(k => {
+      const a = st[k] || {}, j = a.job; if (j && j.state !== 'error') busy = true;
+      const state = j ? (j.state === 'error' ? `<span class="bad">failed: ${esc(j.error || '')}</span>` : j.state === 'indexing' ? 'building the search index…' : `downloading ${j.total ? Math.round(100 * j.done / j.total) + '%' : (j.done / 1e6).toFixed(0) + ' MB'}…`)
+        : a.present ? `<span class="good">✓ ${a.updated || ''}</span>${a.parts ? ` · ${a.parts.toLocaleString()} parts` : ''}${k === 'full' && a.indexed === false ? ' · <span class="warn">not indexed</span>' : ''}` : '<span class="muted">not downloaded</span>';
+      const off = a.desktop_only ? ' disabled title="Desktop version only (server.py)"' : j && j.state !== 'error' ? ' disabled' : '';
+      return `<div class="row archrow"><div style="flex:1"><b>${esc(a.name || k)}</b> <span class="muted small">${esc(a.size_about || '')}${k === 'basic' ? ' · Basic + Preferred parts' : ' · every part in stock'}</span><div class="small">${state}</div></div><button data-arch="${k}"${off}>${a.present ? 'Update' : 'Download'}</button></div>`;
+    }).join('');
+    box.querySelectorAll('[data-arch]').forEach(b => b.onclick = async () => {
+      b.disabled = true; b.textContent = 'Starting…';
+      try { const r = await AI.partsApi('archive/download?kind=' + b.dataset.arch, { method: 'POST' }); if (r && r.done) toast(`Basic Parts Archive saved: ${(r.parts || 0).toLocaleString()} parts`); }
+      catch (e) { toast('Archive download failed: ' + e.message, 8000); }
+      archiveUi();
+    });
+    if (busy) archTimer = setTimeout(archiveUi, 1500);
   }
   let fetchSeq = 0;
   async function fetchModelsUI() {

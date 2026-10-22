@@ -9,7 +9,7 @@ const KiCad = (() => {
 
   function index() {
     if (names) return Promise.resolve(names);
-    if (!loading) loading = fetch('data/kicad-footprints.txt').then(r => { if (!r.ok) throw new Error('KiCad footprint list not found (' + r.status + ')'); return r.text(); })
+    if (!loading) loading = api.readIndex()
       .then(t => (names = t.split(/\r?\n/).filter(Boolean))).finally(() => { loading = null; });
     return loading;
   }
@@ -136,6 +136,9 @@ const KiCad = (() => {
     return { props, pins, extends: null };
   }
 
-  return { index, search, load, loadUrl, parse, parseSymbol, parseLegacySymbol };
+  // the footprint list; replaceable (the MCP server reads it from disk)
+  const api = { readIndex: () => fetch('data/kicad-footprints.txt').then(r => { if (!r.ok) throw new Error('KiCad footprint list not found (' + r.status + ')'); return r.text(); }),
+    index, search, load, loadUrl, parse, parseSymbol, parseLegacySymbol };
+  return api;
 })();
 if (typeof module !== 'undefined') module.exports = KiCad;

@@ -20,7 +20,7 @@ const Engine = (() => {
     if (!r.ok || (j && j.error && !j.results)) throw new Error((j && j.error) || r.statusText);
     return j;
   }
-  const partsApi = path => api('/api/parts/' + path);
+  const partsApi = (path, opts) => api('/api/parts/' + path, opts);
 
   // ---------- tool definitions ----------
   const types = Lib.types();
@@ -115,7 +115,15 @@ const Engine = (() => {
     if (mine) return mine;
     if (typeof OpenLib !== 'undefined' && OpenLib.isKey(raw)) { if (!partCache[raw]) partCache[raw] = await OpenLib.load(raw).catch(e => { throw e; }); return partCache[raw]; }
     if (!/^(C\d+|EE-[0-9A-F]{32})$/.test(up)) throw new Error(`Unknown part "${raw}" — use an LCSC code (C1234), an EasyEDA community key (EE-…), an open-library key (OL:…) or a My Library key`);
-    if (!partCache[up]) partCache[up] = await partsApi('get/' + encodeURIComponent(up));
+    if (!partCache[up]) {
+      try { partCache[up] = await partsApi('get/' + encodeURIComponent(up)); }
+      catch (e) {
+        // EasyEDA library unavailable: build the part from the open libraries (same part number, or the package's KiCad footprint)
+        if (!/^C\d+$/.test(up) || typeof OpenLib === 'undefined' || !OpenLib.fallbackPart) throw e;
+        let info = null; try { info = ((await partsApi('search?q=' + up + '&limit=3')).results || []).find(r => r.lcsc === up) || null; } catch (e2) { }
+        try { partCache[up] = await OpenLib.fallbackPart(up, info); } catch (e3) { throw new Error(e.message + ' — ' + e3.message); }
+      }
+    }
     return partCache[up];
   }
   const keyOf = m => m.key || m.lcsc;

@@ -1369,6 +1369,104 @@ const Pcb = (() => {
     }
     return lines;
   }
+  // ---------- manual tracks: the copilots draw them like the Route tool (pad / point / via, corner by corner) ----------
+  const LAYER = v => v === 'B' || /^b(ot|ottom)?$/i.test(String(v || '')) ? 'B' : v === 'F' || /^(t|top|f|front)$/i.test(String(v || '')) ? 'F' : null;
+  // "U1.2" / "U1.VCC" → the pad (pads with the same pin: the one nearest to `near`)
+  function findPad(ref, near) {
+    const s = String(ref).trim(), d = s.indexOf('.'), c = Model.comp(s.slice(0, d));
+    if (d < 0 || !c) throw new Error(`No pad "${s}" — use REF.PIN, e.g. R1.1 or U1.VCC`);
+    if (!c.pcb) throw new Error(`${c.ref} is not on the PCB`);
+    const pads = padsOf(c, Model.pinIndex()), want = s.slice(d + 1);
+    let nums; try { nums = Model.resolvePins(s).map(k => k.slice(k.lastIndexOf('.') + 1)); } catch (e) { nums = []; }
+    let hit = pads.filter(p => nums.includes(p.num) || (c.pinAlias && nums.includes(c.pinAlias[p.num])));
+    if (!hit.length) hit = pads.filter(p => p.num === want);
+    if (!hit.length) throw new Error(`${c.ref} has no pad "${want}". Pads: ${pads.map(p => p.num).join(', ')}`);
+    if (near) hit.sort((a, b) => Math.hypot(a.x - near[0], a.y - near[1]) - Math.hypot(b.x - near[0], b.y - near[1]));
+    return hit[0];
+  }
+  // points: "REF.PIN" | [x, y] | {x, y, via?, layer?}; a via (or a new layer) at a point switches layer there
+  function addTrack(o = {}) {
+    const S = Model.S, R = rules(), pts = Array.isArray(o.points) ? o.points : [];
+    if (!S.board.w) throw new Error('No PCB yet — call generate_pcb (or place_footprints) first');
+    if (pts.length < 2) throw new Error('points needs at least 2 entries (pads like "U1.2" or [x, y] in board mm)');
+    let net = o.net || null, layer = LAYER(o.layer);
+    const steps = [];
+    for (let i = 0; i < pts.length; i++) {
+      const q = pts[i], prev = steps.length ? [steps[steps.length - 1].x, steps[steps.length - 1].y] : null;
+      if (typeof q === 'string') {
+        const p = findPad(q, prev);
+        if (p.net && net && p.net !== net) throw new Error(`${p.key} is on net ${p.net}, the track is on ${net}`);
+        if (!net) net = p.net || null;
+        steps.push({ x: p.x, y: p.y, pad: p });
+      } else {
+        const x = +(Array.isArray(q) ? q[0] : q.x), y = +(Array.isArray(q) ? q[1] : q.y);
+        if (!isFinite(x) || !isFinite(y)) throw new Error(`Point ${i + 1} is not a pad or [x, y]`);
+        steps.push({ x, y, via: !Array.isArray(q) && !!q.via, layer: Array.isArray(q) ? null : LAYER(q.layer) });
+      }
+    }
+    if (!net) throw new Error('Which net? Start or end on a pad, or give net');
+    if (!S.nets[net]) throw new Error(`No net "${net}"`);
+    if (!layer) { const sp = steps.find(s => s.pad && s.pad.layer); layer = sp ? sp.pad.layer : 'F'; }
+    if (R.layers === 1 && (layer === 'B' || steps.some(s => s.via || s.layer === 'B'))) throw new Error('The board has 1 copper layer — no vias or bottom tracks');
+    const w = +(o.width || netWidth(R, net)), corner = o.corner === '90' || o.corner === 90 ? 90 : o.corner === '45' || o.corner === 45 ? 45 : 0;
+    // optional knee between two points: 45° (diagonal first, then straight) or 90° (x first, then y)
+    const knee = (a, b) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      if (!corner || Math.abs(dx) < 1e-6 || Math.abs(dy) < 1e-6 || (corner === 45 && Math.abs(Math.abs(dx) - Math.abs(dy)) < 1e-6)) return [];
+      if (corner === 90) return [[b[0], a[1]]];
+      const m = Math.min(Math.abs(dx), Math.abs(dy)); return [[+(a[0] + Math.sign(dx) * m).toFixed(4), +(a[1] + Math.sign(dy) * m).toFixed(4)]];
+    };
+    const out = [], vias = [];
+    let cur = { layer, pts: [[steps[0].x, steps[0].y]] };
+    for (let i = 1; i < steps.length; i++) {
+      const s = steps[i], last = cur.pts[cur.pts.length - 1], b = [s.x, s.y];
+      for (const k of knee(last, b)) cur.pts.push(k);
+      cur.pts.push(b);
+      if (s.pad && s.pad.layer && s.pad.layer !== cur.layer) throw new Error(`${s.pad.key} is an SMD pad on the ${s.pad.layer === 'F' ? 'top' : 'bottom'} layer but the track is on the ${cur.layer === 'F' ? 'top' : 'bottom'} here — put {x, y, via: true} before it`);
+      const to = s.via ? (s.layer || (cur.layer === 'F' ? 'B' : 'F')) : s.layer;
+      if (to && to !== cur.layer && i < steps.length - 1) {
+        out.push(cur); if (!s.pad || !s.pad.drill) vias.push({ net, x: s.x, y: s.y, d: R.viaDiameter, drill: R.viaDrill, manual: true });
+        cur = { layer: to, pts: [b] };
+      }
+    }
+    out.push(cur);
+    if (steps[0].pad && steps[0].pad.layer && steps[0].pad.layer !== out[0].layer) throw new Error(`${steps[0].pad.key} is an SMD pad on the ${steps[0].pad.layer === 'F' ? 'top' : 'bottom'} layer — start on that layer`);
+    const before = new Set(drc().violations.map(v => v.msg)), first = S.pcb.traces.length;
+    for (const t of out) { const p = t.pts.filter((q, k) => !k || Math.hypot(q[0] - t.pts[k - 1][0], q[1] - t.pts[k - 1][1]) > 1e-6).map(q => [+(+q[0]).toFixed(4), +(+q[1]).toFixed(4)]); if (p.length >= 2) S.pcb.traces.push({ net, layer: t.layer, w: +w.toFixed(4), pts: p, manual: true }); }
+    for (const v of vias) S.pcb.vias.push(v);
+    const tracks = []; for (let i = first; i < S.pcb.traces.length; i++) tracks.push(i);
+    const d = drc(), fresh = d.violations.filter(v => !before.has(v.msg) && v.type !== 'unrouted').slice(0, 20), c = connectivity()[net];
+    return { net, tracks, vias: vias.length, width: +w.toFixed(4), layers: out.map(t => t.layer === 'F' ? 'top' : 'bottom'), net_complete: !!(c && c.complete), islands_left: c ? c.groups.length : 0, new_drc_problems: fresh, note: fresh.length ? 'This track breaks design rules — move its corners (remove_tracks, then add_track again) or undo' : undefined };
+  }
+  function addVia(o = {}) {
+    const S = Model.S, R = rules();
+    if (R.layers === 1) throw new Error('The board has 1 copper layer — no vias');
+    const x = +o.x, y = +o.y; if (!isFinite(x) || !isFinite(y)) throw new Error('x and y (board mm) are needed');
+    if (o.net && !S.nets[o.net]) throw new Error(`No net "${o.net}"`);
+    S.pcb.vias.push({ net: o.net || null, x: +x.toFixed(4), y: +y.toFixed(4), d: +(o.diameter || R.viaDiameter), drill: +(o.drill || R.viaDrill), manual: true });
+    return { index: S.pcb.vias.length - 1 };
+  }
+  const trackLen = t => { let l = 0; for (let i = 1; i < t.pts.length; i++) l += Math.hypot(t.pts[i][0] - t.pts[i - 1][0], t.pts[i][1] - t.pts[i - 1][1]); return +l.toFixed(2); };
+  function trackList(o = {}) {
+    const S = Model.S, f = x => !o.net || x.net === o.net;
+    return {
+      tracks: S.pcb.traces.map((t, i) => [i, t]).filter(([, t]) => f(t)).map(([i, t]) => ({ index: i, net: t.net, layer: t.layer === 'B' ? 'bottom' : 'top', width: t.w, points: t.pts, length_mm: trackLen(t), manual: !!t.manual })),
+      vias: S.pcb.vias.map((v, i) => [i, v]).filter(([, v]) => f(v)).map(([i, v]) => ({ index: i, net: v.net, x: v.x, y: v.y, diameter: v.d, drill: v.drill, manual: !!v.manual })),
+    };
+  }
+  // by index list, by net, or only the autorouter's / only hand-drawn ones
+  function removeTracks(o = {}) {
+    const S = Model.S, ti = new Set((o.tracks || []).map(Number)), vi = new Set((o.vias || []).map(Number));
+    const by = x => (o.net ? x.net === o.net : true) && (o.only === 'manual' ? !!x.manual : o.only === 'auto' ? !x.manual : true);
+    const all = !ti.size && !vi.size && (o.net || o.only || o.all);
+    if (!ti.size && !vi.size && !all) throw new Error('Give tracks / vias (indexes), net, only or all: true');
+    const nt = S.pcb.traces.length, nv = S.pcb.vias.length;
+    S.pcb.traces = S.pcb.traces.filter((t, i) => !(ti.has(i) || (all && by(t))));
+    S.pcb.vias = S.pcb.vias.filter((v, i) => !(vi.has(i) || (all && by(v))));
+    const conn = connectivity(); if (S.pcb.routed) for (const n of Object.keys(S.pcb.routed)) if (!conn[n] || !conn[n].complete) delete S.pcb.routed[n];
+    return { removed_tracks: nt - S.pcb.traces.length, removed_vias: nv - S.pcb.vias.length, note: 'Track and via indexes after the removed ones moved down — call get_tracks again' };
+  }
+
   function status(conn = connectivity()) {
     const S = Model.S, nets = Object.keys(conn), routed = nets.filter(n => conn[n].complete);
     let len = 0; for (const t of S.pcb.traces) for (let i = 1; i < t.pts.length; i++) len += Math.hypot(t.pts[i][0] - t.pts[i - 1][0], t.pts[i][1] - t.pts[i - 1][1]);
@@ -1908,7 +2006,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: S.board, seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { addTrack, addVia, trackList, removeTracks, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

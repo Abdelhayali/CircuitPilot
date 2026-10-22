@@ -18,6 +18,11 @@ const Projects = (() => {
     const [t, c] = map[s] || ['', '']; el.textContent = t; el.className = c; el.title = title;
   }
 
+  // the server version the browser's copy (localStorage cp.design) is based on, so a change made while no tab was
+  // open (Claude Desktop / Code over MCP) is not overwritten by an older browser copy at the next start
+  const hash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return (h >>> 0).toString(36) + ':' + s.length; };
+  function remember() { try { localStorage.setItem('cp.base', JSON.stringify({ id: Model.S.id, updated: serverUpdated, hash: hash(lastSaved) })); } catch (e) { } }
+
   // ---------- autosave ----------
   function schedule(kind) {
     if (kind === 'move') return;
@@ -36,6 +41,7 @@ const Projects = (() => {
       serverUpdated = r.updated;
       if (!Model.S.id) { Model.S.id = r.id; lastSaved = Model.snapshot(); Model.emit('meta'); }
       else lastSaved = snap;
+      remember();
       setStatus(Model.snapshot() === lastSaved ? 'saved' : 'dirty');
       return true;
     } catch (e) { setStatus('error', e.message); return false; }
@@ -47,7 +53,7 @@ const Projects = (() => {
     await saveNow();
     const d = await api('GET', '/api/projects/' + id);
     serverUpdated = (await api('GET', '/api/projects/' + id + '/meta')).updated;
-    Model.load(d); lastSaved = Model.snapshot(); setStatus('saved');
+    Model.load(d); lastSaved = Model.snapshot(); remember(); setStatus('saved');
     App.showView('sch'); Sch.select(null); Sch.fit(); App.toast('Opened “' + (d.name || 'Untitled') + '”');
     close();
   }
@@ -124,7 +130,7 @@ const Projects = (() => {
       if (serverUpdated && m.updated > serverUpdated + 0.001) {
         const d = await api('GET', '/api/projects/' + Model.S.id);
         if (Model.snapshot() !== lastSaved) return;
-        serverUpdated = m.updated; Model.load(d, true); lastSaved = Model.snapshot(); setStatus('saved');
+        serverUpdated = m.updated; Model.load(d, true); lastSaved = Model.snapshot(); remember(); setStatus('saved');
         if (window.Sch && Sch.offscreen && Sch.offscreen()) Sch.fit();   // parts moved out of view (e.g. auto-layout from Claude Code)
         App.toast('Project updated by an external tool');
       } else if (!serverUpdated) serverUpdated = m.updated;
@@ -169,8 +175,22 @@ const Projects = (() => {
     Model.subscribe(schedule);
     if (online) {
       await loadLibrary();
-      if (Model.S.id) { // make sure the browser's copy still exists on the server
-        try { await api('GET', '/api/projects/' + Model.S.id); } catch (e) { delete Model.S.id; }
+      if (Model.S.id) { // the browser's copy: still on the server? changed there since (by a copilot)?
+        try {
+          const id = Model.S.id, m = await api('GET', '/api/projects/' + id + '/meta'), d = await api('GET', '/api/projects/' + id);
+          let base = null; try { base = JSON.parse(localStorage.getItem('cp.base') || 'null'); } catch (e) { }
+          if (base && base.id !== id) base = null;
+          const local = Model.snapshot(), clean = !!base && base.hash === hash(local);
+          const newer = !base || m.updated > (base.updated || 0) + 0.001;
+          if (newer) {
+            Model.load(d); const srv = Model.snapshot();
+            if (srv !== local && !clean) {   // edited in both places: the server's version stays, the browser's edits become a copy
+              const c = JSON.parse(local); delete c.id; c.name = (c.name || 'Untitled') + ' (browser copy)';
+              try { await api('PUT', '/api/projects/', c); setTimeout(() => App.toast('This project was changed by Claude while CircuitPilot was closed — showing that version. Your unsaved browser edits are in “' + c.name + '” (Projects).', 12000), 500); } catch (e) { }
+            }
+            serverUpdated = m.updated; lastSaved = srv; remember();
+          }
+        } catch (e) { delete Model.S.id; }
       }
       await saveNow();
       setInterval(poll, 2500);

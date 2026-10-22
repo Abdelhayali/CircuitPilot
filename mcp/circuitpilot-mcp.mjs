@@ -276,6 +276,7 @@ Tell the user what you built and what to check (footprints against datasheets, a
 const INSTRUCTIONS = `CircuitPilot is an AI schematic + PCB designer. These tools edit the CURRENT project (see list_projects / open_project / create_project); the user sees every change live in the CircuitPilot browser app.
 Workflow: search_parts → get_part for real ICs/modules (exact pinout + footprint) → add_components → connect (named nets; GND / +3V3 / +5V are power nets) → run_erc → generate_pcb → export_gerbers.
 Pins are "REF.PIN" using the pin number or name. Use create_part for parts missing from the database. If the project has a knowledge folder, read it (knowledge_list / knowledge_search / knowledge_read) and follow its rules.
+Draw single tracks yourself with add_track (pads "U1.3" + [x, y] corners, {x, y, via: true} to change layer; route_pcb keeps them), list them with get_tracks, delete with remove_tracks.
 Look at your work: view_design returns a screenshot (schematic, pcb, pcb_3d, enclosure) drawn by the CircuitPilot tab open in the browser. Check the result after changes and fix what looks wrong.
 Datasheet: get_documentation / set_documentation write the product text of the Documentation tab (the user exports the PDF there). Use auto_layout sparingly; place parts with add_components x/y when you can.`;
 

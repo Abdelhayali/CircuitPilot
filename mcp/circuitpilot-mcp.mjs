@@ -273,6 +273,7 @@ const EXTRA = [
   { name: 'export_gerbers', description: 'Run DRC, then write Gerber (copper, mask, paste, silkscreen, outline) + Excellon drill files and a .zip for the fab into a folder on this machine. Refuses when DRC has errors unless force is true.', input_schema: { type: 'object', required: ['out_dir'], properties: { out_dir: { type: 'string', description: 'Absolute folder path (created if missing)' }, force: { type: 'boolean', description: 'export even with DRC errors' } } } },
   { name: 'export_enclosure', description: 'Write the 3D-printable enclosure for the current project into a folder on this machine: box mode → base + lid STL, parametric OpenSCAD .scad and notes; custom 3D mode → one STL per part, OpenSCAD source and the 3D script; plus a .zip.', input_schema: { type: 'object', required: ['out_dir'], properties: { out_dir: { type: 'string', description: 'Absolute folder path (created if missing)' } } } },
   { name: 'get_bom', description: 'Bill of materials of the current project as CSV text (qty, refs, type, value, footprint, LCSC part).', input_schema: { type: 'object', properties: {} } },
+  { name: 'import_folder', description: 'Add every project found in a folder and all its subfolders: CircuitPilot project files (.json / .circuit.json) and EasyEDA PCB files (.json, imported with tracks). Each becomes a new project; files that match a project already in CircuitPilot (same name and part count) are skipped unless skip_existing: false. dry_run: true only lists what would be imported. The first imported project becomes current.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: 'folder on this PC' }, recursive: { type: 'boolean', description: 'default true' }, dry_run: { type: 'boolean' }, skip_existing: { type: 'boolean', description: 'default true' } } } },
   { name: 'export_parts', description: 'Write parts of My Library (default: all) to a JSON file, to use them in another CircuitPilot database or on another PC (import_parts).', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, path: { type: 'string', description: 'file path (default Documents/CircuitPilot exports/my-library.json)' } } } },
   { name: 'import_parts', description: 'Add the parts of a JSON file from export_parts (or one part object) to My Library. Existing parts with the same key are kept unless overwrite: true.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, overwrite: { type: 'boolean' } } } },
   { name: 'job_status', description: 'Result of a background job (long tools — generate_pcb, route_pcb, optimize_pcb, place_footprints, update_pcb_from_schematic, auto_layout, export_project — hand out a job_id when they take longer than ~40 s). Waits up to wait_s (default 50, max 55) for it to finish. Without job_id: lists the jobs.', input_schema: { type: 'object', properties: { job_id: { type: 'string' }, wait_s: { type: 'number' } } } },
@@ -284,7 +285,7 @@ const EXTRA = [
 ];
 // every tool takes `project`: the call works on that project (it becomes the current one) — no guessing after a restart
 const PROJECT_ARG = { type: 'string', description: 'Project id (or exact name) this call works on; it becomes the current project. Pass it in every call.' };
-const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job', 'export_parts', 'import_parts']);
+const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job', 'export_parts', 'import_parts', 'import_folder']);
 const TOOLS = [...EXTRA, ...Engine.TOOLS.filter(t => !EXTRA.some(x => x.name === t.name)).map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema }))]
   .map(t => NO_PROJECT_ARG.has(t.name) ? t : Object.assign({}, t, { input_schema: Object.assign({}, t.input_schema, { properties: Object.assign({ project: PROJECT_ARG }, t.input_schema.properties || {}) }) }));
 // tools that need no project at all
@@ -301,6 +302,45 @@ async function callTool(name, input = {}) {
   }
   if (LONG.has(name)) { const j = await startJob(name, input); return awaitJob(j, JOB_WAIT); }
   switch (name) {
+    case 'import_folder': {
+      const root = path.resolve(String(input.path || '')); if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error('No folder ' + root);
+      const SKIP = /^(node_modules|\.git|__pycache__|dist|build)$/i, files = [];
+      const walk = (dir, depth) => {
+        let ents = []; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of ents) {
+          const p = path.join(dir, e.name);
+          if (e.isDirectory()) { if (input.recursive !== false && depth < 12 && !SKIP.test(e.name)) walk(p, depth + 1); }
+          else if (/\.json$/i.test(e.name) && files.length < 5000) files.push(p);
+        }
+      };
+      walk(root, 0);
+      const existing = await api('GET', '/api/projects'), found = [], skipped = [];
+      for (const f of files) {
+        const rel = path.relative(root, f).replace(/\\/g, '/');
+        let d; try { if (fs.statSync(f).size > 30e6) throw new Error('too big'); d = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { skipped.push(rel + ' (' + (e.message === 'too big' ? 'too big' : 'not valid JSON') + ')'); continue; }
+        let kind = null, name = null, parts = null;
+        if (d && Array.isArray(d.components) && d.nets && typeof d.nets === 'object') { kind = 'circuitpilot'; name = d.name; parts = d.components.length; }
+        else { const ee = ctx.EasyEDA.isEasyEDA(d); if (ee === 'schematic') { skipped.push(rel + ' (EasyEDA schematic: import its PCB file)'); continue; } if (ee) { kind = 'easyeda'; name = (d.head && d.head.title) || d.title || null; } }
+        if (!kind) { skipped.push(rel + ' (not a project)'); continue; }
+        name = name || path.basename(f).replace(/\.circuit\.json$|\.json$/i, '');
+        const dup = existing.some(p => (p.name || '') === name && (kind !== 'circuitpilot' || p.parts === parts));   // EasyEDA: same name
+        found.push({ file: rel, kind, name, parts, already_in_circuitpilot: dup || undefined, d });
+      }
+      const todo = found.filter(x => !(x.already_in_circuitpilot && input.skip_existing !== false));
+      const list = x => ({ file: x.file, kind: x.kind === 'circuitpilot' ? 'CircuitPilot project' : 'EasyEDA PCB', name: x.name, parts: x.parts == null ? undefined : x.parts, already_in_circuitpilot: x.already_in_circuitpilot });
+      if (input.dry_run) return { folder: root, json_files: files.length, would_import: todo.map(list), already_there: found.filter(x => !todo.includes(x)).map(list), skipped: skipped.slice(0, 50) };
+      const imported = [], failed = [];
+      for (const x of todo) {
+        try {
+          let data;
+          if (x.kind === 'circuitpilot') { data = JSON.parse(JSON.stringify(x.d)); delete data.id; data.name = x.name; }
+          else { const nd = Model.blank(); nd.name = x.name; Model.load(nd); ctx.EasyEDA.importPcb(x.d); data = JSON.parse(Model.snapshot()); delete data.id; }
+          const r = await api('PUT', '/api/projects/', data); imported.push({ id: r.id, name: x.name, file: x.file, parts: data.components.length });
+        } catch (e) { failed.push(x.file + ': ' + e.message); }
+      }
+      if (imported.length) { setCurrent(imported[0].id); await showProject(imported[0].id); }
+      return { folder: root, json_files: files.length, imported, already_there: found.filter(x => !todo.includes(x)).map(x => x.file), failed: failed.length ? failed : undefined, skipped: skipped.slice(0, 50), current: imported.length ? imported[0].id : undefined };
+    }
     case 'export_parts': {
       const lib = await api('GET', '/api/library'), want = Array.isArray(input.keys) && input.keys.length ? new Set(input.keys) : null;
       const parts = lib.filter(p => !want || want.has(p.key)), file = path.resolve(String(input.path || path.join(os.homedir(), 'Documents', 'CircuitPilot exports', 'my-library.json')));

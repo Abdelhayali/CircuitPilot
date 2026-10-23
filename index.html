@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610232100">
+<link rel="stylesheet" href="styles.css?v=202610232200">
 </head>
 <body>
 <header id="top">
@@ -19,6 +19,7 @@
       <div class="ddm">
         <button id="fdSave" title="Choose a folder: the project is written there as <name>.circuit.json, and every save updates it">Save to folder…</button>
         <button id="fdOpen" title="Open a project file (.circuit.json) from a folder; saves go back to that file">Open from folder…</button>
+        <button id="fdImportAll" title="Choose a folder: every CircuitPilot project and EasyEDA PCB (.json) in it and its subfolders is added to your projects">Import all projects in a folder…</button>
         <button id="fdStop" class="hidden" title="Stop writing this project to its folder (the file stays)">Stop saving to folder</button>
       </div>
     </div>
@@ -236,7 +237,7 @@
 <div id="projModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>Projects</h2><button id="projClose">✕</button></div>
-    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><button id="projNew" class="primary">＋ New project</button><button id="projImport" title="A CircuitPilot project (.json), an EasyEDA Pro project (.epro / .epro2: File → Save As / Export → Project) with schematic and PCB, or an EasyEDA Standard PCB (File → Export → EasyEDA Source)">Import (.json, EasyEDA Pro / Std)</button></div>
+    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><button id="projNew" class="primary">＋ New project</button><button id="projImportAll" title="Every project (.json) in a folder and its subfolders">Import folder…</button><button id="projImport" title="A CircuitPilot project (.json), an EasyEDA Pro project (.epro / .epro2: File → Save As / Export → Project) with schematic and PCB, or an EasyEDA Standard PCB (File → Export → EasyEDA Source)">Import (.json, EasyEDA Pro / Std)</button></div>
     <div id="projList"></div>
   </div>
 </div>
@@ -285,11 +286,11 @@
 <div id="rulesModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>Design rules</h2><button id="rulesClose">✕</button></div>
-    <p class="muted small">The autorouter follows these rules and DRC checks the board against them. The default is JLCPCB's smallest 2-layer rules at no extra cost (0.1 mm tracks and gaps, 0.45 / 0.3 mm vias) — verify current limits at <a href="https://jlcpcb.com/capabilities/pcb-capabilities" target="_blank" rel="noopener">jlcpcb.com/capabilities</a>.</p>
+    <p class="muted small">The autorouter follows these rules and DRC checks the board against them. The default is JLCPCB 2-layer rules at no extra cost: 0.2 mm tracks (JLCPCB can go down to 0.1 mm), 0.1 mm gaps, 0.45 / 0.3 mm vias — verify current limits at <a href="https://jlcpcb.com/capabilities/pcb-capabilities" target="_blank" rel="noopener">jlcpcb.com/capabilities</a>.</p>
     <label>Preset <select id="rPreset"></select></label>
     <div class="rgrid">
       <div class="rh">Routing rules</div>
-      <label>Trace width<input data-r="traceWidth" type="number" step="0.01" min="0.05"><span>mm</span></label>
+      <label title="JLCPCB makes tracks down to 0.1 mm (4 mil) at no extra cost — use it on very tight boards; with Neck down the router already narrows a track to the fab minimum where 0.2 mm does not fit">Trace width<input data-r="traceWidth" type="number" step="0.01" min="0.05"><span>mm <span class="muted small">(can go down to 0.1)</span></span></label>
       <label class="chk"><input data-r="powerWider" type="checkbox"> Wider tracks for power / GND nets</label>
       <label>Power / GND trace width<input data-r="powerTraceWidth" type="number" step="0.01" min="0.05"><span>mm</span></label>
       <label>Clearance (copper–copper)<input data-r="clearance" type="number" step="0.01" min="0.05"><span>mm</span></label>
@@ -350,33 +351,33 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610232100"></script>
-<script src="js/static-backend.js?v=202610232100"></script>
-<script src="js/lib.js?v=202610232100"></script>
-<script src="js/view.js?v=202610232100"></script>
-<script src="js/model.js?v=202610232100"></script>
-<script src="js/schematic.js?v=202610232100"></script>
-<script src="js/pcb.js?v=202610232100"></script>
-<script src="js/pcbview.js?v=202610232100"></script>
-<script src="js/enclosure.js?v=202610232100"></script>
-<script src="js/shape3d.js?v=202610232100"></script>
-<script src="js/easyeda.js?v=202610232100"></script>
-<script src="js/libpanel.js?v=202610232100"></script>
-<script src="js/openlib.js?v=202610232100"></script>
-<script src="js/kicad.js?v=202610232100"></script>
-<script src="js/easyedapro.js?v=202610232100"></script>
-<script src="js/encview.js?v=202610232100"></script>
-<script src="js/docview.js?v=202610232100"></script>
-<script src="js/pcb3d.js?v=202610232100"></script>
-<script src="js/blocks.js?v=202610232100"></script>
-<script src="js/engine.js?v=202610232100"></script>
-<script src="js/ai.js?v=202610232100"></script>
-<script src="js/exports.js?v=202610232100"></script>
-<script src="js/pcbpdf.js?v=202610232100"></script>
-<script src="js/folder.js?v=202610232100"></script>
-<script src="js/projects.js?v=202610232100"></script>
-<script src="js/editor.js?v=202610232100"></script>
-<script src="js/app.js?v=202610232100"></script>
+<script src="js/config.js?v=202610232200"></script>
+<script src="js/static-backend.js?v=202610232200"></script>
+<script src="js/lib.js?v=202610232200"></script>
+<script src="js/view.js?v=202610232200"></script>
+<script src="js/model.js?v=202610232200"></script>
+<script src="js/schematic.js?v=202610232200"></script>
+<script src="js/pcb.js?v=202610232200"></script>
+<script src="js/pcbview.js?v=202610232200"></script>
+<script src="js/enclosure.js?v=202610232200"></script>
+<script src="js/shape3d.js?v=202610232200"></script>
+<script src="js/easyeda.js?v=202610232200"></script>
+<script src="js/libpanel.js?v=202610232200"></script>
+<script src="js/openlib.js?v=202610232200"></script>
+<script src="js/kicad.js?v=202610232200"></script>
+<script src="js/easyedapro.js?v=202610232200"></script>
+<script src="js/encview.js?v=202610232200"></script>
+<script src="js/docview.js?v=202610232200"></script>
+<script src="js/pcb3d.js?v=202610232200"></script>
+<script src="js/blocks.js?v=202610232200"></script>
+<script src="js/engine.js?v=202610232200"></script>
+<script src="js/ai.js?v=202610232200"></script>
+<script src="js/exports.js?v=202610232200"></script>
+<script src="js/pcbpdf.js?v=202610232200"></script>
+<script src="js/folder.js?v=202610232200"></script>
+<script src="js/projects.js?v=202610232200"></script>
+<script src="js/editor.js?v=202610232200"></script>
+<script src="js/app.js?v=202610232200"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

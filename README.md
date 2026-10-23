@@ -192,6 +192,8 @@ Everything fetched is cached in a local SQLite database (`parts.db`), so parts y
 
 Projects are stored on the server (`projects.db`, SQLite) and saved automatically — the status next to the project name shows **✓ Saved**. Use **▤ Projects** to open, duplicate, rename, delete or import projects, **＋ New** to start one, and **Save as…** (`Ctrl+Shift+S`) to save the current design under a new name and continue in the copy. The same projects appear on every device that opens the app. **Export → Project file (.json)** downloads a portable copy.
 
+**Import a whole folder**: **▤ Projects → Import folder…** (or the folder menu → *Import all projects in a folder…*) searches the folder and all its subfolders for CircuitPilot projects (`.json` / `.circuit.json`) and EasyEDA PCB files, lists what it found (projects already in CircuitPilot start unticked) and adds the ticked ones as new projects; the first one opens. Claude: `import_folder {path, dry_run?}`.
+
 **Earlier versions**: the desktop server keeps earlier states of every project — about every 10 minutes while you edit, whenever many parts disappear in one save, before a restore and when a project is deleted (60 per project). **▤ Projects → ⟲** lists them with **Restore**; **Deleted projects…** brings back a deleted one. Claude: `list_project_versions`, `restore_project_version`, `copy_project`.
 
 ## Part editor (custom symbols & footprints)
@@ -209,7 +211,7 @@ Only document-type files inside the chosen folder are read (no `..` escapes, hid
 
 ## Control from Claude Code (MCP) and other tools
 
-`mcp/circuitpilot-mcp.mjs` exposes all 83 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
+`mcp/circuitpilot-mcp.mjs` exposes all 84 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
 
 **Claude Desktop (easiest)** — run once:
 
@@ -264,7 +266,7 @@ curl -H "Authorization: Bearer <password>" -X POST http://127.0.0.1:5174/tools/s
 
 JLCPCB makes tracks / gaps down to 0.1 mm and vias down to 0.15 mm hole / 0.25 mm diameter, but on 1–2 layer boards **vias cost nothing extra only with a hole ≥ 0.3 mm and a diameter ≥ 0.4 mm** (0.2 mm holes are free only on multi-layer boards, at ≥ 0.45 mm diameter); the diameter must be ≥ hole + 0.1 mm (0.15 preferred) — the rules warn about that, DRC lists each extra-cost via size once, and Gerber exports / the datasheet say which via size the board uses.
 
-- Presets: **JLCPCB smallest at no extra cost** (`jlcpcb_free_min`, the default: 0.1 mm tracks and gaps, 0.45 / 0.3 mm vias — much more room on small boards), **JLCPCB standard** (`jlcpcb`: 0.25 mm tracks, 0.6 / 0.3 mm vias), **JLCPCB 5/5 mil**, **JLCPCB power/robust**, **Home etching / CNC (1 layer)** — then tweak any value.
+- Presets: **JLCPCB smallest at no extra cost** (`jlcpcb_free_min`, the default: 0.2 mm tracks, 0.1 mm gaps, 0.45 / 0.3 mm vias — tracks can go down to 0.1 mm on tight boards, and *neck down* narrows them to that minimum only where 0.2 mm does not fit), **JLCPCB standard** (`jlcpcb`: 0.25 mm tracks, 0.6 / 0.3 mm vias), **JLCPCB 5/5 mil**, **JLCPCB power/robust**, **Home etching / CNC (1 layer)** — then tweak any value.
 - **No via in pad** (default on): vias never go on SMD pads — not even as the router's last resort — and DRC reports one as an error, so the Gerber export refuses it. Only a real exposed pad (a QFN / DFN paddle among at least four pins) may take thermal vias; module edge pads (XIAO castellations), coin-cell contacts and big chip pads never do. `add_via` / `add_track` refuse a via that touches an SMD pad. When a net cannot be routed, `route_pcb` says why (`failed_reason`).
 - **Keep-out areas** (**K** tool, or `add_keepout`): no tracks, vias or copper pour inside — each can be allowed again — and optionally no parts; on top, bottom or both. For the antenna end of a module, under a coin cell, around a crystal. The router and copper pours avoid them; DRC reports what is inside. Click the dashed border to edit or delete one.
 - **Tracks under batteries / metal parts** (Rules checkbox, off by default; `warnUnderMetal`): DRC warns about tracks and vias of other nets on the same side under a coin cell, battery holder, shield can or magnet, where only solder mask insulates them.

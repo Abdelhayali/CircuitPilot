@@ -24,8 +24,9 @@ const Projects = (() => {
   function remember() { try { localStorage.setItem('cp.base', JSON.stringify({ id: Model.S.id, updated: serverUpdated, hash: hash(lastSaved) })); } catch (e) { } }
 
   // ---------- autosave ----------
+  let paused = false;   // a folder import converts files in the editor model: those states must not be autosaved
   function schedule(kind) {
-    if (kind === 'move') return;
+    if (kind === 'move' || paused) return;
     if (!online) { setStatus('local'); return; }
     if (Model.snapshot() === lastSaved) { setStatus('saved'); return; }
     setStatus('dirty'); clearTimeout(timer); timer = setTimeout(saveNow, 1200);
@@ -244,5 +245,5 @@ const Projects = (() => {
       } catch (err) { App.toast(err.message); }
     };
   }
-  return { init, show, close, saveNow, saveAs, create, get online() { return online; }, get myLib() { return myLib; }, loadLibrary, savePart, deletePart, markLoaded: () => { lastSaved = ''; } };
+  return { init, show, close, saveNow, saveAs, create, openId: open, pause: v => { paused = !!v; if (paused) clearTimeout(timer); }, get online() { return online; }, get myLib() { return myLib; }, loadLibrary, savePart, deletePart, markLoaded: () => { lastSaved = ''; } };
 })();

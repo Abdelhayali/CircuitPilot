@@ -32,7 +32,7 @@ const DocView = (() => {
     const specs = [
       ['Board size', hasPcb ? `${S.board.w} × ${S.board.h} mm` : '—'], ['Outline', { rect: 'Rectangle', rounded: 'Rounded rectangle', ellipse: 'Round / elliptical', polygon: 'Custom outline' }[shape] || shape],
       ['Layers', R.layers === 1 ? '1 (single-sided)' : '2 (top + bottom copper)'], ['Material / thickness', 'FR-4, 1.6 mm, 1 oz copper'],
-      ['Min. track / spacing', `${R.traceWidth} / ${R.clearance} mm`], ['Power tracks', `${R.powerTraceWidth} mm`], ['Vias', `Ø${R.viaDiameter} mm, drill ${R.viaDrill} mm`],
+      ['Min. track / spacing', `${R.traceWidth} / ${R.clearance} mm`], ['Power tracks', `${R.powerTraceWidth} mm`], ['Vias', hasPcb ? Pcb.viaSummary() : `Ø${R.viaDiameter} mm, drill ${R.viaDrill} mm`],
       ['Mounting holes', holes.length ? `${holes.length} × Ø${holes[0].d} mm` : 'none'], ['Components', `${S.components.length}${placed.filter(c => Pcb.isBottom(c)).length ? ` (${placed.filter(c => Pcb.isBottom(c)).length} on the bottom side)` : ''}`],
       ['Nets', String(nets.length)], ['Routing', st ? `${st.routed}/${st.nets} nets, ${st.vias} vias, ${st.trace_length_mm} mm of track` : '—'],
       ['Design-rule check', drc ? drc.summary : '—'], ['Electrical-rule check', ercE ? `${ercE} errors, ${ercW} warnings` : ercW ? `0 errors, ${ercW} warnings` : 'passed'],

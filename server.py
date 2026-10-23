@@ -183,7 +183,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/version":  # changes whenever the app files change → open tabs offer a reload
             files = ["index.html", "styles.css"] + ["js/" + f for f in os.listdir("js") if f.endswith(".js")]
             v = max(os.path.getmtime(f) for f in files if os.path.exists(f))
-            return self._send(200, json.dumps({"version": str(int(v))}).encode(), "application/json")
+            return self._send(200, json.dumps({"version": str(int(v)), "data_dir": os.path.dirname(store.DB_PATH)}).encode(), "application/json")
         if path.startswith("/api/parts/"):
             return self._parts(path)
         if path.startswith(("/api/projects", "/api/library")):
@@ -328,8 +328,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 body = json.loads(self.rfile.read(n).decode("utf-8"))
             m = self.command
             if kind == "projects":
-                if m == "GET" and key and len(parts) > 2 and parts[2] == "meta":
+                if m == "GET" and key == "_deleted":
+                    out = store.deleted_projects()
+                elif m == "GET" and key and len(parts) > 2 and parts[2] == "meta":
                     out = store.get_meta(key)
+                elif m == "GET" and key and len(parts) > 2 and parts[2] == "versions":
+                    out = store.get_version(key, parts[3]) if len(parts) > 3 else store.list_versions(key)
+                elif m == "POST" and key and len(parts) > 2 and parts[2] == "restore":
+                    out = store.restore_version(key, (body or {}).get("version"))
                 elif m == "GET":
                     out = store.get_project(key) if key else store.list_projects()
                 elif m in ("PUT", "POST"):

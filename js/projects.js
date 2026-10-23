@@ -102,9 +102,25 @@ const Projects = (() => {
       list.innerHTML = note + (rows.length ? rows.map(p => `<div class="proj${p.id === Model.S.id ? ' cur' : ''}" data-id="${esc(p.id)}">
         <div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}${p.id === Model.S.id ? ' <span class="badge basic">open</span>' : ''}</div>
         <div class="muted small">${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · ${ago(p.updated)}</div></div>
-        <div class="pact"><button data-a="open" class="primary">Open</button><button data-a="dup" title="Duplicate">⧉</button><button data-a="ren" title="Rename">✎</button><button data-a="del" class="danger" title="Delete">🗑</button></div></div>`).join('')
-        : '<div class="muted">No projects yet.</div>');
+        <div class="pact"><button data-a="open" class="primary">Open</button><button data-a="dup" title="Duplicate">⧉</button>${hasHistory ? '<button data-a="hist" title="Earlier versions (restore)">⟲</button>' : ''}<button data-a="ren" title="Rename">✎</button><button data-a="del" class="danger" title="Delete">🗑</button></div></div>`).join('')
+        : '<div class="muted">No projects yet.</div>') + (hasHistory ? '<div class="proj"><div class="pinfo muted small">Every project keeps earlier versions (⟲). </div><div class="pact"><button data-a="deleted">Deleted projects…</button></div></div>' : '');
     } catch (e) { list.innerHTML = `<div class="bad">${esc(e.message)}</div>`; }
+  }
+  // earlier versions of a project (desktop server keeps them: every ~10 min while editing, big part losses, deletes)
+  const hasHistory = !(window.CPStatic && CPStatic.mode === 'static');
+  async function history(id, name) {
+    const list = $('#projList'), vs = await api('GET', '/api/projects/' + id + '/versions');
+    const when = t => new Date(t * 1000).toLocaleString();
+    list.innerHTML = `<div class="proj" data-id="${esc(id)}"><div class="pinfo"><div class="pname">${esc(name)}</div><div class="muted small">Earlier versions — newest first</div></div><div class="pact"><button data-a="back">← Back</button></div></div>` +
+      (vs.length ? vs.map(v => `<div class="proj" data-id="${esc(id)}"><div class="pinfo"><div class="pname" style="display:none">${esc(name)}</div><div>${esc(when(v.saved))}</div>
+        <div class="muted small">${v.parts} parts · ${esc(v.reason === 'parts removed' ? 'saved before parts were removed' : v.reason === 'deleted' ? 'state when deleted' : v.reason === 'before restore' ? 'state before a restore' : 'autosave')}</div></div>
+        <div class="pact"><button data-a="restore" data-v="${v.version}" data-when="${esc(when(v.saved))}" class="primary">Restore</button></div></div>`).join('') : '<div class="muted">No earlier versions yet (they are kept while you edit, about every 10 minutes).</div>');
+  }
+  async function showDeleted() {
+    const list = $('#projList'), ds = await api('GET', '/api/projects/_deleted');
+    list.innerHTML = `<div class="proj"><div class="pinfo"><div class="pname">Deleted projects</div></div><div class="pact"><button data-a="back">← Back</button></div></div>` +
+      (ds.length ? ds.map(p => `<div class="proj" data-id="${esc(p.id)}"><div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}</div><div class="muted small">${p.parts} parts · deleted ${esc(new Date(p.deleted * 1000).toLocaleString())}</div></div>
+        <div class="pact"><button data-a="hist" title="Versions of this project">⟲ Versions</button></div></div>`).join('') : '<div class="muted">No deleted projects.</div>');
   }
   function show() { $('#projModal').classList.remove('hidden'); $('#projSearch').value = ''; render(); }
   function close() { $('#projModal').classList.add('hidden'); }
@@ -204,13 +220,26 @@ const Projects = (() => {
     $('#projNew').onclick = () => { const n = prompt('Project name', 'New project'); if (n !== null) create(n.trim() || 'Untitled'); };
     $('#projImport').onclick = () => $('#fileIn').click();
     $('#projList').onclick = async e => {
-      const b = e.target.closest('button[data-a]'), row = e.target.closest('.proj'); if (!b || !row) return;
+      const b = e.target.closest('button[data-a]'), row = e.target.closest('.proj');
+      if (b && b.dataset.a === 'back') return render();
+      if (b && b.dataset.a === 'deleted') return showDeleted().catch(err => App.toast(err.message));
+      if (!b || !row) return;
       const id = row.dataset.id, name = row.querySelector('.pname').firstChild.textContent;
       try {
         if (b.dataset.a === 'open') await open(id);
         if (b.dataset.a === 'dup') await duplicate(id);
         if (b.dataset.a === 'ren') { const n = prompt('Rename project', name); if (n && n.trim()) await rename(id, n.trim()); }
-        if (b.dataset.a === 'del' && confirm(`Delete project “${name}”? This cannot be undone.`)) await remove(id);
+        if (b.dataset.a === 'del' && confirm(`Delete project “${name}”?${hasHistory ? ' (It can be brought back later from ⟲ Deleted projects.)' : ' This cannot be undone.'}`)) await remove(id);
+        if (b.dataset.a === 'hist') await history(id, name);
+        if (b.dataset.a === 'restore') {
+          const v = +b.dataset.v, d = b.dataset.when;
+          if (confirm(`Restore “${name}” to the version of ${d}? The current state is kept as a version too.`)) {
+            if (id === Model.S.id) await saveNow();
+            await api('POST', '/api/projects/' + id + '/restore', { version: v });
+            if (id === Model.S.id || b.dataset.deleted) await open(id); else render();
+            App.toast(`Restored “${name}” (${d})`);
+          }
+        }
       } catch (err) { App.toast(err.message); }
     };
   }

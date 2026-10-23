@@ -192,6 +192,8 @@ Everything fetched is cached in a local SQLite database (`parts.db`), so parts y
 
 Projects are stored on the server (`projects.db`, SQLite) and saved automatically — the status next to the project name shows **✓ Saved**. Use **▤ Projects** to open, duplicate, rename, delete or import projects, **＋ New** to start one, and **Save as…** (`Ctrl+Shift+S`) to save the current design under a new name and continue in the copy. The same projects appear on every device that opens the app. **Export → Project file (.json)** downloads a portable copy.
 
+**Earlier versions**: the desktop server keeps earlier states of every project — about every 10 minutes while you edit, whenever many parts disappear in one save, before a restore and when a project is deleted (60 per project). **▤ Projects → ⟲** lists them with **Restore**; **Deleted projects…** brings back a deleted one. Claude: `list_project_versions`, `restore_project_version`, `copy_project`.
+
 ## Part editor (custom symbols & footprints)
 
 - **＋ New part** (Parts panel) opens the editor: pins (number, name, side L/R/T/B, bulk edit), live symbol preview, and a footprint editor with generators (0805, SOT-23, SOT-223, SOIC-n, TSSOP-n, QFN-n(-EP), DIP-n, pin headers…), draggable pads (0.05 mm snap) and per-pad size/shape/drill.
@@ -207,7 +209,7 @@ Only document-type files inside the chosen folder are read (no `..` escapes, hid
 
 ## Control from Claude Code (MCP) and other tools
 
-`mcp/circuitpilot-mcp.mjs` exposes all 58 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
+`mcp/circuitpilot-mcp.mjs` exposes all 77 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
 
 **Claude Desktop (easiest)** — run once:
 
@@ -237,6 +239,12 @@ curl -H "Authorization: Bearer <password>" -X POST http://127.0.0.1:5174/tools/s
 
 `GET /openapi.json` returns an OpenAPI 3.1 spec of every tool. Add `"project": "<id or name>"` to any call to switch project. The REST server listens on 127.0.0.1 only (add `--public` to expose it).
 
+**Working safely with several projects**
+- Every tool takes `project` (id or exact name); the call works on that project. The current project is remembered in `%LOCALAPPDATA%\CircuitPilot\mcp-state.json`, so a restart of the MCP server (e.g. after a timeout) continues on the same project. Without a current project the tools ask for one — they never pick "the most recent project".
+- One database: when no app is running, the MCP server starts `server.py` with the Windows app's projects folder (`%LOCALAPPDATA%\CircuitPilot`, or `CP_DATA_DIR`). `start_here` shows which projects folder the running app uses.
+- **Background jobs**: `generate_pcb`, `route_pcb`, `optimize_pcb`, `place_footprints`, `update_pcb_from_schematic`, `auto_layout` and `export_project` run in a worker thread. They answer directly when done within ~40 s, otherwise they return a `job_id`; `job_status {job_id}` waits up to 55 s per call for the result, `cancel_job` stops one. While a job runs, its project is locked against edits (other projects stay usable). This repo's `.claude/settings.json` also sets `MCP_TOOL_TIMEOUT=300000` for Claude Code.
+- Circuit blocks: `copy_block {refs, to_project?, keep_nets?, place: "free"}` copies a group of parts with its layout and inner tracks; `copy_project` copies a whole project.
+
 ## Design rules (JLCPCB defaults) and DRC
 
 **PCB → ⚙ Rules** edits the project's design rules. The autorouter follows them and **DRC** checks the finished board against them.
@@ -247,10 +255,17 @@ curl -H "Authorization: Bearer <password>" -X POST http://127.0.0.1:5174/tools/s
 | Power / GND trace width (only with *Wider tracks for power / GND nets*) | 0.5 mm | — |
 | Clearance (copper–copper) | 0.2 mm | 0.127 mm (5 mil) |
 | Via diameter / drill | 0.6 / 0.3 mm | 0.5 / 0.3 mm, annular ring 0.13 mm |
-| Copper to board edge | 0.3 mm | 0.3 mm |
+| Copper to board edge | 0.3 mm | 0.2 mm |
 | Hole to hole | — | 0.5 mm |
+| Plated through-hole pad ring | — | 0.18 mm |
 
-- Presets: **JLCPCB recommended**, **JLCPCB minimum (5/5 mil)**, **JLCPCB power/robust**, **Home etching / CNC (1 layer)** — then tweak any value.
+JLCPCB makes tracks / gaps down to 0.1 mm and vias down to 0.15 mm hole / 0.25 mm diameter, but **vias cost extra below 0.2 mm hole, or below 0.3 mm hole with a diameter under 0.45 mm** — the rules warn about that, DRC lists each extra-cost via size once, and Gerber exports / the datasheet say which via size the board uses.
+
+- Presets: **JLCPCB recommended** (default), **JLCPCB smallest at no extra cost** (`jlcpcb_free_min`: 0.1 mm tracks and gaps, 0.45 / 0.2 mm vias — much more room on small boards), **JLCPCB 5/5 mil**, **JLCPCB power/robust**, **Home etching / CNC (1 layer)** — then tweak any value.
+- **No via in pad** (default on): vias never go on SMD pads — not even as the router's last resort — and DRC reports one as an error, so the Gerber export refuses it. Only a real exposed pad (a QFN / DFN paddle among at least four pins) may take thermal vias; module edge pads (XIAO castellations), coin-cell contacts and big chip pads never do. `add_via` / `add_track` refuse a via that touches an SMD pad. When a net cannot be routed, `route_pcb` says why (`failed_reason`).
+- **Keep-out areas** (**K** tool, or `add_keepout`): no tracks, vias or copper pour inside — each can be allowed again — and optionally no parts; on top, bottom or both. For the antenna end of a module, under a coin cell, around a crystal. The router and copper pours avoid them; DRC reports what is inside. Click the dashed border to edit or delete one.
+- **Copper pours** drop dead copper: pieces that touch no copper of their net, and pieces smaller than *pourMinArea* (default 0.5 mm²) — in the view, the Gerbers and the connectivity check. `get_pcb_layout` lists the islands per pour.
+- **Placement helpers**: `check_placement` (overlaps, outside the outline, in a keep-out, on a mounting hole — in well under a second; SMD parts on opposite sides may overlap), `place_in_free_area` (nearest free board space, as a group or part by part).
 - **One width by default**: every net is routed with the trace width; tick *Wider tracks for power / GND nets* in Rules to give power and ground the power width. **Per-net widths** (e.g. `+5V` 0.8 mm, `MOTOR` 1.2 mm) override both.
 - **Changing widths after routing**: click a track — its whole net lights up (the rest is dimmed), the net name shows on the board, and Properties lists the net's tracks, vias and pins. Set the width for that track, the whole net, or every track (DRC reports at once if something no longer fits); *Reset wide tracks to rule width* brings wider tracks back to the rule.
 - **Neck-down**: when a wide trace can't reach a fine-pitch pad, the router narrows it (power width → trace width → fab minimum) and reports which nets were necked down.

@@ -9,12 +9,17 @@
 //   node mcp/circuitpilot-mcp.mjs --http 5174          (REST: GET /tools, POST /tools/<name>)
 //
 // Environment: CP_URL (default http://localhost:5173), CP_PASSWORD (else read from access-password.txt),
-//              CP_PROJECT (project id or name to open at start).
+//              CP_PROJECT (project id or name to open at start), CP_APP_EXE (the Windows app, started when nothing
+//              answers at CP_URL), CP_DATA_DIR (projects folder for a server.py started from here; default: the
+//              Windows app's %LOCALAPPDATA%\CircuitPilot).
+// Every tool takes `project` (id or exact name); the current project is remembered in DATA_DIR/mcp-state.json.
+// Long tools (routing, placement, export) run as background jobs: they answer within ~40 s, else job_status.
 // It talks to the running server.py, so projects changed here appear live in the browser.
 import fs from 'node:fs';
 import path from 'node:path';
-import vm from 'node:vm';
 import http from 'node:http';
+import { Worker } from 'node:worker_threads';
+import { loadEngine } from './engine-vm.mjs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -26,17 +31,12 @@ if (!PASSWORD) { try { PASSWORD = fs.readFileSync(path.join(ROOT, 'access-passwo
 const log = (...a) => console.error('[circuitpilot]', ...a);
 
 // ---------- load the shared engine (same code as the browser app) ----------
-const ctx = vm.createContext({
-  console: { log, info: log, warn: log, error: log }, fetch, TextEncoder, TextDecoder, Blob, URL, URLSearchParams,
-  setTimeout, clearTimeout, AbortController, AbortSignal,
-});
-for (const [file, name] of [['lib.js', 'Lib'], ['model.js', 'Model'], ['pcb.js', 'Pcb'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['kicad.js', 'KiCad'], ['openlib.js', 'OpenLib'], ['easyeda.js', 'EasyEDA'], ['exports.js', 'Exports'], ['engine.js', 'Engine']]) {
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', file), 'utf8') + `\n;globalThis.${name} = ${name};`, ctx, { filename: file });
-}
+const ctx = loadEngine(ROOT, log);
 const { Engine, Model, Pcb } = ctx;
-// open-library part list straight from the app folder
-ctx.OpenLib.readIndex = async () => fs.readFileSync(path.join(ROOT, 'data', 'open-parts.txt'), 'utf8');
-ctx.KiCad.readIndex = async () => fs.readFileSync(path.join(ROOT, 'data', 'kicad-footprints.txt'), 'utf8');
+// where the app keeps its projects: the Windows app's data folder (also used when this server starts server.py itself),
+// and where this MCP server remembers the current project between restarts
+const DATA_DIR = process.env.CP_DATA_DIR || (process.platform === 'win32' && process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'CircuitPilot') : path.join(os.homedir(), '.circuitpilot'));
+const STATE_FILE = path.join(DATA_DIR, 'mcp-state.json');
 const headers = PASSWORD ? { authorization: 'Bearer ' + PASSWORD } : {};
 let myLib = [];
 Object.assign(Engine.env, {
@@ -45,7 +45,7 @@ Object.assign(Engine.env, {
   savePart: async def => { await api('PUT', '/api/library/' + encodeURIComponent(def.key), def); },
   ui: () => { },
   // screenshots (view_design): drawn by the CircuitPilot tab open in the browser, relayed by server.py
-  render: async args => api('POST', '/api/render/request', { project: currentId, args }),
+  render: async args => api('POST', '/api/render/request', { project: currentId, args }),   // view_design
 });
 
 // ---------- make sure the CircuitPilot app is running (Claude Desktop / Claude Code only start this MCP server) ----------
@@ -64,7 +64,8 @@ function ensureApp() {
       } else {
         const args = ['server.py', port, '--allow-ports', '8080'];
         if (fs.existsSync(path.join(ROOT, 'access-password.txt'))) args.push('--password-file', 'access-password.txt');
-        spawn(process.env.CP_PYTHON || 'python', args, { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true }).unref(); log('started server.py');
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+        spawn(process.env.CP_PYTHON || 'python', args, { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true, env: Object.assign({}, process.env, { CP_DATA_DIR: DATA_DIR }) }).unref(); log('started server.py, projects in ' + DATA_DIR);
       }
     } catch (e) { log('could not start CircuitPilot:', e.message); return false; }
     for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 500)); if (await ping()) return true; }
@@ -96,29 +97,130 @@ async function api(method, p, body) {
 }
 
 // ---------- project session ----------
+// The current project is remembered on disk (per app address), so a restart of this server (e.g. after a timeout)
+// keeps working on the same project. There is no silent fallback: without a current project the tools ask for one.
 let currentId = null;
+const stateKey = () => BASE;
+function loadState() { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) || {}; } catch { return {}; } }
+function setCurrent(id) {
+  currentId = id;
+  try { const st = loadState(); st[stateKey()] = { project: id, at: new Date().toISOString() }; fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(STATE_FILE, JSON.stringify(st, null, 1)); } catch (e) { log('could not save the current project:', e.message); }
+}
+// id, exact name, or a unique part of a name — never a guess
 async function resolveProject(ref) {
-  const ps = await api('GET', '/api/projects');
-  if (!ref) return ps[0] || null;
-  return ps.find(p => p.id === ref) || ps.find(p => (p.name || '').toLowerCase() === String(ref).toLowerCase()) ||
-    ps.find(p => (p.name || '').toLowerCase().includes(String(ref).toLowerCase())) || null;
+  const ps = await api('GET', '/api/projects'), r = String(ref == null ? '' : ref).trim(), lo = r.toLowerCase();
+  if (!r) return null;
+  const byId = ps.find(p => p.id === r); if (byId) return byId;
+  const exact = ps.filter(p => (p.name || '').toLowerCase() === lo);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) throw new Error(`${exact.length} projects are called "${r}" — use the id: ${exact.map(p => `${p.id} (${p.parts} parts, ${new Date(p.updated * 1000).toISOString().slice(0, 16)})`).join(', ')}`);
+  const part = ps.filter(p => (p.name || '').toLowerCase().includes(lo));
+  if (part.length === 1) return part[0];
+  if (part.length > 1) throw new Error(`"${r}" matches ${part.length} projects — use the id or the full name: ${part.map(p => `${p.name} (${p.id})`).join(', ')}`);
+  return null;
 }
+const projectExists = async id => { try { await api('GET', '/api/projects/' + id + '/meta'); return true; } catch { return false; } };
 async function ensureProject() {
-  if (currentId) return currentId;
-  const p = await resolveProject(process.env.CP_PROJECT);
-  if (p) currentId = p.id;
-  else { const d = Model.blank(); d.name = 'Untitled'; currentId = (await api('PUT', '/api/projects/', d)).id; }
-  await showProject(currentId);
-  return currentId;
+  if (currentId && await projectExists(currentId)) return currentId;
+  const saved = (loadState()[stateKey()] || {}).project;
+  if (saved && saved !== currentId && await projectExists(saved)) { currentId = saved; log('continuing with project ' + saved); return currentId; }
+  currentId = null;
+  if (process.env.CP_PROJECT) { const p = await resolveProject(process.env.CP_PROJECT); if (p) { setCurrent(p.id); await showProject(p.id); return p.id; } }
+  const ps = await api('GET', '/api/projects');
+  if (!ps.length) { const d = Model.blank(); d.name = 'Untitled'; const id = (await api('PUT', '/api/projects/', d)).id; setCurrent(id); await showProject(id); return id; }
+  throw new Error('No project is open. Pass project (id or exact name) to this tool, or call open_project / create_project first. Recent projects: ' +
+    ps.slice(0, 8).map(p => `${p.name} (${p.id}, ${p.parts} parts)`).join('; '));
 }
-async function withProject(fn) {
+// tools that change a project wait for a running job on it (its result would overwrite theirs)
+function assertIdle(id, name) {
+  const j = [...jobs.values()].find(q => q.project === id && q.status === 'running');
+  if (j) throw new Error(`Project is busy: job ${j.id} (${j.tool}) is running for ${Math.round((Date.now() - j.started) / 1000)} s. Call job_status {job_id: "${j.id}"} and wait for it before ${name}.`);
+}
+async function withProject(fn, write = true, name = '') {
   const id = await ensureProject();
+  if (write) assertIdle(id, name || 'changing the project');
   Model.load(await api('GET', '/api/projects/' + id));
   try { myLib = await api('GET', '/api/library'); } catch { }
   const before = Model.snapshot();
   const out = await fn();
-  if (Model.snapshot() !== before) await api('PUT', '/api/projects/' + id, JSON.parse(Model.snapshot()));
+  if (write && Model.snapshot() !== before) await api('PUT', '/api/projects/' + id, JSON.parse(Model.snapshot()));
   return out;
+}
+
+// ---------- background jobs: long tools run in a worker thread on a copy of the project ----------
+const LONG = new Set(['generate_pcb', 'route_pcb', 'optimize_pcb', 'auto_layout', 'place_footprints', 'update_pcb_from_schematic', 'export_project']);
+const JOB_WAIT = +(process.env.CP_JOB_WAIT || 40000);   // answer directly when done within this time, else hand out a job id
+const jobs = new Map(); let jobSeq = 0;
+function workerRun(msg) {
+  const w = new Worker(new URL('./job-worker.mjs', import.meta.url), { workerData: { root: ROOT } });
+  const p = new Promise((res, rej) => {
+    w.once('message', m => { w.terminate(); m.ok ? res(m) : rej(new Error(m.error)); });
+    w.once('error', e => rej(e));
+    w.once('exit', c => rej(new Error(c ? 'worker stopped (' + c + ')' : 'worker stopped')));
+  });
+  w.postMessage(msg);
+  return { w, p };
+}
+async function startJob(tool, input) {
+  const id = await ensureProject(); assertIdle(id, tool);
+  const project = await api('GET', '/api/projects/' + id), meta = await api('GET', '/api/projects/' + id + '/meta');
+  try { myLib = await api('GET', '/api/library'); } catch { }
+  const job = { id: 'job' + (++jobSeq) + '-' + Date.now().toString(36).slice(-4), tool, project: id, name: project.name, started: Date.now(), status: 'running' };
+  if (tool === 'export_project') job.promise = exportJob(job, project, input);
+  else {
+    const r = workerRun({ kind: 'tool', name: tool, input, project, myLib, base: BASE, headers });
+    job.worker = r.w;
+    job.promise = r.p.then(async m => {
+      const now = await api('GET', '/api/projects/' + id + '/meta').catch(() => null);
+      const changed = now && now.updated > meta.updated + 0.001;   // edited meanwhile (in the app)
+      if (m.project !== JSON.stringify(project)) await api('PUT', '/api/projects/' + id, JSON.parse(m.project));
+      return changed && m.result && typeof m.result === 'object' ? Object.assign({ warning: 'The project was edited while this job ran; those edits were replaced by the job result' }, m.result) : m.result;
+    });
+  }
+  job.promise.then(r => { job.status = 'done'; job.result = r; job.ended = Date.now(); }, e => { if (job.status === 'running') { job.status = 'failed'; job.error = e.message; job.ended = Date.now(); } });
+  jobs.set(job.id, job);
+  for (const [k, j] of jobs) if (j.status !== 'running' && Date.now() - (j.ended || j.started) > 3600e3) jobs.delete(k);   // forget old jobs after an hour
+  return job;
+}
+const jobView = j => ({ job_id: j.id, tool: j.tool, project: j.project, project_name: j.name, status: j.status, seconds: Math.round(((j.ended || Date.now()) - j.started) / 1000) });
+async function awaitJob(j, ms) {
+  await Promise.race([j.promise.catch(() => { }), new Promise(r => setTimeout(r, ms))]);
+  if (j.status === 'done') return j.result;
+  if (j.status === 'failed') throw new Error(`${j.tool} failed: ${j.error}`);
+  if (j.status === 'cancelled') return Object.assign(jobView(j), { note: 'cancelled — nothing was saved' });
+  return Object.assign(jobView(j), { note: `Still working. Call job_status {job_id: "${j.id}"} — it waits up to 55 s for the result. Other projects can be edited meanwhile; this one is locked until the job ends.` });
+}
+// export: files from the worker, PDFs + images from the app window, all into one folder per project
+async function exportJob(job, project, input) {
+  const all = ['project', 'gerbers', 'jlcpcb', 'bom', 'netlist', 'enclosure', 'easyeda', 'pdf', 'images'];
+  const inc = Array.isArray(input.include) && input.include.length ? input.include : all;
+  const { p, w } = workerRun({ kind: 'export', include: inc, project, myLib, base: BASE, headers }); job.worker = w;
+  const { result: X } = await p, written = [], skipped = X.skipped.slice();
+  const root = path.resolve(String(input.out_dir || path.join(os.homedir(), 'Documents', 'CircuitPilot exports'))), dir = path.join(root, X.base);
+  const put = (rel, data) => { const f = path.join(dir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, data instanceof Uint8Array ? Buffer.from(data) : data); written.push(rel.replace(/\\/g, '/')); };
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [rel, d] of Object.entries(X.files)) put(rel, d);
+  const shots = [];
+  if (inc.includes('pdf')) { if (X.hasPcb) shots.push([{ view: 'pdf_pcb' }, X.base + '-pcb-drawing.pdf']); shots.push([{ view: 'pdf_doc' }, X.base + '-datasheet.pdf']); }
+  if (inc.includes('images') && X.parts) {
+    for (let i = 1; i <= X.sheets; i++) shots.push([{ view: 'schematic', sheet: i, full: true }, 'images/' + (X.sheets > 1 ? `schematic-sheet${i}.png` : 'schematic.png')]);
+    if (X.hasPcb) for (const [a, n] of [[{ view: 'pcb' }, 'pcb-2d.png'], [{ view: 'pcb_3d', side: 'iso' }, 'pcb-3d.png'], [{ view: 'pcb_3d', side: 'top' }, 'pcb-3d-top.png'], [{ view: 'pcb_3d', side: 'bottom' }, 'pcb-3d-bottom.png'], [{ view: 'enclosure' }, 'enclosure.png']])
+      shots.push([Object.assign({ full: true }, a), 'images/' + n]);
+  }
+  if (shots.length) {
+    let tab = false;
+    for (let i = 0; i < 20 && !tab && job.status === 'running'; i++) { try { const t = await api('GET', '/api/render/tabs'); tab = !!(t.projects || []).includes(job.project); } catch { } if (!tab) { if (i === 0) await showProject(job.project); await new Promise(r => setTimeout(r, 1000)); } }
+    if (!tab) skipped.push('PDFs and images: the CircuitPilot window is not open on this project (open ' + BASE + ' and run export_project again)');
+    else for (const [args, rel] of shots) {
+      if (job.status !== 'running') break;
+      try { const r = await api('POST', '/api/render/request', { project: job.project, args }); if (!r || !r.data) throw new Error('nothing drawn'); put(rel, new Uint8Array(Buffer.from(r.data, 'base64'))); }
+      catch (e) { skipped.push(rel + ': ' + e.message); }
+    }
+  }
+  fs.writeFileSync(path.join(dir, 'README.txt'), `${X.name} — exported by CircuitPilot ${new Date().toISOString().slice(0, 16).replace('T', ' ')}\n\n` +
+    written.map(f => '  ' + f).join('\n') + (skipped.length ? '\n\nNot exported:\n' + skipped.map(f => '  ' + f).join('\n') : '') +
+    '\n\nJLCPCB order: upload ' + X.base + '-gerbers.zip, then for assembly the BOM and CPL files in jlcpcb/.\n' + (X.vias ? X.vias + '\n' : ''));
+  return { folder: dir, files: written, skipped, drc: X.drc, vias: X.vias };
 }
 
 // ---------- extra tools (projects & exports) ----------
@@ -131,31 +233,97 @@ const EXTRA = [
   { name: 'export_gerbers', description: 'Run DRC, then write Gerber (copper, mask, paste, silkscreen, outline) + Excellon drill files and a .zip for the fab into a folder on this machine. Refuses when DRC has errors unless force is true.', input_schema: { type: 'object', required: ['out_dir'], properties: { out_dir: { type: 'string', description: 'Absolute folder path (created if missing)' }, force: { type: 'boolean', description: 'export even with DRC errors' } } } },
   { name: 'export_enclosure', description: 'Write the 3D-printable enclosure for the current project into a folder on this machine: box mode → base + lid STL, parametric OpenSCAD .scad and notes; custom 3D mode → one STL per part, OpenSCAD source and the 3D script; plus a .zip.', input_schema: { type: 'object', required: ['out_dir'], properties: { out_dir: { type: 'string', description: 'Absolute folder path (created if missing)' } } } },
   { name: 'get_bom', description: 'Bill of materials of the current project as CSV text (qty, refs, type, value, footprint, LCSC part).', input_schema: { type: 'object', properties: {} } },
+  { name: 'job_status', description: 'Result of a background job (long tools — generate_pcb, route_pcb, optimize_pcb, place_footprints, update_pcb_from_schematic, auto_layout, export_project — hand out a job_id when they take longer than ~40 s). Waits up to wait_s (default 50, max 55) for it to finish. Without job_id: lists the jobs.', input_schema: { type: 'object', properties: { job_id: { type: 'string' }, wait_s: { type: 'number' } } } },
+  { name: 'cancel_job', description: 'Stop a running background job; nothing of it is saved.', input_schema: { type: 'object', required: ['job_id'], properties: { job_id: { type: 'string' } } } },
+  { name: 'copy_project', description: 'Copy a project (default: the current one) to a new project, e.g. before trying a big change or to start a variant. The copy becomes current unless open: false.', input_schema: { type: 'object', properties: { name: { type: 'string', description: 'name of the copy (default "<name> (copy)")' }, open: { type: 'boolean' } } } },
+  { name: 'list_project_versions', description: 'Earlier saved states of a project (default: the current one). Kept automatically: about every 10 minutes while it is edited, whenever many parts disappear in one save, before a restore and when it is deleted. Without a project: also lists deleted projects that can be restored.', input_schema: { type: 'object', properties: {} } },
+  { name: 'restore_project_version', description: 'Make an earlier state of a project current again (version from list_project_versions). The state it replaces is kept as a version too. Also brings back a deleted project (project = its id).', input_schema: { type: 'object', required: ['version'], properties: { version: { type: 'number' } } } },
+  { name: 'copy_block', description: 'Copy a circuit block (group of parts: schematic, PCB layout, tracks inside the block) within the current project or into another one (to_project). Power nets and keep_nets stay connected, wiring inside the block gets fresh nets, nets to outside parts are left off.', input_schema: { type: 'object', required: ['refs'], properties: { refs: { type: 'array', items: { type: 'string' } }, to_project: { type: 'string', description: 'target project id or exact name (default: the same project)' }, keep_nets: { type: 'array', items: { type: 'string' } }, suffix: { type: 'string' }, sch_offset: { type: 'array', items: { type: 'number' } }, pcb_offset: { type: 'array', items: { type: 'number' } }, place: { type: 'string', enum: ['next', 'free', 'none'] }, sheet: { type: 'number' }, near: {} } } },
 ];
-const TOOLS = [...EXTRA, ...Engine.TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema }))];
+// every tool takes `project`: the call works on that project (it becomes the current one) — no guessing after a restart
+const PROJECT_ARG = { type: 'string', description: 'Project id (or exact name) this call works on; it becomes the current project. Pass it in every call.' };
+const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job']);
+const TOOLS = [...EXTRA, ...Engine.TOOLS.filter(t => !EXTRA.some(x => x.name === t.name)).map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema }))]
+  .map(t => NO_PROJECT_ARG.has(t.name) ? t : Object.assign({}, t, { input_schema: Object.assign({}, t.input_schema, { properties: Object.assign({ project: PROJECT_ARG }, t.input_schema.properties || {}) }) }));
+// tools that need no project at all
+const NO_PROJECT = new Set(['search_parts', 'web_search', 'web_fetch', 'list_my_parts', 'enclosure_script_help']);
+const RO = new Set(Engine.TOOLS.filter(t => t.ro).map(t => t.name));
 
 async function callTool(name, input = {}) {
+  if (input.project != null && input.project !== '' && !NO_PROJECT_ARG.has(name)) {
+    const ref = input.project; input = Object.assign({}, input); delete input.project;
+    const p = await resolveProject(ref);
+    if (p) { if (p.id !== currentId) { setCurrent(p.id); await showProject(p.id); } }
+    else if (name === 'restore_project_version' && /^[\w.-]{4,80}$/.test(String(ref))) setCurrent(String(ref));   // a deleted project
+    else throw new Error(`No project "${ref}" — list_projects shows the projects (ids and names)`);
+  }
+  if (LONG.has(name)) { const j = await startJob(name, input); return awaitJob(j, JOB_WAIT); }
   switch (name) {
+    case 'job_status': {
+      if (!input.job_id) return [...jobs.values()].map(jobView);
+      const j = jobs.get(String(input.job_id)); if (!j) throw new Error(`No job ${input.job_id} (jobs are forgotten an hour after they end, or when the MCP server restarts)`);
+      return awaitJob(j, Math.min(55, Math.max(0, input.wait_s == null ? 50 : +input.wait_s)) * 1000);
+    }
+    case 'cancel_job': {
+      const j = jobs.get(String(input.job_id)); if (!j) throw new Error(`No job ${input.job_id}`);
+      if (j.status === 'running') { j.status = 'cancelled'; j.ended = Date.now(); try { j.worker && j.worker.terminate(); } catch { } }
+      return jobView(j);
+    }
+    case 'copy_project': {
+      const id = await ensureProject(), d = await api('GET', '/api/projects/' + id);
+      delete d.id; d.name = input.name || (d.name || 'Untitled') + ' (copy)';
+      const r = await api('PUT', '/api/projects/', d);
+      if (input.open !== false) { setCurrent(r.id); await showProject(r.id); }
+      return { copied: d.name, id: r.id, from: id, current: input.open !== false ? r.id : id };
+    }
+    case 'list_project_versions': {
+      const id = await ensureProject().catch(() => null), meta = id ? await api('GET', '/api/projects/' + id + '/meta').catch(() => null) : null;
+      const vs = id ? await api('GET', '/api/projects/' + id + '/versions').catch(() => []) : [];
+      return { project: id, name: meta ? meta.name : undefined, versions: vs.map(v => ({ version: v.version, saved: new Date(v.saved * 1000).toISOString().slice(0, 19), parts: v.parts, name: v.name, reason: v.reason })), deleted_projects: (await api('GET', '/api/projects/_deleted').catch(() => [])).map(p => ({ id: p.id, name: p.name, parts: p.parts, deleted: new Date(p.deleted * 1000).toISOString().slice(0, 19) })) };
+    }
+    case 'restore_project_version': {
+      const id = currentId || await ensureProject(); assertIdle(id, 'restoring');
+      const r = await api('POST', '/api/projects/' + id + '/restore', { version: input.version });
+      setCurrent(id); await showProject(id); return r;
+    }
+    case 'copy_block': {
+      if (!input.to_project) return withProject(() => Engine.exec('copy_block', input, 'agent'), true, 'copy_block');
+      const src = await ensureProject(), tgt = await resolveProject(input.to_project);
+      if (!tgt) throw new Error(`No project "${input.to_project}"`);
+      assertIdle(tgt.id, 'copy_block');
+      Model.load(await api('GET', '/api/projects/' + src));
+      const block = ctx.Blocks.extract(input.refs);
+      Model.load(await api('GET', '/api/projects/' + tgt.id));
+      const o = Object.assign({}, input); delete o.to_project; if (o.sch_offset == null) o.sch_offset = [0, 0]; if (!o.place) o.place = 'free';   // another board: the nearest free area
+      const r = Model.mutate(() => ctx.Blocks.insert(block, o));
+      await api('PUT', '/api/projects/' + tgt.id, JSON.parse(Model.snapshot()));
+      return Object.assign({ from: src, to: tgt.id, to_name: tgt.name, note_current: 'The current project is still ' + src }, r);
+    }
     case 'start_here': {
-      const ps = await api('GET', '/api/projects'), id = await ensureProject(), cur = ps.find(p => p.id === id);
+      const ps = await api('GET', '/api/projects'), id = await ensureProject().catch(() => null), cur = ps.find(p => p.id === id);
+      const v = await api('GET', '/api/version').catch(() => ({})), dataDir = v.data_dir || '?';
+      const sameDir = !v.data_dir || path.resolve(v.data_dir).toLowerCase() === path.resolve(DATA_DIR).toLowerCase();
       return {
         app: BASE + ' (running; the user sees every change live in the browser)',
-        current_project: cur ? { id, name: cur.name, parts: cur.parts, nets: cur.nets, pcb: cur.pcb } : { id },
-        other_projects: ps.filter(p => p.id !== id).slice(0, 10).map(p => p.name),
+        projects_folder: dataDir + (sameDir ? '' : ` — NOTE: not the CircuitPilot app's folder (${DATA_DIR}); a server.py started by hand uses its own projects.db. Tell the user if projects seem to be missing.`),
+        current_project: cur ? { id, name: cur.name, parts: cur.parts, nets: cur.nets, pcb: cur.pcb } : null,
+        projects: ps.slice(0, 12).map(p => ({ id: p.id, name: p.name, parts: p.parts, updated: new Date(p.updated * 1000).toISOString().slice(0, 16) })),
+        rule: 'Pass project (the id) in every tool call. Long tools may return a job_id — then call job_status until it is done.',
         workflow: WORKFLOW,
       };
     }
     case 'list_projects': {
       const ps = await api('GET', '/api/projects');
-      return ps.map(p => ({ ...p, current: p.id === currentId, updated: new Date(p.updated * 1000).toISOString() }));
+      if (!currentId) { const saved = (loadState()[stateKey()] || {}).project; if (saved && ps.some(p => p.id === saved)) currentId = saved; }
+      return ps.map(p => ({ ...p, current: p.id === currentId, busy: [...jobs.values()].some(j => j.project === p.id && j.status === 'running') || undefined, updated: new Date(p.updated * 1000).toISOString() }));
     }
     case 'open_project': {
       const p = await resolveProject(input.project); if (!p) throw new Error(`No project matching "${input.project}"`);
-      currentId = p.id; await showProject(currentId); return { opened: p.name, id: p.id, parts: p.parts, nets: p.nets };
+      setCurrent(p.id); await showProject(currentId); return { opened: p.name, id: p.id, parts: p.parts, nets: p.nets };
     }
     case 'create_project': {
       const d = Model.blank(); d.name = input.name || 'Untitled';
-      currentId = (await api('PUT', '/api/projects/', d)).id; await showProject(currentId);
+      setCurrent((await api('PUT', '/api/projects/', d)).id); await showProject(currentId);
       let k = null;
       if (input.knowledge_folder) k = await withProject(() => Engine.exec('set_knowledge_folder', { path: input.knowledge_folder }));
       return { created: d.name, id: currentId, knowledge: k };
@@ -167,9 +335,11 @@ async function callTool(name, input = {}) {
       const files = Pcb.gerbers(), dir = path.resolve(String(input.out_dir || ''));
       fs.mkdirSync(dir, { recursive: true });
       for (const [n, txt] of Object.entries(files)) fs.writeFileSync(path.join(dir, n), txt);
+      const vias = Pcb.viaSummary();
+      fs.writeFileSync(path.join(dir, 'ORDER-NOTES.txt'), `${Model.S.name || 'Board'}: ${Model.S.board.w} x ${Model.S.board.h} mm, ${Pcb.rules().layers} layers\n${vias}\nDRC: ${d.summary}\n`);
       const zipPath = path.join(dir, (Model.S.name || 'board').replace(/[^\w.-]+/g, '_') + '-gerbers.zip');
       fs.writeFileSync(zipPath, Buffer.from(await ctx.makeZip(files).arrayBuffer()));
-      return { exported: true, drc: d.summary, warnings: d.violations.filter(v => v.severity !== 'error').slice(0, 10).map(v => v.msg), folder: dir, files: Object.keys(files), zip: zipPath };
+      return { exported: true, drc: d.summary, vias, warnings: d.violations.filter(v => v.severity !== 'error').slice(0, 10).map(v => v.msg), folder: dir, files: Object.keys(files), zip: zipPath };
     });
     case 'export_enclosure': return withProject(async () => {
       const dir = path.resolve(String(input.out_dir || ''));
@@ -187,66 +357,6 @@ async function callTool(name, input = {}) {
       fs.writeFileSync(zipPath, Buffer.from(await ctx.makeZip(files).arrayBuffer()));
       return { folder: dir, files: Object.keys(files), zip: zipPath, mode: info.mode || 'box', outer_mm: info.outer_mm, parts: info.parts, collisions: info.collisions, cutouts: info.cutouts.length };
     });
-    case 'export_project': return withProject(async () => {
-      // everything of the project in its own folder; PDFs and images are drawn by the CircuitPilot window
-      const S = Model.S, X = ctx.Exports, base = X.slug(S.name), hasPcb = !!(S.board.w && Pcb.placed().length);
-      const root = path.resolve(String(input.out_dir || path.join(os.homedir(), 'Documents', 'CircuitPilot exports'))), dir = path.join(root, base);
-      const all = ['project', 'gerbers', 'jlcpcb', 'bom', 'netlist', 'enclosure', 'easyeda', 'pdf', 'images'];
-      const inc = new Set(Array.isArray(input.include) && input.include.length ? input.include : all);
-      const written = [], skipped = [];
-      const put = (rel, data) => { const p = path.join(dir, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, data instanceof Uint8Array ? Buffer.from(data) : data); written.push(rel.replace(/\\/g, '/')); };
-      fs.mkdirSync(dir, { recursive: true });
-      if (inc.has('project')) put(base + '.circuit.json', X.project());
-      if (inc.has('bom')) put(base + '-bom.csv', X.bom());
-      if (inc.has('netlist')) put(base + '.net', X.netlist());
-      let drc = null;
-      if (hasPcb) {
-        if (inc.has('gerbers')) {
-          const d = Pcb.drc(); drc = d.summary;
-          const files = Pcb.gerbers(); for (const [n, t] of Object.entries(files)) put(path.join('gerbers', n), t);
-          put(base + '-gerbers.zip', new Uint8Array(await ctx.makeZip(files).arrayBuffer()));
-        }
-        if (inc.has('jlcpcb')) { put(path.join('jlcpcb', base + '-BOM-JLCPCB.csv'), X.bomJlc()); put(path.join('jlcpcb', base + '-CPL-JLCPCB.csv'), X.cpl()); }
-        if (inc.has('enclosure')) {
-          try {
-            if (ctx.Enclosure.mode() === 'custom') {
-              const sc = (() => { try { return ctx.Shape3D.context(ctx.Enclosure.layout()); } catch { return { pcb: null }; } })(), r = ctx.Shape3D.run(ctx.Enclosure.script(), sc, { mesh: false });
-              for (const p of r.parts) put(path.join('enclosure', base + '-' + p.name + '.stl'), p.stl);
-              put(path.join('enclosure', base + '-enclosure.scad'), r.scad);
-            } else { const { files } = ctx.Enclosure.exportFiles(); for (const [n, d] of Object.entries(files)) put(path.join('enclosure', n), d); }
-          } catch (e) { skipped.push('enclosure: ' + e.message); }
-        }
-        if (inc.has('easyeda')) {
-          try {
-            const sch = ctx.EasyEDA.exportSchematic({}), pcb = ctx.EasyEDA.exportPcb(), files = { [`SCH_${base}.json`]: sch, [`PCB_${base}.json`]: pcb };
-            put(path.join('easyeda', `SCH_${base}.json`), sch); put(path.join('easyeda', `PCB_${base}.json`), pcb);
-            put(path.join('easyeda', base + '-easyeda.zip'), new Uint8Array(await ctx.makeZip(files).arrayBuffer()));
-          } catch (e) { skipped.push('EasyEDA: ' + e.message); }
-        }
-      } else for (const k of ['gerbers', 'jlcpcb', 'enclosure', 'easyeda']) if (inc.has(k)) skipped.push(k + ': no PCB yet (generate_pcb)');
-      // drawn by the browser tab (render bridge); open one if none is connected
-      const jobs = [];
-      if (inc.has('pdf')) { if (hasPcb) jobs.push([{ view: 'pdf_pcb' }, base + '-pcb-drawing.pdf']); jobs.push([{ view: 'pdf_doc' }, base + '-datasheet.pdf']); }
-      if (inc.has('images') && S.components.length) {
-        const sheets = Math.max(1, (S.sheets || []).length);
-        for (let i = 1; i <= sheets; i++) jobs.push([{ view: 'schematic', sheet: i, full: true }, path.join('images', sheets > 1 ? `schematic-sheet${i}.png` : 'schematic.png')]);
-        if (hasPcb) for (const [a, n] of [[{ view: 'pcb' }, 'pcb-2d.png'], [{ view: 'pcb_3d', side: 'iso' }, 'pcb-3d.png'], [{ view: 'pcb_3d', side: 'top' }, 'pcb-3d-top.png'], [{ view: 'pcb_3d', side: 'bottom' }, 'pcb-3d-bottom.png'], [{ view: 'enclosure' }, 'enclosure.png']])
-          jobs.push([Object.assign({ full: true }, a), path.join('images', n)]);
-      }
-      if (jobs.length) {
-        let tab = false;
-        for (let i = 0; i < 20 && !tab; i++) { try { const t = await api('GET', '/api/render/tabs'); tab = !!(t.projects || []).includes(currentId); } catch { } if (!tab) { if (i === 0) await showProject(currentId); await new Promise(r => setTimeout(r, 1000)); } }
-        if (!tab) skipped.push('PDFs and images: the CircuitPilot window is not open on this project (open ' + BASE + ' and run export_project again)');
-        else for (const [args, rel] of jobs) {
-          try { const r = await Engine.env.render(args); if (!r || !r.data) throw new Error('nothing drawn'); put(rel, new Uint8Array(Buffer.from(r.data, 'base64'))); }
-          catch (e) { skipped.push(rel.replace(/\\/g, '/') + ': ' + e.message); }
-        }
-      }
-      fs.writeFileSync(path.join(dir, 'README.txt'), `${S.name || 'Untitled'} — exported by CircuitPilot ${new Date().toISOString().slice(0, 16).replace('T', ' ')}\n\n` +
-        written.map(w => '  ' + w).join('\n') + (skipped.length ? '\n\nNot exported:\n' + skipped.map(s => '  ' + s).join('\n') : '') +
-        '\n\nJLCPCB order: upload ' + base + '-gerbers.zip, then for assembly the BOM and CPL files in jlcpcb/.\n');
-      return { folder: dir, files: written, skipped, drc };
-    });
     case 'get_bom': return withProject(() => {
       const g = {};
       for (const c of Model.S.components) { const k = [c.type, c.value, c.footprint, c.lcsc || ''].join('|'); (g[k] = g[k] || []).push(c.ref); }
@@ -254,7 +364,8 @@ async function callTool(name, input = {}) {
     });
   }
   if (!Engine.TOOLS.some(t => t.name === name)) throw new Error('Unknown tool ' + name);
-  return withProject(() => Engine.exec(name, input, 'agent'));
+  if (NO_PROJECT.has(name)) { Model.load(Model.blank()); try { myLib = await api('GET', '/api/library'); } catch { } return Engine.exec(name, input, 'agent'); }
+  return withProject(() => Engine.exec(name, input, 'agent'), !RO.has(name), name);
 }
 
 // Serialize calls: every tool loads, edits and saves the shared project.
@@ -265,7 +376,7 @@ async function callChecked(name, input) {
 }
 const run = (name, input) => (queue = queue.then(() => callChecked(name, input), () => callChecked(name, input)));
 
-const WORKFLOW = `1. New design: create_project {name}. To continue an existing one: list_projects → open_project.
+const WORKFLOW = `1. New design: create_project {name}. To continue an existing one: list_projects → open_project. Pass project (the id) in every call after that.
 2. Parts: search_parts for real ICs, modules, regulators, connectors (JLCPCB catalogue) → get_part for the exact pinout. Passives (resistor, capacitor, LED, diode…) can be added by type.
 3. Schematic: add_components (give x/y positions, ~150 units apart, related parts together) → connect pins with named nets (GND, +3V3, +5V are power nets) → run_erc and fix errors. Use sheets (add_sheet) for big designs.
 4. Look at it: view_design {view:"schematic"} and fix crowded or confusing areas.
@@ -276,6 +387,8 @@ Tell the user what you built and what to check (footprints against datasheets, a
 const INSTRUCTIONS = `CircuitPilot is an AI schematic + PCB designer. These tools edit the CURRENT project (see list_projects / open_project / create_project); the user sees every change live in the CircuitPilot browser app.
 Workflow: search_parts → get_part for real ICs/modules (exact pinout + footprint) → add_components → connect (named nets; GND / +3V3 / +5V are power nets) → run_erc → generate_pcb → export_gerbers.
 Pins are "REF.PIN" using the pin number or name. Use create_part for parts missing from the database. If the project has a knowledge folder, read it (knowledge_list / knowledge_search / knowledge_read) and follow its rules.
+Always pass project (the project id) in every tool call. Long tools (generate_pcb, route_pcb, optimize_pcb, export_project …) may return a job_id: call job_status {job_id} until it reports the result.
+Keep-outs: add_keepout (antenna end, under a coin cell …), strict rule set_design_rules {noViaInPad: true}; place_in_free_area moves parts to free board space; copy_block / copy_project copy a circuit block or a whole project; list_project_versions / restore_project_version undo an overwrite.
 Draw single tracks yourself with add_track (pads "U1.3" + [x, y] corners, {x, y, via: true} to change layer; route_pcb keeps them), list them with get_tracks, delete with remove_tracks.
 Look at your work: view_design returns a screenshot (schematic, pcb, pcb_3d, enclosure) drawn by the CircuitPilot tab open in the browser. Check the result after changes and fix what looks wrong.
 Datasheet: get_documentation / set_documentation write the product text of the Documentation tab (the user exports the PDF there). Use auto_layout sparingly; place parts with add_components x/y when you can.`;
@@ -347,7 +460,6 @@ function startHttp(port, host) {
       let body = ''; for await (const c of req) body += c;
       let input = {}; try { input = body ? JSON.parse(body) : {}; } catch { return out(400, { error: 'Body must be JSON' }); }
       try {
-        if (input.project) { await callTool('open_project', { project: input.project }); delete input.project; }
         return out(200, { result: await run(m[1], input) });
       } catch (e) { return out(400, { error: e.message }); }
     }

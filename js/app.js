@@ -576,7 +576,7 @@ const App = (() => {
   function gerberDownload() {
     download(fname('-gerbers.zip'), makeZip(Pcb.gerbers()));
     $('#gerberModal').classList.add('hidden');
-    toast('Gerbers, drill, paste & silkscreen exported — upload the zip to your PCB fab');
+    toast('Gerbers, drill, paste & silkscreen exported — upload the zip to your PCB fab. ' + Pcb.viaSummary(), 12000);
     if (orderAfter) orderFinish();
   }
   function gerberCheck() {
@@ -1212,8 +1212,8 @@ const App = (() => {
       } else if (routeReject) routeReject(new Error('Routing cancelled'));
     };
     initRules();
-    $('#btnUnroute').onclick = () => Model.mutate(() => { Model.S.pcb = { traces: [], vias: [], routed: {} }; });
-    const setBoard = () => Model.mutate(() => { const w = +$('#boardW').value, h = +$('#boardH').value; if (w > 0 && h > 0) { Model.S.board = { w, h }; Model.S.pcb = { traces: [], vias: [], routed: {} }; } });
+    $('#btnUnroute').onclick = () => Model.mutate(() => { Model.S.pcb = Object.assign({}, Model.S.pcb, { traces: [], vias: [], routed: {} }); });
+    const setBoard = () => Model.mutate(() => { const w = +$('#boardW').value, h = +$('#boardH').value; if (w > 0 && h > 0) { Model.S.board = { w, h }; Model.S.pcb = Object.assign({}, Model.S.pcb, { traces: [], vias: [], routed: {} }); } });
     $('#boardW').onchange = setBoard; $('#boardH').onchange = setBoard;
     $$('[data-layer]').forEach(cb => cb.onchange = () => { Pcb.ui.show[cb.dataset.layer] = cb.checked; Pcb.render(); });
     $('#btnGerber').onclick = () => exportAs('gerber');

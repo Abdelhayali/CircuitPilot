@@ -22,6 +22,7 @@ const PcbView = (() => {
     { id: 'via', key: 'V', name: 'Via', icon: '<circle cx="12" cy="12" r="7" fill="none" stroke-width="2.6"/><circle cx="12" cy="12" r="2.4"/>' },
     { id: 'arc', key: 'A', name: 'Arc track', icon: '<path d="M4 19A15 15 0 0 1 20 5" fill="none" stroke-width="2.4"/>' },
     { id: 'pour', key: 'E', name: 'Copper area (pour)', icon: '<path d="M4 6l7-3 9 4-2 12-12 1z" stroke-width="1.6" opacity="0.85"/>' },
+    { id: 'keepout', key: 'K', name: 'Keep-out area (no tracks / vias / copper pour inside): click corners, click the first corner to close', icon: '<path d="M4 4h16v16H4z" fill="none" stroke-width="2" stroke-dasharray="3 2"/><path d="M8 8l8 8M16 8l-8 8" stroke-width="2"/>' },
     { id: 'text', key: 'T', name: 'Text on the silkscreen (click to place on the active side)', icon: '<path d="M5 5h14M12 5v14M9 19h6" fill="none" stroke-width="2.4"/>' },
     { id: 'measure', key: 'M', name: 'Measure', icon: '<path d="M3 16l13-13 5 5-13 13z" fill="none" stroke-width="1.8"/><path d="M7 12l2 2M10 9l2 2M13 6l2 2" stroke-width="1.6"/>' },
   ];
@@ -269,7 +270,11 @@ const PcbView = (() => {
   function closePoly() {
     const P = ui.poly; ui.poly = null; if (!P || P.pts.length < 3) { renderLive(); return; }
     try {
-      if (P.kind === 'outline') {
+      if (P.kind === 'keepout') {
+        const r = Model.mutate(() => Pcb.addKeepout({ points: P.pts, layer: 'both' }));
+        ui.sel = null; ui.item = { k: 'ko', i: r.index }; ui.hlNet = null; ui.onSelect(null);
+        App.toast(r.already_inside.length ? `Keep-out added — ${r.already_inside.length} problems inside: press Route to move the copper out` : 'Keep-out added: the router and copper pours avoid it (settings in Properties)', 7000);
+      } else if (P.kind === 'outline') {
         Model.mutate(() => Pcb.setBoardShape({ shape: 'polygon', points: P.pts, corner_radius: ui.outlineR || 0 }));
         App.toast('Board outline updated — press Route to re-check connections'); setTool('select'); Pcb.fit && fit();
       } else {
@@ -309,7 +314,7 @@ const PcbView = (() => {
       else commitArc([pt.x, pt.y]);
       renderLive(); return;
     }
-    if (ui.tool === 'pour' || ui.tool === 'outline') {
+    if (ui.tool === 'pour' || ui.tool === 'outline' || ui.tool === 'keepout') {
       const sp = ui.tool === 'pour' ? snapPoint(pt, null) : { x: +snapG(pt.x).toFixed(3), y: +snapG(pt.y).toFixed(3), obj: null };
       if (!ui.poly) ui.poly = { kind: ui.tool, pts: [], net: sp.obj && sp.obj.net };
       const P = ui.poly.pts, f = P[0];
@@ -345,6 +350,7 @@ const PcbView = (() => {
       drag = { kind: near != null ? 'vertex' : 'seg', i, s: sg, v: near, orig: t.pts.map(q => q.slice()), x0: pt.x, y0: pt.y, moved: false };
       return;
     }
+    if (el && el.dataset.k === 'ko') { ui.sel = null; ui.multi = new Set(); ui.item = { k: 'ko', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); render(); return; }
     if (el && el.dataset.k === 'pour') { ui.sel = null; ui.item = { k: 'pour', i: +el.dataset.i }; ui.hlNet = (Model.S.pcb.pours[+el.dataset.i] || {}).net; ui.onSelect(null); render(); pan = { x: e.clientX, y: e.clientY }; return; }
     if (el && el.dataset.k === 'h') { const h = Model.S.pcb.holes[+el.dataset.i]; ui.sel = null; ui.item = { k: 'h', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); drag = { kind: 'hole', i: +el.dataset.i, ox: pt.x - h.x, oy: pt.y - h.y, moved: false }; render(); return; }
     if (el && el.dataset.k === 'v') { const v = Model.S.pcb.vias[+el.dataset.i]; selectItem({ k: 'v', i: +el.dataset.i }); drag = { kind: 'via', i: +el.dataset.i, ox: pt.x - v.x, oy: pt.y - v.y, moved: false }; return; }
@@ -513,6 +519,7 @@ const PcbView = (() => {
     if (k === 't' && !e.ctrlKey && !e.metaKey) { setTool('text'); return true; }
     if (k === 'a') { setTool('arc'); return true; }
     if (k === 'e') { setTool('pour'); return true; }
+    if (k === 'k') { setTool('keepout'); return true; }
     if (k === 'Enter' && ui.poly) { closePoly(); return true; }
     if (k === 's') { setTool('select'); return true; }
     if (k === 't' || k === 'b') { const to = k === 't' ? 'F' : 'B'; if (ui.route) switchLayer(to); else { ui.active = to; ui.layers[to].on = true; renderLayers(); syncBar(); render(); } return true; }
@@ -546,6 +553,7 @@ const PcbView = (() => {
       const S = Model.S;
       if (it.k === 'v') S.pcb.vias.splice(it.i, 1);
       else if (it.k === 'pour') S.pcb.pours.splice(it.i, 1);
+      else if (it.k === 'ko') Pcb.removeKeepout({ index: it.i });
       else if (it.k === 'h') S.pcb.holes.splice(it.i, 1);
       else if (it.k === 'txt') Pcb.removeText(it.i);
       else if (it.k === 'blbl') Pcb.setSilkLabel('board', { hidden: true });
@@ -573,7 +581,7 @@ const PcbView = (() => {
     // footprint hit areas (bottom), so copper on top stays clickable
     for (const c of cs) { const b = Pcb.fpBox(c); out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); }
     const R0 = Pcb.rules(), bpoly = Pcb.boardPoly(), bpath = 'M' + bpoly.map(q => q.join(' ')).join('L') + 'Z';
-    out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath></defs>`);
+    out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath><pattern id="kohatch" width="0.8" height="0.8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="0.8" stroke="#ff5a5a" stroke-width="0.12"/></pattern></defs>`);
     const order = ui.active === 'F' ? ['B', 'F'] : ['F', 'B'];
     for (const L of order) {
       if (!vis(L)) continue;
@@ -587,6 +595,8 @@ const PcbView = (() => {
         for (const p of cache.pads) if (p.net !== pr.net && padLayers(p).includes(L)) m.push(padEl(p, 'black', '', cl));
         for (const v of S.pcb.vias) if (v.net !== pr.net) m.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2 + cl}" fill="black"/>`);
         m.push(`<path d="${bpath}" fill="none" stroke="black" stroke-width="${2 * R0.edgeClearance}"/>`);
+        for (const k of Pcb.keepouts()) if (k.pours && (k.layer === 'both' || k.layer === L)) m.push(`<path d="M${k.pts.map(q => q.join(' ')).join('L')}Z" fill="black"/>`);
+        for (const [x0, y0, x1, y1] of Pcb.pourDeadRects(pr)) m.push(`<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="black"/>`);
         out.push(`<defs><mask id="pm${i}" maskUnits="userSpaceOnUse" x="-50" y="-50" width="${S.board.w + 100}" height="${S.board.h + 100}">${m.join('')}</mask></defs>`);
         const sel = ui.item && ui.item.k === 'pour' && ui.item.i === i;
         out.push(`<path data-k="pour" data-i="${i}" class="pour${hl && pr.net === hl ? ' hl' : ''}" pointer-events="none" d="M${poly.map(q => q.join(' ')).join('L')}Z" fill="${c}" fill-opacity="${sel ? 0.55 : 0.38}" mask="url(#pm${i})" clip-path="url(#bclip)" opacity="${op}"><title>Copper area · ${esc(pr.net)} · ${LNAME[L]}</title></path>`);
@@ -633,6 +643,11 @@ const PcbView = (() => {
       }
     }
     if (vis('OL')) out.push(`<path d="${bpath}" fill="none" stroke="${col('OL')}" stroke-width="0.15" pointer-events="none"/>`);
+    Pcb.keepouts().forEach((k, i) => {
+      const d = `M${k.pts.map(q => q.join(' ')).join('L')}Z`, on = ui.item && ui.item.k === 'ko' && ui.item.i === i;
+      out.push(`<path d="${d}" fill="url(#kohatch)" stroke="none" pointer-events="none" opacity="0.5"/>`);
+      out.push(`<path data-k="ko" data-i="${i}" class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="#ff5a5a" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="stroke"><title>Keep-out "${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')}</title></path>`);
+    });
     out.push(`<g id="prats">${ratsHtml()}</g>`);
     if (vis('DRC') && ui.drc) for (const v of ui.drc.violations) if (v.x != null) out.push(`<g class="drcmark" transform="translate(${v.x} ${v.y})" stroke="${v.severity === 'error' ? col('DRC') : '#f0b429'}"><circle r="0.9" fill="none" stroke-width="0.12"/><path d="M-0.45 -0.45L0.45 0.45M0.45 -0.45L-0.45 0.45" stroke-width="0.14"/><title>${esc(v.msg)}</title></g>`);
     // selection outlines
@@ -707,7 +722,7 @@ const PcbView = (() => {
       out.push(`<polyline points="${pts.map(p => p.join(',')).join(' ')}" stroke="${col(A.layer)}" stroke-width="${curWidth(A.net)}" class="rprev"/>`);
     }
     if (ui.poly) {
-      const P = ui.poly.pts.concat(c ? [[c.x, c.y]] : []), colr = ui.poly.kind === 'outline' ? col('OL') : col(ui.active);
+      const P = ui.poly.pts.concat(c ? [[c.x, c.y]] : []), colr = ui.poly.kind === 'outline' ? col('OL') : ui.poly.kind === 'keepout' ? '#ff5a5a' : col(ui.active);
       out.push(`<polygon points="${P.map(p => p.join(',')).join(' ')}" fill="${colr}" fill-opacity="0.18" stroke="${colr}" stroke-width="0.1" stroke-dasharray="0.4 0.25"/>`);
       if (P.length) out.push(`<circle cx="${P[0][0]}" cy="${P[0][1]}" r="0.35" fill="none" stroke="#fff" stroke-width="0.08"/>`);
     }
@@ -729,7 +744,7 @@ const PcbView = (() => {
     if (R && R.bad) s += ` · <span class="bad">⚠ ${R.bad.d <= 0 ? 'short' : 'clearance ' + R.bad.d.toFixed(3) + ' mm'} to ${esc(R.bad.what)} (rule ${Pcb.rules().clearance})</span>`;
     if (ui.tool === 'track') s += ` <span class="muted">· T/B/V switch layer + via · Space angle · / bend · Backspace undo · Esc / right-click finish</span>`;
     if (ui.tool === 'arc') s += ` <span class="muted">· click start, click end, then click to set the curve · Esc cancels</span>`;
-    if (ui.tool === 'pour' || ui.tool === 'outline') s += ` <span class="muted">· click corners, click the first corner (or Enter) to close · Backspace removes a corner · Esc cancels</span>`;
+    if (ui.tool === 'pour' || ui.tool === 'outline' || ui.tool === 'keepout') s += ` <span class="muted">· click corners, click the first corner (or Enter) to close · Backspace removes a corner · Esc cancels</span>`;
     el.innerHTML = s;
   }
 
@@ -777,6 +792,21 @@ const PcbView = (() => {
         <div class="row"><button id="ppDel" class="danger">Delete hole (Del)</button></div>`;
       const upd = f => Model.mutate(() => { const q = Model.S.pcb.holes[it.i]; f(q); q.auto = false; });
       $('#phD').onchange = e => upd(q => q.d = Math.max(0.5, +e.target.value)); $('#phX').onchange = e => upd(q => q.x = +e.target.value); $('#phY').onchange = e => upd(q => q.y = +e.target.value);
+      $('#ppDel').onclick = deleteItem;
+      return true;
+    }
+    if (it.k === 'ko') {
+      const k = (S.pcb.keepouts || [])[it.i]; if (!k) return false;
+      const chk = (id, on, t) => `<label class="chk"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> ${t}</label>`;
+      el.innerHTML = `<div class="ph">Keep-out area</div><label>Name<input id="pkN" value="${esc(k.name)}"></label>
+        <label>Layers<select id="pkL"><option value="both" ${k.layer === 'both' ? 'selected' : ''}>Top + bottom</option><option value="F" ${k.layer === 'F' ? 'selected' : ''}>Top only</option><option value="B" ${k.layer === 'B' ? 'selected' : ''}>Bottom only</option></select></label>
+        ${chk('pkT', k.tracks, 'No tracks')}${chk('pkV', k.vias, 'No vias')}${chk('pkP', k.pours, 'No copper pour')}${chk('pkC', k.parts, 'No parts')}
+        <div class="muted small">The autorouter and copper pours keep out; DRC reports anything inside. Press Route after changing it.</div>
+        <div class="row"><button id="ppDel" class="danger">Delete keep-out (Del)</button></div>`;
+      const upd = f => Model.mutate(() => { const K = Model.S.pcb.keepouts.slice(); K[it.i] = Object.assign({}, K[it.i]); f(K[it.i]); Model.S.pcb.keepouts = K; });
+      $('#pkN').onchange = e => upd(q => q.name = e.target.value.slice(0, 60) || q.name);
+      $('#pkL').onchange = e => upd(q => q.layer = e.target.value);
+      for (const [id, f] of [['pkT', 'tracks'], ['pkV', 'vias'], ['pkP', 'pours'], ['pkC', 'parts']]) $('#' + id).onchange = e => upd(q => q[f] = e.target.checked);
       $('#ppDel').onclick = deleteItem;
       return true;
     }
@@ -848,7 +878,7 @@ const PcbView = (() => {
   // keep the item selection valid after undo/redo or external edits
   function validate() {
     const S = Model.S;
-    const it = ui.item, gone = it && (it.k === 'v' ? !S.pcb.vias[it.i] : it.k === 'pour' ? !(S.pcb.pours || [])[it.i] : it.k === 'h' ? !(S.pcb.holes || [])[it.i]
+    const it = ui.item, gone = it && (it.k === 'v' ? !S.pcb.vias[it.i] : it.k === 'pour' ? !(S.pcb.pours || [])[it.i] : it.k === 'ko' ? !(S.pcb.keepouts || [])[it.i] : it.k === 'h' ? !(S.pcb.holes || [])[it.i]
       : it.k === 'txt' ? !(S.pcb.texts || [])[it.i] : it.k === 'blbl' ? false : !S.pcb.traces[it.i]);   // t / T: tracks
     if (gone) ui.item = null;
     if (ui.sel && !Model.comp(ui.sel)) ui.sel = null;

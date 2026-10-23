@@ -341,6 +341,8 @@ Enclosure **STL ⤓** files are always rebuilt at high resolution (≈0.4 mm cur
 
 ## Windows app (CircuitPilot.exe)
 
+**Download:** [CircuitPilot-Windows.zip](https://github.com/Abdelhayali/CircuitPilot/releases/latest/download/CircuitPilot-Windows.zip) from the [latest release](https://github.com/Abdelhayali/CircuitPilot/releases/latest) — unzip anywhere and double-click `CircuitPilot.exe` (Windows 10 / 11, 64-bit). Windows SmartScreen may warn because the app is not code-signed: **More info → Run anyway**.
+
 `python desktop/build_windows.py` builds `dist/CircuitPilot/CircuitPilot.exe` (and `dist/CircuitPilot-Windows.zip`): the whole desktop version — server, AI, parts databases and archives, open libraries, Gerbers, 3D, enclosure — in one folder that needs no Python or Node.js installed. Double-click **CircuitPilot.exe**: it starts the server and opens the app in its own window (Microsoft Edge app mode). Projects and downloads are kept in `%LOCALAPPDATA%\CircuitPilot`.
 
 **Claude Desktop:** ⚙ Settings → *Claude Desktop* → **Connect** (or `CircuitPilot.exe --connect-claude`), then quit Claude Desktop completely and open it again. The connection uses the Node.js bundled in the folder and starts CircuitPilot.exe by itself when Claude needs it.

@@ -519,7 +519,7 @@ const Pcb = (() => {
   };
   function rules() {
     const r = Model.S.rules || {}, p = RULE_PRESETS[r.preset] || RULE_PRESETS.jlcpcb;
-    return Object.assign({ preset: 'jlcpcb', netWidths: {}, routeTime: 90 }, p.values, r, { netWidths: Object.assign({}, r.netWidths || {}) });
+    return Object.assign({ preset: 'jlcpcb', netWidths: {}, routeTime: 90, trackStyle: '45' }, p.values, r, { netWidths: Object.assign({}, r.netWidths || {}) });
   }
   // every net uses the rule's trace width; power / GND nets get the power width only when powerWider is on
   const netWidth = (R, net) => +(R.netWidths[net] || (R.powerWider && Model.isPower(net) ? R.powerTraceWidth : R.traceWidth));
@@ -547,6 +547,7 @@ const Pcb = (() => {
     if (u.neckDown != null) next.neckDown = !!u.neckDown;
     if (u.powerWider != null) next.powerWider = !!u.powerWider;
     if (u.viaInPad != null) next.viaInPad = !!u.viaInPad;
+    if (u.trackStyle != null) { const v = String(u.trackStyle).replace(/°|deg/g, ''); if (!['45', '90'].includes(v)) throw new Error('trackStyle must be "45" or "90"'); next.trackStyle = v; }
     if (u.routeTime != null && u.routeTime !== '') { const v = +u.routeTime; if (!(v >= 5 && v <= 1800)) throw new Error('routeTime must be 5…1800 seconds'); next.routeTime = v; }
     if (u.netWidths) {
       next.netWidths = Object.assign({}, base.netWidths || {});
@@ -743,6 +744,8 @@ const Pcb = (() => {
     const SOFT = 3;
     let searchId = 0; const stats = { searches: 0, failed: 0, expanded: 0, maxed: 0, ripups: 0, restarts: 0 };
     const DX = [1, -1, 0, 0, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1], DC = [1, 1, 1, 1, Math.SQRT2, Math.SQRT2, Math.SQRT2, Math.SQRT2];
+    // track style: '90' = horizontal / vertical runs only; every change of direction costs a little (fewer, longer straight runs)
+    const ortho = R.trackStyle === '90', ND = ortho ? 4 : 8, TURN = 0.6;
     const vr = R.viaDiameter / 2, slack = 0.3 * g;
     // routing state: kept copper is fixed; copper made here belongs to its net (t.id) and can be ripped up
     const vip = new Set();   // nets allowed a via on their own SMD pin (last resort)
@@ -891,7 +894,7 @@ const Pcb = (() => {
       let tp = target.pads ? target.pads[0] : target;
       if (!anyT) { if (soft) stats.softNoTarget = (stats.softNoTarget || 0) + 1; return null; }
       const [wx0, wy0, wx1, wy1] = win;
-      const tx = tp.x / g, ty = tp.y / g, heap = new Heap(), K = Math.SQRT2 - 1, HW = 1.15;
+      const tx = tp.x / g, ty = tp.y / g, heap = new Heap(), K = ortho ? 1 : Math.SQRT2 - 1, HW = 1.15;
       let started = 0;
       for (const s0 of sources) {
         if (blockT[s0] && own[s0] < wt) continue;
@@ -908,13 +911,14 @@ const Pcb = (() => {
         if (tmask[s]) { stats.expanded += expanded; if (soft) stats.expSoft = (stats.expSoft || 0) + expanded; if (win[2] - win[0] === W - 1) stats.expFull = (stats.expFull || 0) + expanded; stats.big = Math.max(stats.big || 0, expanded); const path = []; for (let c = s; c !== -1; c = came[c]) path.push(c); return path.reverse(); }
         if (++expanded > limit) { stats.expanded += expanded; stats.failed++; stats.maxed++; return null; }
         const l = s >= N ? 1 : 0, lo = l * N, i = s - lo, x = i % W, y = (i / W) | 0, gs = g2[s] + (l ? 0.15 : 0);
-        for (let d = 0; d < 8; d++) {
+        const ps = came[s], pi = ps >= 0 && ps - lo >= 0 && ps - lo < N ? ps - lo : -1, pdx = pi >= 0 ? x - pi % W : 0, pdy = pi >= 0 ? y - ((pi / W) | 0) : 0;
+        for (let d = 0; d < ND; d++) {
           const nx = x + DX[d], ny = y + DY[d]; if (nx < wx0 || ny < wy0 || nx > wx1 || ny > wy1) continue;
           const ns = lo + ny * W + nx;
           if (stamp[ns] !== sid) { stamp[ns] = sid; g2[ns] = Infinity; closed[ns] = 0; tmask[ns] = 0; }
           else if (closed[ns]) continue;
           if (blockT[ns] && own[ns] < wt && !tmask[ns]) continue;
-          const ng = gs + DC[d] + (useHist ? hist[ns] : 0) + (soft && softT[ns] && own[ns] < wt ? SOFT : 0);
+          const ng = gs + DC[d] + ((pdx || pdy) && (pdx !== DX[d] || pdy !== DY[d]) ? TURN : 0) + (useHist ? hist[ns] : 0) + (soft && softT[ns] && own[ns] < wt ? SOFT : 0);
           if (ng < g2[ns]) {
             g2[ns] = ng; came[ns] = s;
             const ddx = Math.abs(nx - tx), ddy = Math.abs(ny - ty);
@@ -993,20 +997,26 @@ const Pcb = (() => {
               }
               return true;
             };
-            const octo = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1]; return Math.abs(dx) < 1e-6 || Math.abs(dy) < 1e-6 || Math.abs(Math.abs(dx) - Math.abs(dy)) < 1e-6; };
+            const okDir = (a, b) => { const dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]); return dx < 1e-6 || dy < 1e-6 || (!ortho && Math.abs(dx - dy) < 1e-6); };
+            // two-leg elbows from a to b: 90° style → the two L corners; 45° style → straight + 45° (both orders)
+            const elbows = (a, b) => {
+              const dx = b[0] - a[0], dy = b[1] - a[1];
+              if (ortho) return [[b[0], a[1]], [a[0], b[1]]];
+              const d = Math.min(Math.abs(dx), Math.abs(dy)), sx = Math.sign(dx), sy = Math.sign(dy);
+              return [Math.abs(dx) > Math.abs(dy) ? [b[0] - sx * d, a[1]] : [a[0], b[1] - sy * d], [a[0] + sx * d, a[1] + sy * d]];
+            };
             const smooth = [pts[0]];
             for (let i = 0; i < pts.length - 1;) {
-              let j = i + 1;
-              for (let k = pts.length - 1; k > i + 1; k--) if (clear(pts[i], pts[k])) { j = k; break; }
-              const a = pts[i], b = pts[j];
-              if (!octo(a, b)) {
-                // prefer a straight + 45° dog-leg over an odd angle
-                const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.min(Math.abs(dx), Math.abs(dy)), sx = Math.sign(dx), sy = Math.sign(dy);
-                const m1 = Math.abs(dx) > Math.abs(dy) ? [b[0] - sx * d, a[1]] : [a[0], b[1] - sy * d], m2 = [a[0] + sx * d, a[1] + sy * d];
-                const m = [m1, m2].find(q => clear(a, q) && clear(q, b));
-                if (m) smooth.push(m);
+              // the farthest point reachable by one straight run, or by an elbow; otherwise the next grid step
+              let j = i + 1, m = null;
+              for (let k = pts.length - 1; k > i; k--) {
+                const a = pts[i], b = pts[k];
+                if (okDir(a, b)) { if (clear(a, b)) { j = k; break; } continue; }
+                const e = elbows(a, b).find(q => clear(a, q) && clear(q, b));
+                if (e) { j = k; m = e; break; }
               }
-              smooth.push(b); i = j;
+              if (m) smooth.push(m);
+              smooth.push(pts[j]); i = j;
             }
             const out = [smooth[0]];
             for (let k = 1; k < smooth.length; k++) {

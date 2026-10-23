@@ -221,7 +221,12 @@ details.tool pre.res { color: var(--tool-res); } details.tool.err pre.res { colo
 .rgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin: 8px 0; }
 .rgrid label, .dlg .rgrid label { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: var(--text); font-size: 12px; }
 .dlg .rgrid label input:not([type=checkbox]), .dlg .rgrid select { width: 86px !important; margin: 0 0 0 auto; display: inline-block; }
-.rgrid label span { color: var(--muted); width: 22px; }
+.dlg .rgrid select { width: auto !important; max-width: 62%; }
+.rgrid label > input + span { color: var(--muted); width: 26px; flex: none; }
+.rgrid label .hint { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.rgrid label.chk { align-items: flex-start; line-height: 1.35; }
+.rgrid label.chk input { margin-top: 2px; flex: none; }
+.rgrid label.full { grid-column: 1 / -1; }
 .rh { grid-column: 1 / -1; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-top: 8px; }
 #rNets .nr { display: flex; gap: 8px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 #rNets .nr b { flex: 1; }
@@ -238,7 +243,8 @@ ul.drc li { cursor: pointer; } ul.drc li:hover { text-decoration: underline; }
 .row-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sec-h.row-h button { font-size: 11px; padding: 1px 8px; text-transform: none; letter-spacing: 0; }
 #saveState { font-size: 12px; white-space: nowrap; } #saveState.good { color: var(--good); } #saveState.warn { color: var(--warn); } #saveState.bad { color: var(--bad); }
-.dlg.wide { width: min(720px, 96vw); }
+.dlg.wide { width: min(780px, 96vw); }
+@media (max-width: 640px) { .rgrid { grid-template-columns: 1fr; } }
 #projList { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
 .proj { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .proj.cur { border-color: var(--accent); }

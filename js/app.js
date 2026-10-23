@@ -1353,7 +1353,9 @@ const App = (() => {
       if (e.key === 'f' || e.key === 'F') { view === 'sch' ? Sch.fit() : Pcb.fit(); return; }
       if ((view === 'sch' ? Sch : Pcb).key(e)) e.preventDefault();
     });
-    $('#schSvg').oncontextmenu = $('#pcbSvg').oncontextmenu = e => e.preventDefault();
+    // right-click belongs to CircuitPilot (pan, context menu, finish a track): the browser menu only appears in
+    // text fields. On Windows the event fires on mouse-up, often over our own menu that just opened.
+    document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea, [contenteditable="true"], .allow-ctx')) e.preventDefault(); });
   }
   return { init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download, openProjectData, exportProject: () => exportAs('json') };
 })();

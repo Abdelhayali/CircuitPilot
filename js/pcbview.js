@@ -368,7 +368,8 @@ const PcbView = (() => {
       }
       if (!(ui.multi.size > 1 && ui.multi.has(c.ref))) ui.multi = new Set([c.ref]);   // otherwise keep the group
       ui.sel = c.ref; ui.hlNet = el.dataset.net || null; ui.onSelect(c.ref);
-      drag = { kind: 'fp', x0: pt.x, y0: pt.y, orig: selected().map(r => { const o = Model.comp(r); return [o, o.pcb.x, o.pcb.y]; }), moved: false }; render(); return;
+      drag = { kind: 'fp', x0: pt.x, y0: pt.y, orig: selected().map(r => { const o = Model.comp(r); return [o, o.pcb.x, o.pcb.y]; }), moved: false }; render();
+      drag.ends = attachedEnds(drag.orig.map(o => o[0].ref)); return;
     }
     // drag on empty space: selection box (Shift adds to the selection)
     const keep = e.shiftKey ? selected() : [];
@@ -431,7 +432,8 @@ const PcbView = (() => {
         if (c0 && c0.pcb && (Math.abs(c0.pcb.x - (x0 + dx)) > 1e-6 || Math.abs(c0.pcb.y - (y0 + dy)) > 1e-6)) {
           if (!drag.moved) { Model.begin(); drag.moved = true; }
           for (const [c, x, y] of drag.orig) if (c.pcb) { c.pcb.x = +(x + dx).toFixed(4); c.pcb.y = +(y + dy).toFixed(4); }
-          Model.emit('move');
+          for (const t of drag.ends) { const tr = Model.S.pcb.traces[t.i]; if (tr) for (const k of t.ks) tr.pts[k] = [+(t.orig[k][0] + dx).toFixed(4), +(t.orig[k][1] + dy).toFixed(4)]; }
+          dragFast(drag, dx, dy);
         }
       } else if (drag.kind === 'seg' || drag.kind === 'vertex') {
         const t = Model.S.pcb.traces[drag.i]; if (!t) return;
@@ -478,6 +480,13 @@ const PcbView = (() => {
       if (x1 - x0 > 0.2 || y1 - y0 > 0.2) {
         const hit = Pcb.placed().filter(c => { const q = Pcb.fpBox(c); return q[0] < x1 && q[2] > x0 && q[1] < y1 && q[3] > y0; }).map(c => c.ref);
         setSelection([...new Set([...b.add, ...hit])]);
+      } else if (!b.add.length) drag = { kind: 'box' };
+    }
+    if (drag && drag.kind === 'box') {   // a click (no drag) on empty board: the copper pour under it, if any
+      const pt = vp.toWorld(e.clientX, e.clientY), P = Model.S.pcb.pours || [];
+      for (const L of [ui.active, ui.active === 'F' ? 'B' : 'F']) {
+        const i = P.findIndex(pr => pr.layer === L && vis(L) && Pcb.inPoly(pt.x, pt.y, Pcb.pourPoly(pr)));
+        if (i >= 0) { ui.item = { k: 'pour', i }; ui.hlNet = P[i].net; ui.onSelect(null); render(); break; }
       }
     }
     if (rdown && e.button === 2) {
@@ -550,9 +559,10 @@ const PcbView = (() => {
   }
 
   // ---------- rendering ----------
+  // data-o: the part an element belongs to — a part drag moves just those elements (see dragFast)
   const padEl = (p, fill, extra = '', grow = 0) => p.shape === 'round'
-    ? `<circle cx="${p.x}" cy="${p.y}" r="${p.w / 2 + grow}" fill="${fill}" ${extra}/>`
-    : `<rect x="${p.x - p.w / 2 - grow}" y="${p.y - p.h / 2 - grow}" width="${p.w + 2 * grow}" height="${p.h + 2 * grow}" rx="${p.shape === 'oval' ? Math.min(p.w, p.h) / 2 + grow : 0}" fill="${fill}" ${extra}/>`;
+    ? `<circle data-o="${esc(p.ref)}" cx="${p.x}" cy="${p.y}" r="${p.w / 2 + grow}" fill="${fill}" ${extra}/>`
+    : `<rect data-o="${esc(p.ref)}" x="${p.x - p.w / 2 - grow}" y="${p.y - p.h / 2 - grow}" width="${p.w + 2 * grow}" height="${p.h + 2 * grow}" rx="${p.shape === 'oval' ? Math.min(p.w, p.h) / 2 + grow : 0}" fill="${fill}" ${extra}/>`;
   function render() {
     if (!world) return;
     const S = Model.S, cs = Pcb.placed();
@@ -561,7 +571,7 @@ const PcbView = (() => {
     const out = [], hl = ui.hlNet;
     svg.classList.toggle('hlmode', !!hl);   // highlighted net: everything else is dimmed
     // footprint hit areas (bottom), so copper on top stays clickable
-    for (const c of cs) { const b = Pcb.fpBox(c); out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); }
+    for (const c of cs) { const b = Pcb.fpBox(c); out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); }
     const R0 = Pcb.rules(), bpoly = Pcb.boardPoly(), bpath = 'M' + bpoly.map(q => q.join(' ')).join('L') + 'Z';
     out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath></defs>`);
     const order = ui.active === 'F' ? ['B', 'F'] : ['F', 'B'];
@@ -579,7 +589,7 @@ const PcbView = (() => {
         m.push(`<path d="${bpath}" fill="none" stroke="black" stroke-width="${2 * R0.edgeClearance}"/>`);
         out.push(`<defs><mask id="pm${i}" maskUnits="userSpaceOnUse" x="-50" y="-50" width="${S.board.w + 100}" height="${S.board.h + 100}">${m.join('')}</mask></defs>`);
         const sel = ui.item && ui.item.k === 'pour' && ui.item.i === i;
-        out.push(`<path data-k="pour" data-i="${i}" class="pour${hl && pr.net === hl ? ' hl' : ''}" d="M${poly.map(q => q.join(' ')).join('L')}Z" fill="${c}" fill-opacity="${sel ? 0.55 : 0.38}" mask="url(#pm${i})" clip-path="url(#bclip)" opacity="${op}"><title>Copper area · ${esc(pr.net)} · ${LNAME[L]}</title></path>`);
+        out.push(`<path data-k="pour" data-i="${i}" class="pour${hl && pr.net === hl ? ' hl' : ''}" pointer-events="none" d="M${poly.map(q => q.join(' ')).join('L')}Z" fill="${c}" fill-opacity="${sel ? 0.55 : 0.38}" mask="url(#pm${i})" clip-path="url(#bclip)" opacity="${op}"><title>Copper area · ${esc(pr.net)} · ${LNAME[L]}</title></path>`);
         if (sel) out.push(`<path d="M${poly.map(q => q.join(' ')).join('L')}Z" class="selbox" />`);
       });
       out.push(`<g class="cu" opacity="${op}">`);
@@ -599,7 +609,7 @@ const PcbView = (() => {
       out.push(`<g data-k="h" data-i="${i}" class="mhole"><circle cx="${h.x}" cy="${h.y}" r="${h.d / 2 + R0.clearance}" fill="none" stroke="${col('MU')}" stroke-width="0.08" stroke-dasharray="0.3 0.2"/><circle cx="${h.x}" cy="${h.y}" r="${h.d / 2}" fill="${col('HO')}" stroke="${col('MU')}" stroke-width="0.1"><title>Mounting hole Ø${h.d} mm (non-plated)</title></circle></g>`);
     });
     if (vis('HO')) {
-      for (const p of cache.pads) if (p.drill) out.push(`<circle cx="${p.x}" cy="${p.y}" r="${p.drill / 2}" fill="${col('HO')}" pointer-events="none"/>`);
+      for (const p of cache.pads) if (p.drill) out.push(`<circle data-o="${esc(p.ref)}" cx="${p.x}" cy="${p.y}" r="${p.drill / 2}" fill="${col('HO')}" pointer-events="none"/>`);
       for (const v of S.pcb.vias) out.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.drill / 2}" fill="${col('HO')}" pointer-events="none"/>`);
     }
     if (vis('FM')) for (const p of cache.pads) if (p.drill || (p.layer || 'F') === 'F') out.push(padEl(p, 'none', `stroke="${col('FM')}" stroke-width="0.05" pointer-events="none"`, 0.05));
@@ -607,7 +617,7 @@ const PcbView = (() => {
     for (const c of cs) {
       const sl = Pcb.isBottom(c) ? 'BS' : 'FS'; if (!vis(sl)) continue;
       const b = Pcb.fpBox(c);
-      out.push(`<rect x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="${col(sl)}" stroke-width="0.15" pointer-events="none"/>`);
+      out.push(`<rect data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="${col(sl)}" stroke-width="0.15" pointer-events="none"/>`);
     }
     // silkscreen text exactly as exported (part labels, board name, free text); drag to move, red = covers pads
     const lblHits = [];
@@ -615,18 +625,18 @@ const PcbView = (() => {
       if (!vis(sl)) continue;
       for (const l of Pcb.silkLabels(side)) {
         const r = l.rect, [cx, cy] = Pcb.labelCentre(l), on = labelSelected(l);
-        out.push(`<path d="${l.lines.map(pl => 'M' + pl.map(q => q.join(' ')).join('L')).join('')}" fill="none" stroke="${col(sl)}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>`);
+        out.push(`<path ${l.kind === 'part' ? `data-o="${esc(l.ref)}" ` : ''}d="${l.lines.map(pl => 'M' + pl.map(q => q.join(' ')).join('L')).join('')}" fill="none" stroke="${col(sl)}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>`);
         const data = `data-lk="${l.kind}" data-lref="${esc(l.ref || '')}" data-i="${l.i != null ? l.i : ''}" data-cx="${cx}" data-cy="${cy}" data-h="${l.h}"`;
-        lblHits.push(`<rect class="lblhit${on ? ' on' : ''}${l.overPads ? ' bad' : ''}" data-k="lbl" ${data} x="${r[0]}" y="${r[1]}" width="${r[2] - r[0]}" height="${r[3] - r[1]}"><title>${esc(l.kind === 'part' ? l.ref + ' label' : l.kind === 'board' ? 'Board name' : 'Text')}${l.overPads ? ' — covers pads, move it' : ''} · drag to move · R rotates · + / − size</title></rect>`);
+        lblHits.push(`<rect ${l.kind === 'part' ? `data-o="${esc(l.ref)}" ` : ''}class="lblhit${on ? ' on' : ''}${l.overPads ? ' bad' : ''}" data-k="lbl" ${data} x="${r[0]}" y="${r[1]}" width="${r[2] - r[0]}" height="${r[3] - r[1]}"><title>${esc(l.kind === 'part' ? l.ref + ' label' : l.kind === 'board' ? 'Board name' : 'Text')}${l.overPads ? ' — covers pads, move it' : ''} · drag to move · R rotates · + / − size</title></rect>`);
         // resize handle on the selected text: drag it away from / towards the centre
         if (on) { const hs = Math.max(0.35, 7 / vp.s); lblHits.push(`<rect class="lblsize" data-k="lsize" ${data} x="${r[2] - hs / 2}" y="${r[1] - hs / 2}" width="${hs}" height="${hs}"><title>Drag to resize</title></rect>`); }
       }
     }
     if (vis('OL')) out.push(`<path d="${bpath}" fill="none" stroke="${col('OL')}" stroke-width="0.15" pointer-events="none"/>`);
-    if (vis('RA')) for (const r of Pcb.ratsnest()) out.push(`<line x1="${r.a.x}" y1="${r.a.y}" x2="${r.b.x}" y2="${r.b.y}" stroke="${col('RA')}" stroke-width="0.08" pointer-events="none"><title>${esc(r.net)}</title></line>`);
+    out.push(`<g id="prats">${ratsHtml()}</g>`);
     if (vis('DRC') && ui.drc) for (const v of ui.drc.violations) if (v.x != null) out.push(`<g class="drcmark" transform="translate(${v.x} ${v.y})" stroke="${v.severity === 'error' ? col('DRC') : '#f0b429'}"><circle r="0.9" fill="none" stroke-width="0.12"/><path d="M-0.45 -0.45L0.45 0.45M0.45 -0.45L-0.45 0.45" stroke-width="0.14"/><title>${esc(v.msg)}</title></g>`);
     // selection outlines
-    for (const r of new Set([...ui.multi, ...(ui.sel ? [ui.sel] : [])])) { const c = Model.comp(r); if (c && c.pcb) { const b = Pcb.fpBox(c, 0.2); out.push(`<rect class="selbox" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); } }
+    for (const r of new Set([...ui.multi, ...(ui.sel ? [ui.sel] : [])])) { const c = Model.comp(r); if (c && c.pcb) { const b = Pcb.fpBox(c, 0.2); out.push(`<rect data-o="${esc(c.ref)}" class="selbox" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); } }
     if (ui.item && ui.item.k === 'h') { const h = (S.pcb.holes || [])[ui.item.i]; if (h) out.push(`<circle class="selbox" cx="${h.x}" cy="${h.y}" r="${h.d / 2 + 0.4}"/>`); }
     if (ui.item && ['v', 't', 'T'].includes(ui.item.k)) {
       if (ui.item.k === 'v') { const v = S.pcb.vias[ui.item.i]; if (v) out.push(`<circle class="selbox" cx="${v.x}" cy="${v.y}" r="${v.d / 2 + 0.15}"/>`); }
@@ -637,6 +647,39 @@ const PcbView = (() => {
     out.push('<g id="pcbLive"></g>');
     world.innerHTML = out.join('');
     renderLiveLayer();
+  }
+  const ratsHtml = () => vis('RA') ? Pcb.ratsnest().map(r => `<line x1="${r.a.x}" y1="${r.a.y}" x2="${r.b.x}" y2="${r.b.y}" stroke="${col('RA')}" stroke-width="0.08" pointer-events="none"><title>${esc(r.net)}</title></line>`).join('') : '';
+  // part drag: move the dragged parts' elements, stretch the tracks attached to their pads and redraw the
+  // ratsnest — the full redraw (about 250 kB of SVG on a busy board) waits for the mouse button to come up
+  function dragFast(d, dx, dy) {
+    if (!d.els) {
+      const own = new Set(d.orig.map(o => o[0].ref)), tr = new Set(d.ends.map(t => String(t.i)));
+      d.els = [...world.querySelectorAll('[data-o]')].filter(e => own.has(e.dataset.o));
+      d.lines = {}; for (const e of world.querySelectorAll('line[data-k="t"]')) if (tr.has(e.dataset.i)) (d.lines[e.dataset.i] = d.lines[e.dataset.i] || []).push(e);
+      // guide lines while dragging (the exact ratsnest needs the full connectivity, ≈ 25 ms on a busy board): each moved
+      // pad to the nearest pad of its net on the other parts — not for pads a following track keeps connected, or poured nets
+      const S = Model.S, poured = new Set((S.pcb.pours || []).map(p => p.net)), kept = new Set();
+      for (const t of d.ends) { const tr0 = S.pcb.traces[t.i]; for (const p of cache.pads) if (own.has(p.ref) && p.net === tr0.net) for (const k of t.ks) if (G.padDist(p, t.orig[k][0], t.orig[k][1]) <= 1e-3) kept.add(p.uid); }
+      d.fly = cache.pads.filter(p => own.has(p.ref) && p.net && !poured.has(p.net) && !kept.has(p.uid))
+        .map(p => ({ p, to: cache.pads.filter(q => q.net === p.net && !own.has(q.ref)) })).filter(f => f.to.length);
+    }
+    for (const e of d.els) e.setAttribute('transform', `translate(${dx} ${dy})`);
+    for (const t of d.ends) for (const e of d.lines[t.i] || []) { const s = +e.dataset.s, p = Model.S.pcb.traces[t.i].pts; e.setAttribute('x1', p[s - 1][0]); e.setAttribute('y1', p[s - 1][1]); e.setAttribute('x2', p[s][0]); e.setAttribute('y2', p[s][1]); }
+    const r = world.querySelector('#prats');
+    if (r && vis('RA')) r.innerHTML = d.fly.map(({ p, to }) => {
+      const x = p.x + dx, y = p.y + dy, q = to.reduce((a, b) => Math.hypot(b.x - x, b.y - y) < Math.hypot(a.x - x, a.y - y) ? b : a);
+      return `<line x1="${x}" y1="${y}" x2="${q.x}" y2="${q.y}" stroke="${col('RA')}" stroke-width="0.08" pointer-events="none"/>`;
+    }).join('');
+  }
+  // tracks that end on a pad of the dragged parts: those ends follow the parts (a track between two dragged parts moves whole)
+  function attachedEnds(refs) {
+    const own = new Set(refs), pads = cache.pads.filter(p => own.has(p.ref)), out = [];
+    const on = (q, t) => pads.some(p => (!t.net || !p.net || p.net === t.net) && (p.drill || (p.layer || 'F') === t.layer) && G.padDist(p, q[0], q[1]) <= 1e-3);
+    Model.S.pcb.traces.forEach((t, i) => {
+      const a = on(t.pts[0], t), b = on(t.pts[t.pts.length - 1], t);
+      if (a || b) out.push({ i, orig: t.pts.map(q => q.slice()), ks: a && b ? t.pts.map((_, k) => k) : [a ? 0 : t.pts.length - 1] });
+    });
+    return out;
   }
   // routing preview / cursor / measure are redrawn on mouse move without touching the board
   function renderLive() { if (world && world.querySelector('#pcbLive')) renderLiveLayer(); }

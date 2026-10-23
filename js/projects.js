@@ -50,7 +50,7 @@ const Projects = (() => {
 
   // ---------- project actions ----------
   async function open(id) {
-    await saveNow();
+    if (Model.S.id || Model.S.components.length) await saveNow();   // nothing to keep in an empty, never-saved page
     const d = await api('GET', '/api/projects/' + id);
     serverUpdated = (await api('GET', '/api/projects/' + id + '/meta')).updated;
     Model.load(d); lastSaved = Model.snapshot(); remember(); setStatus('saved');
@@ -208,12 +208,13 @@ const Projects = (() => {
           }
         } catch (e) { delete Model.S.id; }
       }
-      await saveNow();
-      setInterval(poll, 2500);
-      // a link like /?project=<id> (Claude Desktop opens one) shows that project
+      // a link like /?project=<id> (Claude Desktop, or a drawing window the MCP server starts) shows that project —
+      // an empty page opened that way is not saved as a new "Untitled" project first
       const want = new URLSearchParams(location.search).get('project');
+      if (!(want && !Model.S.id && !Model.S.components.length)) await saveNow();
+      setInterval(poll, 2500);
+      if (!(window.CPStatic && CPStatic.mode === 'static')) renderLoop();   // screenshots for Claude: start before opening
       if (want && want !== Model.S.id) { try { await open(want); } catch (e) { } history.replaceState(null, '', location.pathname); }
-      if (!(window.CPStatic && CPStatic.mode === 'static')) renderLoop();
     } else setStatus('local');
     $('#projClose').onclick = close;
     $('#projSearch').oninput = render;

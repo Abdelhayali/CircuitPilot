@@ -35,6 +35,14 @@ const PcbView = (() => {
   try { const s = JSON.parse(localStorage.getItem('cp.pcbView') || '{}'); if (s.layers) for (const k in s.layers) if (ui.layers[k]) Object.assign(ui.layers[k], s.layers[k]); ['grid', 'angle', 'dim'].forEach(k => { if (s[k] != null) ui[k] = s[k]; }); } catch (e) { }
   const persist = () => { try { localStorage.setItem('cp.pcbView', JSON.stringify({ layers: ui.layers, grid: ui.grid, angle: ui.angle, dim: ui.dim })); } catch (e) { } };
   const vis = id => ui.layers[id].on, col = id => ui.layers[id].color;
+  // parts on a hidden side (its copper layer switched off) cannot be picked, dragged or box-selected
+  const partVisible = c => vis(Pcb.isBottom(c) ? 'B' : 'F');
+  // track ends sitting on a via (same net): [track index, point index]
+  function viaEnds(v) {
+    const out = [];
+    Model.S.pcb.traces.forEach((t, i) => { if (v.net && t.net && t.net !== v.net) return; for (const k of [0, t.pts.length - 1]) if (Math.hypot(t.pts[k][0] - v.x, t.pts[k][1] - v.y) < 1e-3) out.push([i, k]); });
+    return out;
+  }
   const LNAME = { F: 'TopLayer', B: 'BottomLayer' };
 
   let svg, world, grid, vp, overlay, boxEl, cache = { pads: [] };
@@ -353,18 +361,19 @@ const PcbView = (() => {
     if (el && el.dataset.k === 'ko') { ui.sel = null; ui.multi = new Set(); ui.item = { k: 'ko', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); render(); return; }
     if (el && el.dataset.k === 'pour') { ui.sel = null; ui.item = { k: 'pour', i: +el.dataset.i }; ui.hlNet = (Model.S.pcb.pours[+el.dataset.i] || {}).net; ui.onSelect(null); render(); pan = { x: e.clientX, y: e.clientY }; return; }
     if (el && el.dataset.k === 'h') { const h = Model.S.pcb.holes[+el.dataset.i]; ui.sel = null; ui.item = { k: 'h', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); drag = { kind: 'hole', i: +el.dataset.i, ox: pt.x - h.x, oy: pt.y - h.y, moved: false }; render(); return; }
-    if (el && el.dataset.k === 'v') { const v = Model.S.pcb.vias[+el.dataset.i]; selectItem({ k: 'v', i: +el.dataset.i }); drag = { kind: 'via', i: +el.dataset.i, ox: pt.x - v.x, oy: pt.y - v.y, moved: false }; return; }
+    if (el && el.dataset.k === 'v') { const v = Model.S.pcb.vias[+el.dataset.i]; selectItem({ k: 'v', i: +el.dataset.i }); drag = { kind: 'via', i: +el.dataset.i, ox: pt.x - v.x, oy: pt.y - v.y, moved: false }; drag.ends = viaEnds(v); return; }
     if (el && el.dataset.k === 'lsize') {
       const cx = +el.dataset.cx, cy = +el.dataset.cy;
       drag = { kind: 'lsize', lk: el.dataset.lk, ref: el.dataset.lref, i: +el.dataset.i, cx, cy, h0: +el.dataset.h, d0: Math.max(0.2, Math.hypot(pt.x - cx, pt.y - cy)), moved: false }; return;
     }
-    if (el && el.dataset.k === 'lbl') {
+    if (el && el.dataset.k === 'lbl' && !(el.dataset.lk === 'part' && Model.comp(el.dataset.lref) && !partVisible(Model.comp(el.dataset.lref)))) {
       const lk = el.dataset.lk, cx = +el.dataset.cx, cy = +el.dataset.cy;
       if (lk === 'part') { const c = Model.comp(el.dataset.lref); ui.item = null; ui.multi = new Set([c.ref]); ui.sel = c.ref; ui.labelOf = c.ref; ui.hlNet = null; ui.onSelect(c.ref); }
       else { ui.sel = null; ui.multi = new Set(); ui.hlNet = null; ui.item = lk === 'board' ? { k: 'blbl' } : { k: 'txt', i: +el.dataset.i }; ui.onSelect(null); }
       drag = { kind: 'label', lk, ref: el.dataset.lref, i: +el.dataset.i, ox: pt.x - cx, oy: pt.y - cy, moved: false }; render(); return;
     }
-    const ref = el && (el.dataset.ref || el.dataset.pref);
+    let ref = el && (el.dataset.ref || el.dataset.pref);
+    if (ref && Model.comp(ref) && !partVisible(Model.comp(ref))) ref = null;   // its side is hidden
     ui.labelOf = null;   // clicking anything but a label: R / + / − act on parts again
     if (ref) {
       const c = Model.comp(ref); ui.item = null;
@@ -469,7 +478,12 @@ const PcbView = (() => {
         Model.emit('move');
       } else if (drag.kind === 'via') {
         const v = Model.S.pcb.vias[drag.i], nx = +snapG(pt.x - drag.ox).toFixed(4), ny = +snapG(pt.y - drag.oy).toFixed(4);
-        if (nx !== v.x || ny !== v.y) { if (!drag.moved) { Model.begin(); drag.moved = true; } v.x = nx; v.y = ny; Model.emit('move'); }
+        if (nx !== v.x || ny !== v.y) {
+          if (!drag.moved) { Model.begin(); drag.moved = true; }
+          v.x = nx; v.y = ny;
+          for (const [ti, k] of drag.ends || []) { const t = Model.S.pcb.traces[ti]; if (t) t.pts[k] = [nx, ny]; }   // the tracks on the via follow it
+          Model.emit('move');
+        }
       }
       return;
     }
@@ -484,7 +498,7 @@ const PcbView = (() => {
       const b = ui.box, x0 = Math.min(b.x0, b.x1), x1 = Math.max(b.x0, b.x1), y0 = Math.min(b.y0, b.y1), y1 = Math.max(b.y0, b.y1);
       ui.box = null; drawBox();
       if (x1 - x0 > 0.2 || y1 - y0 > 0.2) {
-        const hit = Pcb.placed().filter(c => { const q = Pcb.fpBox(c); return q[0] < x1 && q[2] > x0 && q[1] < y1 && q[3] > y0; }).map(c => c.ref);
+        const hit = Pcb.placed().filter(partVisible).filter(c => { const q = Pcb.fpBox(c); return q[0] < x1 && q[2] > x0 && q[1] < y1 && q[3] > y0; }).map(c => c.ref);
         setSelection([...new Set([...b.add, ...hit])]);
       } else if (!b.add.length) drag = { kind: 'box' };
     }
@@ -579,7 +593,7 @@ const PcbView = (() => {
     const out = [], hl = ui.hlNet;
     svg.classList.toggle('hlmode', !!hl);   // highlighted net: everything else is dimmed
     // footprint hit areas (bottom), so copper on top stays clickable
-    for (const c of cs) { const b = Pcb.fpBox(c); out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); }
+    for (const c of cs) { if (!partVisible(c)) continue; const b = Pcb.fpBox(c); out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); }
     const R0 = Pcb.rules(), bpoly = Pcb.boardPoly(), bpath = 'M' + bpoly.map(q => q.join(' ')).join('L') + 'Z';
     out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath><pattern id="kohatch" width="0.8" height="0.8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="0.8" stroke="#ff5a5a" stroke-width="0.12"/></pattern></defs>`);
     const order = ui.active === 'F' ? ['B', 'F'] : ['F', 'B'];

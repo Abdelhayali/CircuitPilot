@@ -608,13 +608,13 @@ const App = (() => {
   }
   function fillRules() {
     $('#rPreset').value = rDraft.preset;
-    $$('#rulesModal [data-r]').forEach(el => { const v = rDraft[el.dataset.r]; if (el.type === 'checkbox') el.checked = !!v; else el.value = v; });
+    $$('#rulesModal [data-r]').forEach(el => { const v = rDraft[el.dataset.r]; if (el.type === 'checkbox') el.checked = !!v; else el.value = v == null ? '' : v; });
     $('#rNets').innerHTML = Object.entries(rDraft.netWidths).map(([n, w]) => `<div class="nr"><b>${esc(n)}</b><span>${w} mm</span><button data-rm="${esc(n)}" class="danger">✕</button></div>`).join('') || (rDraft.powerWider ? '<div class="muted small">No per-net widths — power/GND nets use the power width.</div>' : '<div class="muted small">No per-net widths — every net uses the trace width.</div>');
     $('#rNetSel').innerHTML = Object.keys(Model.S.nets).sort().map(n => `<option>${esc(n)}</option>`).join('');
     const w = Pcb.ruleWarnings(rDraft); $('#rWarn').innerHTML = w.map(x => '⚠ ' + esc(x)).join('<br>');
   }
   function readRules() {
-    $$('#rulesModal [data-r]').forEach(el => { const k = el.dataset.r; rDraft[k] = el.type === 'checkbox' ? el.checked : +el.value; });
+    $$('#rulesModal [data-r]').forEach(el => { const k = el.dataset.r; if (el.type === 'checkbox') rDraft[k] = el.checked; else if (el.value !== '') rDraft[k] = el.tagName === 'SELECT' && isNaN(+el.value) ? el.value : +el.value; });
   }
   async function saveRules(route) {
     readRules();
@@ -630,7 +630,13 @@ const App = (() => {
   }
   function initRules() {
     $('#rulesClose').onclick = $('#rulesCancel').onclick = () => $('#rulesModal').classList.add('hidden');
-    $('#rPreset').onchange = e => { const nw = rDraft.netWidths; rDraft = Object.assign({ preset: e.target.value, netWidths: nw }, Pcb.RULE_PRESETS[e.target.value].values); fillRules(); };
+    // a preset sets the sizes; the other settings (track corners, via-in-pad, warnings …) stay as they are
+    $('#rPreset').onchange = e => { readRules(); rDraft = Object.assign({}, rDraft, Pcb.RULE_PRESETS[e.target.value].values, { preset: e.target.value }); fillRules(); };
+    $('#rulesModal').addEventListener('change', e => {
+      const k = e.target.dataset && e.target.dataset.r;
+      if (k === 'viaInPad' && e.target.checked) $('#rulesModal [data-r="noViaInPad"]').checked = false;
+      if (k === 'noViaInPad' && e.target.checked) $('#rulesModal [data-r="viaInPad"]').checked = false;
+    });
     $('#rulesModal').addEventListener('input', e => { if (e.target.dataset.r) { readRules(); $('#rWarn').innerHTML = Pcb.ruleWarnings(rDraft).map(x => '⚠ ' + esc(x)).join('<br>'); } });
     $('#rNets').onclick = e => { const b = e.target.closest('[data-rm]'); if (b) { readRules(); delete rDraft.netWidths[b.dataset.rm]; fillRules(); } };
     $('#rNetAdd').onclick = () => { readRules(); const n = $('#rNetSel').value, w = +$('#rNetW').value; if (n && w > 0) { rDraft.netWidths[n] = w; $('#rNetW').value = ''; fillRules(); } };

@@ -209,7 +209,7 @@ Only document-type files inside the chosen folder are read (no `..` escapes, hid
 
 ## Control from Claude Code (MCP) and other tools
 
-`mcp/circuitpilot-mcp.mjs` exposes all 77 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
+`mcp/circuitpilot-mcp.mjs` exposes all 83 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
 
 **Claude Desktop (easiest)** — run once:
 
@@ -244,27 +244,36 @@ curl -H "Authorization: Bearer <password>" -X POST http://127.0.0.1:5174/tools/s
 - One database: when no app is running, the MCP server starts `server.py` with the Windows app's projects folder (`%LOCALAPPDATA%\CircuitPilot`, or `CP_DATA_DIR`). `start_here` shows which projects folder the running app uses.
 - **Background jobs**: `generate_pcb`, `route_pcb`, `optimize_pcb`, `place_footprints`, `update_pcb_from_schematic`, `auto_layout` and `export_project` run in a worker thread. They answer directly when done within ~40 s, otherwise they return a `job_id`; `job_status {job_id}` waits up to 55 s per call for the result, `cancel_job` stops one. While a job runs, its project is locked against edits (other projects stay usable). This repo's `.claude/settings.json` also sets `MCP_TOOL_TIMEOUT=300000` for Claude Code.
 - Circuit blocks: `copy_block {refs, to_project?, keep_nets?, place: "free"}` copies a group of parts with its layout and inner tracks; `copy_project` copies a whole project.
+- **Screenshots, PDFs and export images without a window**: when no CircuitPilot window shows the project, the MCP server opens it in a hidden (headless) Edge / Chrome, draws there and closes it after 10 idle minutes (with an app password it logs in with a one-time link).
+- `batch {calls: [{tool, args}]}` runs many quick edits in one call (e.g. side / rotation of 20 parts); `export_parts` / `import_parts` move My Library parts between databases or PCs.
+- `pcb_status` lists every unrouted net with its pad groups and the router's reason.
 
 ## Design rules (JLCPCB defaults) and DRC
 
 **PCB → ⚙ Rules** edits the project's design rules. The autorouter follows them and **DRC** checks the finished board against them.
 
-| Rule | Default (JLCPCB 2-layer, recommended) | JLCPCB minimum |
+| Rule | JLCPCB standard preset | JLCPCB minimum |
 |---|---|---|
-| Trace width | 0.25 mm | 0.127 mm (5 mil) |
+| Trace width | 0.25 mm | 0.1 mm |
 | Power / GND trace width (only with *Wider tracks for power / GND nets*) | 0.5 mm | — |
-| Clearance (copper–copper) | 0.2 mm | 0.127 mm (5 mil) |
-| Via diameter / drill | 0.6 / 0.3 mm | 0.5 / 0.3 mm, annular ring 0.13 mm |
+| Clearance (copper–copper) | 0.2 mm | 0.1 mm |
+| Via diameter / drill | 0.6 / 0.3 mm | 0.25 / 0.15 mm (extra cost; free from 0.4 / 0.3 mm) |
 | Copper to board edge | 0.3 mm | 0.2 mm |
 | Hole to hole | — | 0.5 mm |
 | Plated through-hole pad ring | — | 0.18 mm |
 
-JLCPCB makes tracks / gaps down to 0.1 mm and vias down to 0.15 mm hole / 0.25 mm diameter, but **vias cost extra below 0.2 mm hole, or below 0.3 mm hole with a diameter under 0.45 mm** — the rules warn about that, DRC lists each extra-cost via size once, and Gerber exports / the datasheet say which via size the board uses.
+JLCPCB makes tracks / gaps down to 0.1 mm and vias down to 0.15 mm hole / 0.25 mm diameter, but on 1–2 layer boards **vias cost nothing extra only with a hole ≥ 0.3 mm and a diameter ≥ 0.4 mm** (0.2 mm holes are free only on multi-layer boards, at ≥ 0.45 mm diameter); the diameter must be ≥ hole + 0.1 mm (0.15 preferred) — the rules warn about that, DRC lists each extra-cost via size once, and Gerber exports / the datasheet say which via size the board uses.
 
-- Presets: **JLCPCB recommended** (default), **JLCPCB smallest at no extra cost** (`jlcpcb_free_min`: 0.1 mm tracks and gaps, 0.45 / 0.2 mm vias — much more room on small boards), **JLCPCB 5/5 mil**, **JLCPCB power/robust**, **Home etching / CNC (1 layer)** — then tweak any value.
+- Presets: **JLCPCB smallest at no extra cost** (`jlcpcb_free_min`, the default: 0.1 mm tracks and gaps, 0.45 / 0.3 mm vias — much more room on small boards), **JLCPCB standard** (`jlcpcb`: 0.25 mm tracks, 0.6 / 0.3 mm vias), **JLCPCB 5/5 mil**, **JLCPCB power/robust**, **Home etching / CNC (1 layer)** — then tweak any value.
 - **No via in pad** (default on): vias never go on SMD pads — not even as the router's last resort — and DRC reports one as an error, so the Gerber export refuses it. Only a real exposed pad (a QFN / DFN paddle among at least four pins) may take thermal vias; module edge pads (XIAO castellations), coin-cell contacts and big chip pads never do. `add_via` / `add_track` refuse a via that touches an SMD pad. When a net cannot be routed, `route_pcb` says why (`failed_reason`).
 - **Keep-out areas** (**K** tool, or `add_keepout`): no tracks, vias or copper pour inside — each can be allowed again — and optionally no parts; on top, bottom or both. For the antenna end of a module, under a coin cell, around a crystal. The router and copper pours avoid them; DRC reports what is inside. Click the dashed border to edit or delete one.
+- **Tracks under batteries / metal parts** (Rules checkbox, off by default; `warnUnderMetal`): DRC warns about tracks and vias of other nets on the same side under a coin cell, battery holder, shield can or magnet, where only solder mask insulates them.
 - **Copper pours** drop dead copper: pieces that touch no copper of their net, and pieces smaller than *pourMinArea* (default 0.5 mm²) — in the view, the Gerbers and the connectivity check. `get_pcb_layout` lists the islands per pour.
+- **Board outline**: `set_board_shape` keeps coordinates as they are (parts, tracks and keep-outs stay put; only an outline that reaches below 0 moves everything, by the returned offset), and makes round boards directly: `{shape: "circle", d: 30, flat: {side: "left", at: 3}}`, `rounded_rect`. A round single-pad part (electrode) counts by its circle, not its square box, for "outside the board".
+- **Routing control**: `route_pcb {nets: [...]}` re-routes only those nets; `lock_tracks {net | tracks | all}` keeps good tracks through every re-route and optimisation; `generate_pcb {keep_placement: true}` only routes, without placing the parts again. `stitch_pour {net, max_spacing}` adds stitching vias between a net's top and bottom pours (and one into every piece that has none); `get_pcb_layout {pour_pieces: true}` lists each pour piece with the pads it touches.
+- **Keep-out at a part's end**: `add_keepout {ref: "U1", end: "top", depth: 6, beyond: 5}` — the antenna end of a XIAO / ESP32 module.
+- **Silkscreen**: `arrange_silk_labels {hide?}` puts every reference label back next to its part, off pads, smaller where needed, hidden where there is no room.
+- **Editing**: dragging a via drags the tracks that end on it; parts on a hidden side (copper layer switched off) cannot be selected.
 - **Placement helpers**: `check_placement` (overlaps, outside the outline, in a keep-out, on a mounting hole — in well under a second; SMD parts on opposite sides may overlap), `place_in_free_area` (nearest free board space, as a group or part by part).
 - **One width by default**: every net is routed with the trace width; tick *Wider tracks for power / GND nets* in Rules to give power and ground the power width. **Per-net widths** (e.g. `+5V` 0.8 mm, `MOTOR` 1.2 mm) override both.
 - **Changing widths after routing**: click a track — its whole net lights up (the rest is dimmed), the net name shows on the board, and Properties lists the net's tracks, vias and pins. Set the width for that track, the whole net, or every track (DRC reports at once if something no longer fits); *Reset wide tracks to rule width* brings wider tracks back to the rule.
@@ -341,6 +350,8 @@ The AI writes a short **3D script** (`set_enclosure_script`): rounded boxes, con
 - **Export**: one **STL per part** (lids/covers flipped for printing), equivalent **OpenSCAD** source, and the script itself in the zip.
 
 The geometry engine (CSG with watertight-mesh repair) is self-contained JavaScript, so it runs in the browser and in the MCP server; only the 3D preview loads three.js from cdnjs.
+
+Fit check: a part counts as *not enclosed* only when its centre, or most of a grid of points in its box, can see out of the enclosure; parts whose estimated box only touches a wall are listed under `near_wall` (set their real height with `set_enclosure {partHeights}`). Coin-cell holders are estimated at 4.4 mm with the cell. `envelope({side: 'top' | 'bottom', parts, exclude})` sizes a body from only some parts.
 
 ## Documentation (product datasheet PDF)
 

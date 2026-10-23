@@ -17,6 +17,8 @@ import http.server
 import json
 import os
 import re
+import secrets
+import socket
 import sys
 import threading
 import time
@@ -42,6 +44,7 @@ CLOUD_RE = re.compile(r"^/llm-cloud/([a-z]+)(/.*)?$")
 EXT_RE = re.compile(r"^/llm-ext/([A-Za-z0-9_-]+)(/.*)?$")
 CLOUD_HOSTS = {"ollama": "https://ollama.com"}
 PASSWORD = None
+LOGIN_TICKETS = {}   # one-time login links for a headless drawing window started by the MCP server: ticket -> expiry
 LOGIN_PAGE = b"""<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title><body style="background:#0f1216;color:#dfe5ec;font:15px system-ui;display:grid;place-items:center;height:100vh;margin:0">
 <form method=post action=/__login style="display:flex;flex-direction:column;gap:10px;width:260px">
@@ -161,8 +164,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             else:
                 self._login(b"<span style='color:#ff5d5d'>Wrong password</span>")
             return False
+        if self.command == "GET" and self.path.startswith("/login-ticket?"):
+            q = urllib.parse.parse_qs(self.path.split("?", 1)[1])
+            t, nxt = q.get("t", [""])[0], q.get("next", ["/"])[0]
+            if not nxt.startswith("/") or nxt.startswith("//"):
+                nxt = "/"
+            if PASSWORD and LOGIN_TICKETS.pop(t, 0) > time.time():
+                self.send_response(303)
+                self.send_header("Set-Cookie", f"cp_auth={token()}; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax")
+                self.send_header("Location", nxt)
+                self.send_header("Content-Length", "0")
+                super().end_headers()
+            else:
+                self._login()
+            return False
         if not self._authed():
             self._login()
+            return False
+        if self.command == "POST" and self.path == "/api/login-ticket":   # only with the password (Bearer): a link valid once, for 60 s
+            for k, exp in list(LOGIN_TICKETS.items()):
+                if exp < time.time():
+                    LOGIN_TICKETS.pop(k, None)
+            t = secrets.token_urlsafe(24) if PASSWORD else None
+            if t:
+                LOGIN_TICKETS[t] = time.time() + 60
+            self._send(200, json.dumps({"ticket": t}).encode(), "application/json")
             return False
         return True
     def end_headers(self):
@@ -440,13 +466,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
 
+class _Server(http.server.ThreadingHTTPServer):
+    # Windows lets a second server bind a port that is already in use (SO_REUSEADDR), and requests then go to either
+    # one at random: the app window and a server.py would mix projects. Own the port exclusively instead.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def run(port=5173, allow_ports="8080", password=None, bind="", ready=None):
     """start serving (blocks). The Windows app calls this from a thread with bind="127.0.0.1"."""
     global ALLOWED_PORTS, PASSWORD
     ALLOWED_PORTS = {int(p) for p in str(allow_ports).split(",") if str(p).strip()}
     PASSWORD = password or None
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    srv = http.server.ThreadingHTTPServer((bind, port), Handler)
+    srv = _Server((bind, port), Handler)
     print(f"CircuitPilot on http://{bind or '0.0.0.0'}:{port}  proxy ports: {sorted(ALLOWED_PORTS)}  "
           f"password: {'on' if PASSWORD else 'off'}", flush=True)
     if ready:
@@ -464,4 +501,10 @@ if __name__ == "__main__":
     if a.password_file:
         with open(a.password_file, encoding="utf-8") as f:
             a.password = f.read().strip()
-    run(a.port, a.allow_ports, a.password)
+    try:
+        run(a.port, a.allow_ports, a.password)
+    except OSError as e:
+        if getattr(e, "winerror", None) in (10048, 10013) or getattr(e, "errno", None) in (48, 98):
+            sys.exit(f"Port {a.port} is already in use - CircuitPilot (the app or another server.py) is probably running: "
+                     f"open http://localhost:{a.port}, or start this one on another port: python server.py {a.port + 1}")
+        raise

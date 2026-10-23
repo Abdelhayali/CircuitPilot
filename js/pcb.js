@@ -81,31 +81,74 @@ const Pcb = (() => {
     const c = sh.k === 'seg' ? sh.a : sh.k === 'circ' ? sh.c : [sh.cx, sh.cy];
     return inPoly(c[0], c[1], poly) ? d : -d;
   }
+  // Board outline. Coordinates keep their meaning (keep_origin, default): a polygon is used as given, and only when
+  // it reaches below x = 0 / y = 0 is everything (parts, copper, holes, keep-outs, texts) moved by the offset returned.
+  // circle {d, flat: {side, at}}: a round board of diameter d (centre d/2, d/2 unless cx / cy), optionally with a flat
+  // edge (side left / right / top / bottom, at = that edge's x or y); rounded_rect = rounded.
   function setBoardShape(o = {}) {
     const S = Model.S, b = S.board;
-    const type = o.shape || o.type || 'rect';
-    if (!['rect', 'rounded', 'ellipse', 'polygon'].includes(type)) throw new Error('shape must be rect, rounded, ellipse or polygon');
+    let type = o.shape || o.type || 'rect';
+    if (type === 'rounded_rect') type = 'rounded';
+    if (!['rect', 'rounded', 'ellipse', 'polygon', 'circle'].includes(type)) throw new Error('shape must be rect, rounded (rounded_rect), ellipse, circle or polygon');
+    if (type === 'circle') {
+      const d = +(o.d || o.diameter || o.width || b.w); if (!(d > 0)) throw new Error('circle needs d (diameter, mm)');
+      const cx = o.cx != null ? +o.cx : d / 2, cy = o.cy != null ? +o.cy : d / 2, r = d / 2, f = o.flat, pts = [];
+      for (let k = 0; k < 120; k++) {
+        const a = k / 120 * 2 * Math.PI; let x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+        if (f && f.side) {   // a flat: points beyond the cut line land on it
+          const at = +(f.at ?? f.at_x ?? f.at_y);
+          if (f.side === 'left') x = Math.max(x, at); else if (f.side === 'right') x = Math.min(x, at); else if (f.side === 'top') y = Math.max(y, at); else if (f.side === 'bottom') y = Math.min(y, at);
+        }
+        const q = [+x.toFixed(3), +y.toFixed(3)], last = pts[pts.length - 1];
+        if (!last || Math.hypot(q[0] - last[0], q[1] - last[1]) > 1e-3) pts.push(q);
+      }
+      // drop points in the middle of the flat (collinear)
+      const clean = pts.filter((q, i) => { const a = pts[(i - 1 + pts.length) % pts.length], c = pts[(i + 1) % pts.length]; return Math.abs((q[0] - a[0]) * (c[1] - q[1]) - (q[1] - a[1]) * (c[0] - q[0])) > 1e-6; });
+      return Object.assign(setBoardShape(Object.assign({}, o, { shape: 'polygon', points: clean, corner_radius: o.corner_radius || 0 })), { requested: 'circle' + (f ? ' with a flat ' + f.side : '') });
+    }
     if (o.width > 0) b.w = +o.width; if (o.height > 0) b.h = +o.height;
     const sh = { type };
+    let offset = null;
     if (type === 'rounded') sh.r = Math.max(0.5, +(o.corner_radius ?? o.r ?? 3));
     if (type === 'polygon') {
       const pts = (o.points || o.pts || []).map(q => [+q[0], +q[1]]);
       if (pts.length < 3) throw new Error('polygon needs at least 3 points');
       const minx = Math.min(...pts.map(q => q[0])), miny = Math.min(...pts.map(q => q[1]));
-      if (o.normalize !== false && (minx !== 0 || miny !== 0)) { for (const q of pts) { q[0] -= minx; q[1] -= miny; } for (const c of placed()) { c.pcb.x -= minx; c.pcb.y -= miny; } shiftCopper(-minx, -miny); }
+      // keep_origin (default): shift only what reaches below 0; keep_origin false (or normalize true): the polygon starts at 0, 0
+      const toZero = o.keep_origin === false || o.normalize === true;
+      const dx = toZero ? -minx : Math.max(0, -minx), dy = toZero ? -miny : Math.max(0, -miny);
+      if (dx || dy) { for (const q of pts) { q[0] += dx; q[1] += dy; } shiftAll(dx, dy); offset = [+dx.toFixed(3), +dy.toFixed(3)]; }
       sh.pts = pts.map(q => [+q[0].toFixed(3), +q[1].toFixed(3)]); sh.r = +(o.corner_radius ?? o.r ?? 0);
       b.w = +Math.max(...sh.pts.map(q => q[0])).toFixed(3); b.h = +Math.max(...sh.pts.map(q => q[1])).toFixed(3);
     }
     b.shape = sh;
-    return { board: { w: b.w, h: b.h, shape: sh.type, corner_radius: sh.r }, outside: placed().filter(c => !fpInside(c)).map(c => c.ref) };
+    return { board: { w: b.w, h: b.h, shape: sh.type, corner_radius: sh.r }, offset_applied: offset || undefined,
+      note: offset ? `Everything on the board was moved by (${offset[0]}, ${offset[1]}) mm so the outline starts at 0` : undefined, outside: placed().filter(c => !fpInside(c)).map(c => c.ref) };
   }
-  function shiftCopper(dx, dy) {
-    const P = Model.S.pcb;
-    for (const t of P.traces) t.pts = t.pts.map(q => [q[0] + dx, q[1] + dy]);
-    for (const v of P.vias) { v.x += dx; v.y += dy; }
-    for (const pr of P.pours || []) if (pr.pts) pr.pts = pr.pts.map(q => [q[0] + dx, q[1] + dy]);
+  // move the whole board content (parts, copper, holes, keep-outs, free texts, board label)
+  function shiftAll(dx, dy) {
+    const S = Model.S, P = S.pcb, mv = q => [+(q[0] + dx).toFixed(4), +(q[1] + dy).toFixed(4)];
+    for (const c of placed()) { c.pcb.x = +(c.pcb.x + dx).toFixed(4); c.pcb.y = +(c.pcb.y + dy).toFixed(4); }
+    for (const t of P.traces) t.pts = t.pts.map(mv);
+    for (const v of P.vias) { v.x = +(v.x + dx).toFixed(4); v.y = +(v.y + dy).toFixed(4); }
+    for (const pr of P.pours || []) if (pr.pts) pr.pts = pr.pts.map(mv);
+    for (const h of P.holes || []) { h.x = +(h.x + dx).toFixed(3); h.y = +(h.y + dy).toFixed(3); }
+    for (const k of P.keepouts || []) k.pts = k.pts.map(mv);
+    for (const t of P.texts || []) { t.x = +(+t.x + dx).toFixed(3); t.y = +(+t.y + dy).toFixed(3); }
+    if (P.boardLabel && P.boardLabel.x != null) { P.boardLabel.x = +(P.boardLabel.x + dx).toFixed(3); P.boardLabel.y = +(P.boardLabel.y + dy).toFixed(3); }
   }
-  function fpInside(c) { const b = fpBox(c, -0.1), poly = boardPoly(); return [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].every(q => inPoly(q[0], q[1], poly)); }
+  // the outline of a part's body for "is it on the board": a round single-pad part (electrode, round test pad) is the circle
+  // inside its box, everything else its box. inset > 0 grows it.
+  function bodyPoints(c, inset = 0) {
+    const fp = Lib.footprint(c.footprint), b = fpBox(c, inset);
+    if (fp && fp.pads.length === 1 && fp.pads[0].shape === 'round') {
+      const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, r = Math.min(b[2] - b[0], b[3] - b[1]) / 2, out = [];
+      for (let k = 0; k < 24; k++) out.push([cx + r * Math.cos(k * Math.PI / 12), cy + r * Math.sin(k * Math.PI / 12)]);
+      return out;
+    }
+    return [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]], [(b[0] + b[2]) / 2, b[1]], [(b[0] + b[2]) / 2, b[3]], [b[0], (b[1] + b[3]) / 2], [b[2], (b[1] + b[3]) / 2]];
+  }
+  function fpInside(c) { const poly = boardPoly(); return bodyPoints(c, -0.1).every(q => inPoly(q[0], q[1], poly)); }
 
   // ---------- mounting holes (NPTH) ----------
   function addMountingHoles(o = {}) {
@@ -149,9 +192,18 @@ const Pcb = (() => {
     if (Array.isArray(o.points) && o.points.length >= 3) pts = o.points.map(q => [+(+q[0]).toFixed(3), +(+q[1]).toFixed(3)]);
     else if (Array.isArray(o.rect) && o.rect.length === 4) { const [x0, y0, x1, y1] = o.rect.map(Number); pts = [[Math.min(x0, x1), Math.min(y0, y1)], [Math.max(x0, x1), Math.min(y0, y1)], [Math.max(x0, x1), Math.max(y0, y1)], [Math.min(x0, x1), Math.max(y0, y1)]]; }
     else if (o.circle) { const c = Array.isArray(o.circle) ? { x: o.circle[0], y: o.circle[1], r: o.circle[2] } : o.circle, n = 32; pts = []; for (let i = 0; i < n; i++) { const a = i / n * 2 * Math.PI; pts.push([+(+c.x + c.r * Math.cos(a)).toFixed(3), +(+c.y + c.r * Math.sin(a)).toFixed(3)]); } }
-    else if (o.ref) {   // around a part: its footprint box (+ margin), e.g. the antenna end of a module or a coin-cell holder
+    else if (o.ref) {   // around a part: its footprint box (+ margin), e.g. a coin-cell holder
       const c = Model.comp(o.ref); if (!c || !c.pcb) throw new Error(`${o.ref} is not on the PCB`);
-      const b = fpBox(c, +o.margin || 0); pts = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].map(q => q.map(v => +v.toFixed(3)));
+      let b = fpBox(c, +o.margin || 0);
+      // end: one end of the part only — the antenna end of a radio module: depth mm into the part, beyond mm past its edge
+      if (o.end) {
+        const d = +(o.depth ?? 6), e = +(o.beyond ?? 5), [x0, y0, x1, y1] = b;
+        b = o.end === 'top' ? [x0, y0 - e, x1, Math.min(y1, y0 + d)] : o.end === 'bottom' ? [x0, Math.max(y0, y1 - d), x1, y1 + e]
+          : o.end === 'left' ? [x0 - e, y0, Math.min(x1, x0 + d), y1] : o.end === 'right' ? [Math.max(x0, x1 - d), y0, x1 + e, y1] : null;
+        if (!b) throw new Error('end must be top, bottom, left or right (board view: y grows downwards)');
+        b = [Math.max(0, b[0]), Math.max(0, b[1]), Math.min(S.board.w, b[2]), Math.min(S.board.h, b[3])];
+      }
+      pts = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].map(q => q.map(v => +v.toFixed(3)));
     } else throw new Error('Give points (polygon), rect [x0, y0, x1, y1], circle {x, y, r} or ref (board mm)');
     if (pts.some(q => !q.every(isFinite))) throw new Error('Coordinates must be numbers (mm)');
     const L = String(o.layer || 'both').toLowerCase(), layer = /^(b|bot|bottom)$/.test(L) ? 'B' : /^(f|t|top|front)$/.test(L) ? 'F' : 'both';
@@ -229,6 +281,52 @@ const Pcb = (() => {
     // relabel the kept islands 1…kept
     if (kept < n) { const nl = new Int32Array(n + 1); let m = 0; for (let k = 1; k <= n; k++) if (!drop[k]) nl[k] = ++m; for (let i = 0; i < N; i++) if (label[i]) label[i] = nl[label[i]]; }
     return { W, H, g: gStep, label, islands: kept, dead, removed: n - kept, removedArea: +(deadArea * gStep * gStep).toFixed(2), at: at0 };
+  }
+  // each piece of a pour with its area and the pads it touches (connectivity says which pieces are joined)
+  function pourIslands(pr) {
+    const r = pourRaster(pr), idx = Model.pinIndex(), out = [];
+    for (let k = 1; k <= r.islands; k++) out.push({ island: k, area_mm2: 0, pads: [], vias: 0 });
+    for (let i = 0; i < r.label.length; i++) if (r.label[i]) out[r.label[i] - 1].area_mm2 += r.g * r.g;
+    for (const c of placed()) for (const p of padsOf(c, idx)) if (p.net === pr.net && padCu(p, ['F', 'B']).includes(pr.layer)) {
+      const labs = new Set([[0, 0], [0.4, 0], [-0.4, 0], [0, 0.4], [0, -0.4]].map(([a, b]) => r.at(p.x + a * p.w, p.y + b * p.h)).filter(Boolean));
+      for (const l of labs) out[l - 1].pads.push(p.key);
+    }
+    for (const v of Model.S.pcb.vias) if (v.net === pr.net) { const l = r.at(v.x, v.y); if (l) out[l - 1].vias++; }
+    for (const o of out) o.area_mm2 = +o.area_mm2.toFixed(1);
+    return out;
+  }
+  // Stitching vias between a net's top and bottom pours: on a grid (max_spacing mm) wherever both pours are solid, plus one
+  // in every piece of either pour that has none yet — so pads cut off on one side reach the other side's pour.
+  function stitchPour(o = {}) {
+    const S = Model.S, R = rules(), net = o.net || 'GND', P = (S.pcb.pours || []).filter(p => p.net === net);
+    if (R.layers === 1) throw new Error('The board has 1 copper layer — no vias');
+    const F = P.find(p => p.layer === 'F'), B = P.find(p => p.layer === 'B');
+    if (!F || !B) throw new Error(`Net ${net} needs a copper pour on both layers (add_copper_pour {net: "${net}", layer: "both"})`);
+    const rF = pourRaster(F), rB = pourRaster(B), d = +(o.diameter || R.viaDiameter), drill = +(o.drill || R.viaDrill), step = Math.max(1, +(o.max_spacing || 3));
+    const placedV = [], near = (x, y, m) => placedV.some(v => Math.hypot(v.x - x, v.y - y) < m) || S.pcb.vias.some(v => Math.hypot(v.x - x, v.y - y) < m);
+    // the whole via (+ a little) must sit on solid pour on both layers, clear of keep-outs and SMD pads
+    const fits = (x, y) => {
+      const rr = d / 2 + 0.1;
+      for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4, px = x + rr * Math.cos(a), py = y + rr * Math.sin(a); if (!rF.at(px, py) || !rB.at(px, py)) return false; }
+      if (!rF.at(x, y) || !rB.at(x, y)) return false;
+      if (keepouts().some(k => k.vias && koDist(k, x, y) < d / 2 + 0.05)) return false;
+      if (near(x, y, Math.max(d + R.minHoleToHole, d + 0.3))) return false;
+      return !viaPadProblem({ net, x, y, d, drill }, R);
+    };
+    const add = (x, y) => { const v = { net, x: +x.toFixed(3), y: +y.toFixed(3), d, drill, manual: true, stitch: true }; placedV.push(v); };
+    for (let y = step / 2; y < S.board.h; y += step) for (let x = step / 2; x < S.board.w; x += step) if (fits(x, y)) add(x, y);
+    // every piece without a via gets one (its biggest free spot)
+    let joined = 0;
+    for (const [ras, other] of [[rF, rB], [rB, rF]]) {
+      const has = new Set([...S.pcb.vias.filter(v => v.net === net), ...placedV].map(v => ras.at(v.x, v.y)).filter(Boolean));
+      for (let k = 1; k <= ras.islands; k++) {
+        if (has.has(k)) continue;
+        let done = false;
+        for (let i = 0; i < ras.label.length && !done; i += 2) if (ras.label[i] === k) { const x = (i % ras.W) * ras.g, y = Math.floor(i / ras.W) * ras.g; if (fits(x, y)) { add(x, y); has.add(k); joined++; done = true; } }
+      }
+    }
+    for (const v of placedV) S.pcb.vias.push(v);
+    return { net, added: placedV.length, pieces_joined: joined, max_spacing: step, note: placedV.length ? 'Run run_drc; route_pcb is not needed for the pour itself' : 'No room for stitching vias (both pours must be solid at the same spot)' };
   }
   const pourInfo = pr => { try { const r = pourRaster(pr); return { islands: r.islands, removed: r.removed, removed_mm2: r.removedArea }; } catch (e) { return {}; } };
   function pourDeadRects(pr) {
@@ -445,7 +543,7 @@ const Pcb = (() => {
   }
   function boxInside(c, poly, inset) {
     const b = fpBox(c, inset);
-    if (!isRectBoard()) return [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]], [(b[0] + b[2]) / 2, b[1]], [(b[0] + b[2]) / 2, b[3]], [b[0], (b[1] + b[3]) / 2], [b[2], (b[1] + b[3]) / 2]].every(q => inPoly(q[0], q[1], poly));
+    if (!isRectBoard()) return bodyPoints(c, inset).every(q => inPoly(q[0], q[1], poly));
     return b[0] >= -1e-6 && b[1] >= -1e-6 && b[2] <= Model.S.board.w + 1e-6 && b[3] <= Model.S.board.h + 1e-6;
   }
   function clampInside(c, poly, m, W, H) {
@@ -694,9 +792,10 @@ const Pcb = (() => {
   // JLCPCB capabilities (1–2 layers, 1 oz, checked 2026-10-23): 0.1 / 0.1 mm track / space, vias down to 0.15 mm hole /
   // 0.25 mm diameter (extra cost), diameter ≥ hole + 0.1, plated through-hole ring ≥ 0.18 mm, copper ≥ 0.2 mm from the edge
   const JLC_MIN = { minTraceWidth: 0.1, minClearance: 0.1, minViaDrill: 0.15, minViaDiameter: 0.25, minAnnularRing: 0.05, minPthRing: 0.18, minHoleToHole: 0.5, minEdgeClearance: 0.2, minHoleSize: 0.15 };
-  // JLCPCB charges extra for a via hole < 0.2 mm, or a hole < 0.3 mm with a diameter < 0.45 mm
-  const costsExtra = v => v.drill < 0.2 - 1e-9 || (v.drill < 0.3 - 1e-9 && v.d < 0.45 - 1e-9);
-  const costNote = v => `Via ${v.d}/${v.drill} mm costs extra at JLCPCB (no extra cost: hole ≥ 0.2 mm with diameter ≥ 0.45 mm) — pick the matching via option when ordering`;
+  // JLCPCB via pricing: no extra charge with hole ≥ 0.3 mm and diameter ≥ 0.4 mm; on boards with more than 2 layers a 0.2 mm
+  // hole is also free when the diameter is ≥ 0.45 mm. Smaller vias cost extra. Diameter ≥ hole + 0.1 mm (0.15 preferred).
+  const costsExtra = (v, layers = rules().layers) => !((v.drill >= 0.3 - 1e-9 && v.d >= 0.4 - 1e-9) || (layers > 2 && v.drill >= 0.2 - 1e-9 && v.d >= 0.45 - 1e-9));
+  const costNote = v => `Via ${v.d}/${v.drill} mm (diameter/hole) costs extra at JLCPCB — no extra charge with hole ≥ 0.3 mm and diameter ≥ 0.4 mm (0.45 preferred) on 1–2 layer boards — pick the matching via option when ordering, or use 0.45/0.3`;
   // one line for exports / the datasheet: which via sizes the board uses, and whether that costs extra
   function viaSummary() {
     const S = Model.S, R = rules(), sizes = new Map();
@@ -705,15 +804,16 @@ const Pcb = (() => {
     return [...sizes.values()].map(v => `Vias ${v.d} mm diameter / ${v.drill} mm hole: ${costsExtra(v) ? 'COSTS EXTRA at JLCPCB — choose the matching via size when ordering' : 'JLCPCB standard, no extra cost'}`).join('; ');
   }
   const RULE_PRESETS = {
-    jlcpcb: { label: 'JLCPCB 2-layer — recommended', values: { traceWidth: 0.25, powerTraceWidth: 0.5, clearance: 0.2, viaDiameter: 0.6, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
-    jlcpcb_free_min: { label: 'JLCPCB 2-layer — smallest at no extra cost (0.1 mm, vias 0.45/0.2)', values: { traceWidth: 0.1, powerTraceWidth: 0.3, clearance: 0.1, viaDiameter: 0.45, viaDrill: 0.2, edgeClearance: 0.2, layers: 2, neckDown: true, ...JLC_MIN } },
+    jlcpcb_free_min: { label: 'JLCPCB 2-layer — smallest at no extra cost (0.1 mm tracks, vias 0.45/0.3) — default', values: { traceWidth: 0.1, powerTraceWidth: 0.3, clearance: 0.1, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.2, layers: 2, neckDown: true, ...JLC_MIN } },
+    jlcpcb: { label: 'JLCPCB 2-layer — standard (0.25 mm tracks, vias 0.6/0.3)', values: { traceWidth: 0.25, powerTraceWidth: 0.5, clearance: 0.2, viaDiameter: 0.6, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_min: { label: 'JLCPCB 2-layer — 5/5 mil', values: { traceWidth: 0.127, powerTraceWidth: 0.3, clearance: 0.127, viaDiameter: 0.56, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_power: { label: 'JLCPCB 2-layer — power / robust', values: { traceWidth: 0.3, powerTraceWidth: 0.8, clearance: 0.25, viaDiameter: 0.8, viaDrill: 0.4, edgeClearance: 0.5, layers: 2, neckDown: true, ...JLC_MIN } },
     home: { label: 'Home etching / CNC milling (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6 } },
   };
+  const DEFAULT_PRESET = 'jlcpcb_free_min';   // smallest JLCPCB rules at no extra cost
   function rules() {
-    const r = Model.S.rules || {}, p = RULE_PRESETS[r.preset] || RULE_PRESETS.jlcpcb;
-    return Object.assign({ preset: 'jlcpcb', netWidths: {}, routeTime: 90, trackStyle: '45', noViaInPad: true, pourMinArea: 0.5 }, p.values, r, { netWidths: Object.assign({}, r.netWidths || {}) });
+    const r = Model.S.rules || {}, p = RULE_PRESETS[r.preset] || RULE_PRESETS[DEFAULT_PRESET];
+    return Object.assign({ preset: DEFAULT_PRESET, netWidths: {}, routeTime: 90, trackStyle: '45', noViaInPad: true, pourMinArea: 0.5, warnUnderMetal: false }, p.values, r, { netWidths: Object.assign({}, r.netWidths || {}) });
   }
   // every net uses the rule's trace width; power / GND nets get the power width only when powerWider is on
   const netWidth = (R, net) => +(R.netWidths[net] || (R.powerWider && Model.isPower(net) ? R.powerTraceWidth : R.traceWidth));
@@ -727,7 +827,8 @@ const Pcb = (() => {
     if (R.viaDiameter < R.minViaDiameter) w.push(`Via diameter ${R.viaDiameter} < fab minimum ${R.minViaDiameter} mm`);
     if ((R.viaDiameter - R.viaDrill) / 2 < R.minAnnularRing - 1e-9) w.push(`Via annular ring ${((R.viaDiameter - R.viaDrill) / 2).toFixed(3)} < fab minimum ${R.minAnnularRing} mm`);
     if (R.edgeClearance < R.minEdgeClearance) w.push(`Edge clearance ${R.edgeClearance} < fab minimum ${R.minEdgeClearance} mm`);
-    if (R.viaDiameter - R.viaDrill < 0.1 - 1e-9) w.push('Via diameter must be at least 0.1 mm larger than the hole (JLCPCB)');
+    if (R.viaDiameter - R.viaDrill < 0.1 - 1e-9) w.push('Via diameter must be at least 0.1 mm larger than the hole (JLCPCB; 0.15 mm preferred)');
+    else if (R.viaDiameter - R.viaDrill < 0.15 - 1e-9) w.push(`Via ${R.viaDiameter}/${R.viaDrill} mm: JLCPCB prefers a diameter 0.15 mm larger than the hole (e.g. ${(R.viaDrill + 0.15).toFixed(2)} mm)`);
     if (costsExtra({ d: R.viaDiameter, drill: R.viaDrill })) w.push(costNote({ d: R.viaDiameter, drill: R.viaDrill }));
     for (const [n, v] of Object.entries(R.netWidths)) if (+v < R.minTraceWidth) w.push(`Net ${n} width ${v} < fab minimum ${R.minTraceWidth} mm`);
     return w;
@@ -736,14 +837,21 @@ const Pcb = (() => {
   // Merge a partial rule update into the project (preset first, then overrides).
   function setRules(u = {}) {
     let base = Model.S.rules || {};
-    if (u.preset) { if (!RULE_PRESETS[u.preset]) throw new Error(`Unknown preset "${u.preset}". Presets: ${Object.keys(RULE_PRESETS).join(', ')}`); base = { preset: u.preset, netWidths: base.netWidths || {} }; }
+    if (u.preset) {   // a preset sets the sizes and fab minimums; settings that are not sizes stay
+      if (!RULE_PRESETS[u.preset]) throw new Error(`Unknown preset "${u.preset}". Presets: ${Object.keys(RULE_PRESETS).join(', ')}`);
+      const keep = {}; for (const k of ['trackStyle', 'noViaInPad', 'viaInPad', 'warnUnderMetal', 'pourMinArea', 'routeTime', 'powerWider']) if (base[k] != null) keep[k] = base[k];
+      base = Object.assign({ preset: u.preset, netWidths: base.netWidths || {} }, keep);
+    }
     const next = Object.assign({}, base);
     for (const k of NUM_KEYS) if (u[k] != null && u[k] !== '') { const v = +u[k]; if (!(v > 0 && v < 20)) throw new Error(`${k} must be a positive number in mm`); next[k] = v; }
     if (u.layers != null) { if (![1, 2].includes(+u.layers)) throw new Error('layers must be 1 or 2'); next.layers = +u.layers; }
     if (u.neckDown != null) next.neckDown = !!u.neckDown;
     if (u.powerWider != null) next.powerWider = !!u.powerWider;
+    // allowing via-in-pad switches the strict rule off, and the other way round
+    if (u.noViaInPad != null) next.noViaInPad = !!u.noViaInPad;
     if (u.viaInPad != null) next.viaInPad = !!u.viaInPad;
-    if (u.noViaInPad != null) { next.noViaInPad = !!u.noViaInPad; if (next.noViaInPad) next.viaInPad = false; }
+    if (next.viaInPad && (next.noViaInPad ?? true)) { if (u.viaInPad === true && u.noViaInPad !== true) next.noViaInPad = false; else next.viaInPad = false; }   // the strict rule is on unless switched off
+    if (u.warnUnderMetal != null) next.warnUnderMetal = !!u.warnUnderMetal;
     if (u.pourMinArea != null && u.pourMinArea !== '') { const v = +u.pourMinArea; if (!(v >= 0 && v <= 50)) throw new Error('pourMinArea must be 0…50 mm²'); next.pourMinArea = v; }
     if (u.trackStyle != null) { const v = String(u.trackStyle).replace(/°|deg/g, ''); if (!['45', '90'].includes(v)) throw new Error('trackStyle must be "45" or "90"'); next.trackStyle = v; }
     if (u.routeTime != null && u.routeTime !== '') { const v = +u.routeTime; if (!(v >= 5 && v <= 1800)) throw new Error('routeTime must be 5…1800 seconds'); next.routeTime = v; }
@@ -821,6 +929,7 @@ const Pcb = (() => {
         : 'the router ran out of time or room — route_pcb again, optimize_pcb, more board area or narrower rules (preset jlcpcb_free_min)');
       r.failed_reason = fr;
     } else delete r.failed_reason;
+    S.pcb.routeNotes = r.failed_reason ? Object.assign({}, r.failed_reason) : undefined;
     return r;
   }
   function routeOnce(opt = {}) {
@@ -1526,6 +1635,24 @@ const Pcb = (() => {
         }
       }
     }
+    // tracks / vias of other nets right under a battery, coin cell or metal part on the same side: only solder mask
+    // separates them from the metal (a coin cell's face, a shield can)
+    const METAL = /COIN|\bCR-?\d{4}|LIR-?\d{4}|BATT|BAT-|\bCELL\b|HOLDER|SHIELD|\bCAN\b|MAGNET|BUZZER/i;
+    if (R.warnUnderMetal) for (const c of cs) {
+      const lib = (c.lcsc && S.lib[c.lcsc]) || {}, txt = [c.value, c.type, c.footprint, lib.name, lib.package].filter(Boolean).join(' ');
+      if (!METAL.test(txt)) continue;
+      const side = isBottom(c) ? 'B' : 'F', b = fpBox(c, -0.2), pads = padsOf(c, idx), own = new Set(pads.map(p => p.net).filter(Boolean));
+      const under = (x, y) => x > b[0] && x < b[2] && y > b[1] && y < b[3] && !pads.some(p => padDist(p, x, y) <= 0);
+      const nets = new Set(); let n = 0, at = null;
+      for (const t of S.pcb.traces) {
+        if (t.layer !== side || own.has(t.net)) continue;
+        let hit = false;
+        for (let i = 1; i < t.pts.length && !hit; i++) { const a = t.pts[i - 1], q = t.pts[i], m = Math.max(1, Math.ceil(Math.hypot(q[0] - a[0], q[1] - a[1]) / 0.2)); for (let j = 0; j <= m && !hit; j++) { const x = a[0] + (q[0] - a[0]) * j / m, y = a[1] + (q[1] - a[1]) * j / m; if (under(x, y)) { hit = true; at = at || [x, y]; } } }
+        if (hit) { n++; nets.add(t.net || '(no net)'); }
+      }
+      for (const v of S.pcb.vias) if (!own.has(v.net) && under(v.x, v.y)) { n++; nets.add(v.net || '(no net)'); at = at || [v.x, v.y]; }
+      if (n) add('under-metal', `${n} track(s) / via(s) of ${[...nets].slice(0, 6).join(', ')} run under ${c.ref} (${c.value}) on the ${side === 'B' ? 'bottom' : 'top'} layer — only solder mask insulates them from its metal. Move them to the other layer, or add_keepout {ref: "${c.ref}", layer: "${side === 'B' ? 'bottom' : 'top'}"} and route again`, at[0], at[1], 'warning');
+    }
     // keep-out areas
     for (const k of keepouts()) {
       const tag = `keep-out "${k.name}"`;
@@ -1877,6 +2004,22 @@ const Pcb = (() => {
   const labelCentre = l => [+(((l.rect[0] + l.rect[2]) / 2)).toFixed(3), +(((l.rect[1] + l.rect[3]) / 2)).toFixed(3)];
   // Change a part's silkscreen label, the board name label ('board') — inside Model.mutate.
   // o: { text, size, hidden, x, y (label centre, board mm), auto: true = back to automatic placement }
+  // Tidy the reference labels: back to automatic placement (next to the part, off pads, parts and other labels); labels
+  // that still cover pads get smaller (down to min_size) and, with hide: true, are hidden when there is no room at all.
+  function arrangeSilk(o = {}) {
+    const S = Model.S, only = o.refs && o.refs.length ? new Set(o.refs) : null, minH = Math.max(0.6, +(o.min_size || 0.8));
+    const cs = placed().filter(c => !only || only.has(c.ref));
+    for (const c of cs) if (c.pcb.silk) { const L = Object.assign({}, c.pcb.silk); delete L.dx; delete L.dy; if (o.unhide) delete L.hide; if (Object.keys(L).length) c.pcb.silk = L; else delete c.pcb.silk; }
+    const bad = () => silkInfo().filter(l => l.kind === 'part' && l.covers_pads && (!only || only.has(l.ref))).map(l => l.ref);
+    const shrunk = [], hidden = [];
+    for (let h = 1.0; h >= minH - 1e-9; h = +(h - 0.2).toFixed(2)) {
+      const b = bad(); if (!b.length) break;
+      for (const r of b) { const c = Model.comp(r), L = Object.assign({}, c.pcb.silk || {}); if ((+L.h || SILK_H) > h) { L.h = h; c.pcb.silk = L; if (!shrunk.includes(r)) shrunk.push(r); } }
+    }
+    if (o.hide) for (const r of bad()) { const c = Model.comp(r); c.pcb.silk = Object.assign({}, c.pcb.silk || {}, { hide: true }); hidden.push(r); }
+    const still = bad();
+    return { arranged: cs.length, shrunk: shrunk.filter(r => !hidden.includes(r)), hidden, still_on_pads: still.length ? still : undefined, note: still.length ? 'No room for these labels next to their parts — move them (set_silk_label x/y), or arrange again with hide: true' : undefined };
+  }
   function setSilkLabel(ref, o = {}) {
     const S = Model.S;
     if (/^(board|#board)$/i.test(ref)) {
@@ -2284,7 +2427,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: S.board, seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

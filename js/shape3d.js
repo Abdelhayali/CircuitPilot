@@ -378,7 +378,7 @@ CONTEXT: pcb = {w, h, thickness, outline:[[x,y],…], holes:[{x,y,d}], parts:[{r
 HELPERS: board(extra=0) → PCB slab (outline offset by extra, z 0…thickness); partBoxes({clearance=0.5, side}) → union of component boxes (for cavities);
     resolution(fn) sets segments per circle (default adaptive 12–48; lower = faster); range(a,b,step); log(...); Math.*, PI.
 ENCLOSURE KIT (use these — the board then always fits):
-    e = envelope({gap=0.5, headroom=0.8, standoff=1.2}) → space the board needs: {w, l, cx, cy (cavity size/centre, covers PCB + every part), zFloor, zTop, top, under, plugs, leds, buttons}
+    e = envelope({gap=0.5, headroom=0.8, standoff=1.2, side: 'top'|'bottom', parts: [refs], exclude: [refs]}) → space the board needs (side / parts / exclude: only those parts; part heights from set_enclosure partHeights or the estimate — coin-cell holders ≈ 4.4 mm): {w, l, cx, cy (cavity size/centre, covers PCB + every part), zFloor, zTop, top, under, plugs, leds, buttons}
     outlineAround(style, e, margin, cornerR) → 2D outline that contains the cavity + margin; style rect | oval | circle | pill | hex | octagon | squircle
     softSolid(outline2d, z0, z1, roundTop, roundBottom) → solid with rounded top/bottom edges;  cavity(e) → the board pocket
     boardPosts(e) → posts under the PCB (screw pilots at PCB holes);  connectorCuts(e) → openings for edge connectors;  topWindows(e, zTop) → holes above LEDs / buttons
@@ -615,10 +615,13 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       if (!pcb) { const w = o.w ?? 32, l = o.l ?? 24; return { w, l, cx: 0, cy: 0, x0: -w / 2, y0: -l / 2, x1: w / 2, y1: l / 2, top: 6, under: 0, zFloor: -standoff, zTop: 6 + head, plugs: [], leds: [], buttons: [], gap }; }
       const xs = pcb.outline.map(q => q[0]), ys = pcb.outline.map(q => q[1]);
       let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-      for (const p of pcb.parts) if (!(p.plug && p.edge)) { x0 = Math.min(x0, p.x0); x1 = Math.max(x1, p.x1); y0 = Math.min(y0, p.y0); y1 = Math.max(y1, p.y1); }
+      // side: 'top' / 'bottom' — only that side's parts; parts / exclude: by reference
+      const only = o.parts ? new Set(o.parts) : null, skip = new Set(o.exclude || []);
+      const use = pcb.parts.filter(p => (!o.side || o.side === 'both' || p.side === o.side) && (!only || only.has(p.ref)) && !skip.has(p.ref));
+      for (const p of use) if (!(p.plug && p.edge)) { x0 = Math.min(x0, p.x0); x1 = Math.max(x1, p.x1); y0 = Math.min(y0, p.y0); y1 = Math.max(y1, p.y1); }
       x0 -= gap; y0 -= gap; x1 += gap; y1 += gap;
-      const top = Math.max(pcb.thickness, ...pcb.parts.filter(p => p.side === 'top').map(p => pcb.thickness + p.h));
-      const under = Math.max(0, ...pcb.parts.filter(p => p.side === 'bottom').map(p => p.h));
+      const top = Math.max(pcb.thickness, ...use.filter(p => p.side === 'top').map(p => pcb.thickness + p.h));
+      const under = Math.max(0, ...use.filter(p => p.side === 'bottom').map(p => p.h));
       return { w: x1 - x0, l: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, x0, y0, x1, y1, top, under, zFloor: -(under + standoff), zTop: top + head, gap,
         plugs: pcb.parts.filter(p => p.plug && p.edge), leds: pcb.parts.filter(p => p.side === 'top' && (/led/i.test(p.type) || /\bled\b/i.test(String(p.value || '')))),
         buttons: pcb.parts.filter(p => p.side === 'top' && /switch|button|tact/i.test(p.type)) };
@@ -841,10 +844,14 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       if (boardPts.some(P => escapes(P) >= 3)) out.push('PCB');
       for (const p of pcb.parts) {
         if (p.plug && p.edge) continue;
-        const z0 = p.side === 'top' ? pcb.thickness : -p.h, z1 = z0 + p.h, m = 0.15;
-        const pts = [[p.cx, p.cy, (z0 + z1) / 2]];
-        for (const x of [p.x0 + m, p.x1 - m]) for (const y of [p.y0 + m, p.y1 - m]) for (const z of [z0 + m, z1 - m]) pts.push([x, y, z]);
-        if (pts.some(P => escapes(P) >= 3)) out.push(p.ref);
+        // the part's box is only an estimate (its corners stick out of curved walls and floors): it is outside when its
+        // centre can see out, or most of a grid of points inside its box can; a few escaping points only mean it is close
+        const z0 = p.side === 'top' ? pcb.thickness : -p.h, z1 = z0 + p.h, ix = (p.x1 - p.x0) * 0.2, iy = (p.y1 - p.y0) * 0.2, iz = Math.min(0.3, p.h * 0.2);
+        const pts = [];
+        for (const fx of [0, 0.5, 1]) for (const fy of [0, 0.5, 1]) for (const fz of [0, 1]) pts.push([p.x0 + ix + (p.x1 - p.x0 - 2 * ix) * fx, p.y0 + iy + (p.y1 - p.y0 - 2 * iy) * fy, z0 + iz + (p.h - 2 * iz) * fz]);
+        const centre = escapes([p.cx, p.cy, (z0 + z1) / 2]) >= 3, esc = pts.filter(P => escapes(P) >= 3).length;
+        if (centre || esc > pts.length / 2) out.push(p.ref);
+        else if (esc) (report.near_wall = report.near_wall || []).push(`${p.ref} (${Math.round(esc / pts.length * 100)}% of its estimated box touches or crosses a wall — check its real height / position)`);
         if (Date.now() > budget) { report.warnings.push('containment check stopped early (time limit)'); break; }
       }
       report.outside = out;

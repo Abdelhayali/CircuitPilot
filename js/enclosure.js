@@ -196,7 +196,8 @@ const Enclosure = (() => {
     if (params.partHeights && params.partHeights[c.ref] != null) return +params.partHeights[c.ref];
     const lib = c.lcsc && Model.S.lib && Model.S.lib[c.lcsc];
     const t = [c.footprint, c.value, c.type, lib && lib.name, lib && lib.package, lib && lib.footprint && lib.footprint.name].filter(Boolean).join(' ').toUpperCase();
-    const tests = [[/TO-?220/, 18], [/DC-?0|BARREL|JACK/, 11], [/RJ-?45/, 13.5], [/BUZZER/, 9.5], [/POT/, 10], [/PINHEADER|HEADER|CONN/, 8.5],
+    // coin-cell holders: holder + cell (LIR2032 / CR2032 in a Keystone 3034-type holder ≈ 4.4 mm)
+    const tests = [[/CR-?2450|LIR-?2450/, 5.6], [/CR-?20(32|25|16)|LIR-?20(32|25)|2032|COIN|BATTERY.?HOLDER|BAT.?HLD|KEYSTONE.?30[0-9]{2}/, 4.4], [/CR-?1[0-9]20|LIR-?1[0-9]20/, 3.2], [/18650/, 21], [/AA|AA.?HOLDER/, 16], [/AAA/, 13], [/TO-?220/, 18], [/DC-?0|BARREL|JACK/, 11], [/RJ-?45/, 13.5], [/BUZZER/, 9.5], [/POT/, 10], [/PINHEADER|HEADER|CONN/, 8.5],
       [/CAPACITOR_POLARIZED|ELECTROLYTIC|CP_RADIAL/, 11], [/TYPE-?C|USB-?C/, 3.3], [/MICRO-?USB|MICRO-?B/, 2.9], [/USB/, 7], [/ESP32|WROOM|MINI-1|MODULE|WIFIM/, 3.3],
       [/TO-?92/, 5], [/DIP-/, 4.5], [/SW_|SWITCH|TACT/, 5], [/CRYSTAL|HC49/, 4], [/SOT-?223/, 1.8], [/THT_P2\.54/, 8.6], [/THT_P/, 6],
       [/QFN|SOIC|SOP|TSSOP|SSOP|QFP|SOT|SOD|0402|0603|0805|1206|SMA|SMB/, 1.6]];

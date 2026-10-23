@@ -45,7 +45,7 @@ Object.assign(Engine.env, {
   savePart: async def => { await api('PUT', '/api/library/' + encodeURIComponent(def.key), def); },
   ui: () => { },
   // screenshots (view_design): drawn by the CircuitPilot tab open in the browser, relayed by server.py
-  render: async args => api('POST', '/api/render/request', { project: currentId, args }),   // view_design
+  render: async args => { await ensureRenderTab(currentId); const r = await api('POST', '/api/render/request', { project: currentId, args }); touchHeadless(); return r; },   // view_design
 });
 
 // ---------- make sure the CircuitPilot app is running (Claude Desktop / Claude Code only start this MCP server) ----------
@@ -86,6 +86,47 @@ async function showProject(id) {
   if (!id) return;
   try { await api('POST', '/api/render/focus', { project: id }); } catch { }
   try { const t = await api('GET', '/api/render/tabs'); if (!t.tabs && !browserOpened) openBrowser(BASE + '/?project=' + encodeURIComponent(id)); } catch { }
+}
+
+// ---------- drawing without a window: a headless Edge / Chrome tab renders screenshots and PDFs ----------
+// Used only when no CircuitPilot tab shows the project; closed again after 10 idle minutes.
+let headless = null, headlessTimer = null;
+function browserPath() {
+  const env = process.env, c = [];
+  if (process.platform === 'win32') for (const base of [env['ProgramFiles(x86)'], env.ProgramFiles, env.LOCALAPPDATA].filter(Boolean)) c.push(path.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'), path.join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+  else c.push('/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
+  return process.env.CP_BROWSER || c.find(p => { try { return fs.statSync(p).isFile(); } catch { return false; } }) || null;
+}
+function touchHeadless() {
+  if (!headless) return;
+  clearTimeout(headlessTimer); headlessTimer = setTimeout(stopHeadless, 10 * 60e3); headlessTimer.unref && headlessTimer.unref();
+}
+function stopHeadless() { if (headless) { try { headless.kill(); } catch { } headless = null; log('headless browser closed'); } }
+process.on('exit', stopHeadless);
+async function tabProjects() { try { const t = await api('GET', '/api/render/tabs'); return { n: t.tabs || 0, projects: t.projects || [] }; } catch { return { n: 0, projects: [] }; } }
+async function ensureRenderTab(id, waitS = 25) {
+  if (!id) return false;
+  let t = await tabProjects();
+  if (t.projects.includes(id)) return true;
+  if (t.n) await showProject(id);   // an open window switches to the project
+  else if (!headless) {
+    const exe = browserPath();
+    let url = BASE + '/?project=' + encodeURIComponent(id);
+    if (PASSWORD) {   // the app wants a login: a one-time link sets the cookie in the headless browser
+      const tk = await api('POST', '/api/login-ticket').catch(() => ({}));
+      if (tk.ticket) url = BASE + '/login-ticket?t=' + encodeURIComponent(tk.ticket) + '&next=' + encodeURIComponent('/?project=' + id);
+    }
+    if (exe) {
+      const prof = path.join(DATA_DIR, 'headless-browser'); fs.mkdirSync(prof, { recursive: true });
+      headless = spawn(exe, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-sync', '--remote-debugging-port=0', '--disable-extensions', '--mute-audio', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+        '--window-size=1600,1000', '--user-data-dir=' + prof, url], { stdio: 'ignore', windowsHide: true });
+      headless.on('exit', () => { headless = null; });
+      log('headless browser started for drawing: ' + exe);
+      touchHeadless();
+    }
+  } else if (headless) await showProject(id);
+  for (let i = 0; i < waitS * 2; i++) { await new Promise(r => setTimeout(r, 500)); t = await tabProjects(); if (t.projects.includes(id)) return true; if (i === 10 && t.n) await showProject(id); }
+  return false;
 }
 
 async function api(method, p, body) {
@@ -208,12 +249,11 @@ async function exportJob(job, project, input) {
       shots.push([Object.assign({ full: true }, a), 'images/' + n]);
   }
   if (shots.length) {
-    let tab = false;
-    for (let i = 0; i < 20 && !tab && job.status === 'running'; i++) { try { const t = await api('GET', '/api/render/tabs'); tab = !!(t.projects || []).includes(job.project); } catch { } if (!tab) { if (i === 0) await showProject(job.project); await new Promise(r => setTimeout(r, 1000)); } }
-    if (!tab) skipped.push('PDFs and images: the CircuitPilot window is not open on this project (open ' + BASE + ' and run export_project again)');
+    const tab = await ensureRenderTab(job.project, 30);
+    if (!tab) skipped.push('PDFs and images: no CircuitPilot window could show this project (open ' + BASE + ' and run export_project again)');
     else for (const [args, rel] of shots) {
       if (job.status !== 'running') break;
-      try { const r = await api('POST', '/api/render/request', { project: job.project, args }); if (!r || !r.data) throw new Error('nothing drawn'); put(rel, new Uint8Array(Buffer.from(r.data, 'base64'))); }
+      try { const r = await api('POST', '/api/render/request', { project: job.project, args }); touchHeadless(); if (!r || !r.data) throw new Error('nothing drawn'); put(rel, new Uint8Array(Buffer.from(r.data, 'base64'))); }
       catch (e) { skipped.push(rel + ': ' + e.message); }
     }
   }
@@ -233,6 +273,8 @@ const EXTRA = [
   { name: 'export_gerbers', description: 'Run DRC, then write Gerber (copper, mask, paste, silkscreen, outline) + Excellon drill files and a .zip for the fab into a folder on this machine. Refuses when DRC has errors unless force is true.', input_schema: { type: 'object', required: ['out_dir'], properties: { out_dir: { type: 'string', description: 'Absolute folder path (created if missing)' }, force: { type: 'boolean', description: 'export even with DRC errors' } } } },
   { name: 'export_enclosure', description: 'Write the 3D-printable enclosure for the current project into a folder on this machine: box mode → base + lid STL, parametric OpenSCAD .scad and notes; custom 3D mode → one STL per part, OpenSCAD source and the 3D script; plus a .zip.', input_schema: { type: 'object', required: ['out_dir'], properties: { out_dir: { type: 'string', description: 'Absolute folder path (created if missing)' } } } },
   { name: 'get_bom', description: 'Bill of materials of the current project as CSV text (qty, refs, type, value, footprint, LCSC part).', input_schema: { type: 'object', properties: {} } },
+  { name: 'export_parts', description: 'Write parts of My Library (default: all) to a JSON file, to use them in another CircuitPilot database or on another PC (import_parts).', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, path: { type: 'string', description: 'file path (default Documents/CircuitPilot exports/my-library.json)' } } } },
+  { name: 'import_parts', description: 'Add the parts of a JSON file from export_parts (or one part object) to My Library. Existing parts with the same key are kept unless overwrite: true.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, overwrite: { type: 'boolean' } } } },
   { name: 'job_status', description: 'Result of a background job (long tools — generate_pcb, route_pcb, optimize_pcb, place_footprints, update_pcb_from_schematic, auto_layout, export_project — hand out a job_id when they take longer than ~40 s). Waits up to wait_s (default 50, max 55) for it to finish. Without job_id: lists the jobs.', input_schema: { type: 'object', properties: { job_id: { type: 'string' }, wait_s: { type: 'number' } } } },
   { name: 'cancel_job', description: 'Stop a running background job; nothing of it is saved.', input_schema: { type: 'object', required: ['job_id'], properties: { job_id: { type: 'string' } } } },
   { name: 'copy_project', description: 'Copy a project (default: the current one) to a new project, e.g. before trying a big change or to start a variant. The copy becomes current unless open: false.', input_schema: { type: 'object', properties: { name: { type: 'string', description: 'name of the copy (default "<name> (copy)")' }, open: { type: 'boolean' } } } },
@@ -242,7 +284,7 @@ const EXTRA = [
 ];
 // every tool takes `project`: the call works on that project (it becomes the current one) — no guessing after a restart
 const PROJECT_ARG = { type: 'string', description: 'Project id (or exact name) this call works on; it becomes the current project. Pass it in every call.' };
-const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job']);
+const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job', 'export_parts', 'import_parts']);
 const TOOLS = [...EXTRA, ...Engine.TOOLS.filter(t => !EXTRA.some(x => x.name === t.name)).map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema }))]
   .map(t => NO_PROJECT_ARG.has(t.name) ? t : Object.assign({}, t, { input_schema: Object.assign({}, t.input_schema, { properties: Object.assign({ project: PROJECT_ARG }, t.input_schema.properties || {}) }) }));
 // tools that need no project at all
@@ -259,6 +301,24 @@ async function callTool(name, input = {}) {
   }
   if (LONG.has(name)) { const j = await startJob(name, input); return awaitJob(j, JOB_WAIT); }
   switch (name) {
+    case 'export_parts': {
+      const lib = await api('GET', '/api/library'), want = Array.isArray(input.keys) && input.keys.length ? new Set(input.keys) : null;
+      const parts = lib.filter(p => !want || want.has(p.key)), file = path.resolve(String(input.path || path.join(os.homedir(), 'Documents', 'CircuitPilot exports', 'my-library.json')));
+      if (want) { const miss = [...want].filter(k => !parts.some(p => p.key === k)); if (miss.length) throw new Error('Not in My Library: ' + miss.join(', ')); }
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ format: 'circuitpilot-parts', version: 1, exported: new Date().toISOString(), parts }, null, 1));
+      return { file, parts: parts.map(p => p.key) };
+    }
+    case 'import_parts': {
+      const d = JSON.parse(fs.readFileSync(path.resolve(String(input.path)), 'utf8')), list = Array.isArray(d) ? d : Array.isArray(d.parts) ? d.parts : [d];
+      const have = new Set((await api('GET', '/api/library')).map(p => p.key)), added = [], kept = [], bad = [];
+      for (const p of list) {
+        if (!p || !p.key || !Array.isArray(p.pins)) { bad.push(p && (p.key || p.name) || '?'); continue; }
+        if (have.has(p.key) && !input.overwrite) { kept.push(p.key); continue; }
+        await api('PUT', '/api/library/' + encodeURIComponent(p.key), p); added.push(p.key);
+      }
+      return { added, kept_existing: kept.length ? kept : undefined, invalid: bad.length ? bad : undefined };
+    }
     case 'job_status': {
       if (!input.job_id) return [...jobs.values()].map(jobView);
       const j = jobs.get(String(input.job_id)); if (!j) throw new Error(`No job ${input.job_id} (jobs are forgotten an hour after they end, or when the MCP server restarts)`);

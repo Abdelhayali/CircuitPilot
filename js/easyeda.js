@@ -157,11 +157,14 @@ const EasyEDA = (() => {
       const pkg = clean(link && link.puuid && link.package ? link.package : (lib && lib.footprint && lib.footprint.name) || c.footprint || 'FOOTPRINT');
       const para = ['package', pkg, 'pre', clean(c.ref), 'Contributor', 'CircuitPilot', 'Supplier', lcsc ? 'LCSC' : '', 'Supplier Part', lcsc, 'Manufacturer Part', clean((lib && lib.mfr_part) || c.value || ''), 'Manufacturer', clean((lib && lib.manufacturer) || '')];
       const sub = [];
+      // pads in the footprint's own orientation plus the part's rotation (board-oriented sizes would make every rotated
+      // copy a different footprint for EasyEDA Pro, which then "fixes" them by turning the pads 90°)
+      const rot = ((c.pcb.rot || 0) % 360 + 360) % 360, sw = rot === 90 || rot === 270;
       for (const p of Pcb.padsOf(c, idx)) {
-        const x = X(p.x), y = Y(p.y), w = u(p.w), h = u(p.h), layer = p.drill ? 11 : cuL(p.layer);
+        const x = X(p.x), y = Y(p.y), w = u(p.w), h = u(p.h), layer = p.drill ? 11 : cuL(p.layer), lw = sw ? h : w, lh = sw ? w : h;
         const shape = p.shape === 'round' ? 'ELLIPSE' : p.shape === 'oval' ? 'OVAL' : 'RECT';
         const pts = shape === 'RECT' ? [[x - w / 2, y - h / 2], [x + w / 2, y - h / 2], [x + w / 2, y + h / 2], [x - w / 2, y + h / 2]].map(q => n2(q[0]) + ' ' + n2(q[1])).join(' ') : '';
-        sub.push(`PAD~${shape}~${x}~${y}~${w}~${h}~${layer}~${clean(p.net || '')}~${clean(p.num)}~${p.drill ? u(p.drill / 2) : 0}~${pts}~0~${id()}~0~~Y~0~0~0.2~${x},${y}`);
+        sub.push(`PAD~${shape}~${x}~${y}~${lw}~${lh}~${layer}~${clean(p.net || '')}~${clean(p.num)}~${p.drill ? u(p.drill / 2) : 0}~${pts}~${rot}~${id()}~0~~Y~0~0~0.2~${x},${y}`);
       }
       const b = Pcb.fpBox(c), silk = bot ? 4 : 3;
       sub.push(`TRACK~0.6~${silk}~~${X(b[0])} ${Y(b[1])} ${X(b[2])} ${Y(b[1])} ${X(b[2])} ${Y(b[3])} ${X(b[0])} ${Y(b[3])} ${X(b[0])} ${Y(b[1])}~${id()}~0`);

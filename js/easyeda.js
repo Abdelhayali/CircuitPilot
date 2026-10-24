@@ -93,7 +93,8 @@ const EasyEDA = (() => {
       const lib = c.lcsc && S.lib[c.lcsc];
       const fp = (lib && lib.footprint && lib.footprint.name) || c.footprint || '';
       const lcsc = Model.lcscOf(c), link = (lcsc && ids[lcsc]) || null;
-      const para = ['package', link && link.puuid && link.package ? link.package : fp, 'pre', (c.ref.replace(/\d+$/, '') || d.prefix || 'U') + '?', 'Contributor', 'CircuitPilot', 'Supplier', lcsc ? 'LCSC' : '', 'Supplier Part', lcsc, 'Manufacturer Part', (lib && lib.mfr_part) || c.value || '', 'Manufacturer', (lib && lib.manufacturer) || ''];
+      // "pre" is the designator in EasyEDA ("R?" = not annotated: EasyEDA Pro then cannot pair the symbol with its footprint)
+      const para = ['package', link && link.puuid && link.package ? link.package : fp, 'pre', c.ref, 'spicePre', (c.ref.replace(/\d+$/, '') || d.prefix || 'U'), 'Contributor', 'CircuitPilot', 'Supplier', lcsc ? 'LCSC' : '', 'Supplier Part', lcsc, 'Manufacturer Part', (lib && lib.mfr_part) || c.value || '', 'Manufacturer', (lib && lib.manufacturer) || ''];
       const sub = [];
       // graphics
       let svg = '';
@@ -141,7 +142,7 @@ const EasyEDA = (() => {
   // ---------- PCB export ----------
   // Same records the importer below reads. Footprints are written in full (pads in board coordinates), so EasyEDA needs no
   // library lookup; net names on pads, tracks, vias and pours are the schematic's net names.
-  function exportPcb() {
+  function exportPcb(ids = {}) {
     const S = Model.S, idx = Model.pinIndex(), cs = Pcb.placed();
     if (!cs.length || !S.board.w) throw new Error('No PCB yet: create the PCB first (PCB tab)');
     const OX = 4000, OY = 3000, u = v => n2(v / U), X = x => n2(OX + x / U), Y = y => n2(OY + y / U);
@@ -150,8 +151,9 @@ const EasyEDA = (() => {
     const shapes = [], cuL = l => l === 'B' ? 2 : 1;
     for (const c of cs) {
       const lib = c.type === 'part' ? S.lib[c.lcsc] : null, bot = Pcb.isBottom(c), lcsc = Model.lcscOf(c);
-      const pkg = clean((lib && lib.footprint && lib.footprint.name) || c.footprint || 'FOOTPRINT');
-      const para = ['package', pkg, 'pre', (c.ref.replace(/\d+$/, '') || 'U') + '?', 'Contributor', 'CircuitPilot', 'Supplier', lcsc ? 'LCSC' : '', 'Supplier Part', lcsc, 'Manufacturer Part', clean((lib && lib.mfr_part) || c.value || ''), 'Manufacturer', clean((lib && lib.manufacturer) || '')];
+      const link = (lcsc && ids[lcsc]) || null;   // the EasyEDA library footprint the schematic symbol points to
+      const pkg = clean(link && link.puuid && link.package ? link.package : (lib && lib.footprint && lib.footprint.name) || c.footprint || 'FOOTPRINT');
+      const para = ['package', pkg, 'pre', clean(c.ref), 'Contributor', 'CircuitPilot', 'Supplier', lcsc ? 'LCSC' : '', 'Supplier Part', lcsc, 'Manufacturer Part', clean((lib && lib.mfr_part) || c.value || ''), 'Manufacturer', clean((lib && lib.manufacturer) || '')];
       const sub = [];
       for (const p of Pcb.padsOf(c, idx)) {
         const x = X(p.x), y = Y(p.y), w = u(p.w), h = u(p.h), layer = p.drill ? 11 : cuL(p.layer);
@@ -164,7 +166,8 @@ const EasyEDA = (() => {
       sub.push(`TEXT~P~${X(b[0])}~${n2(Y(b[1]) - 2)}~0.6~0~${bot ? 1 : 0}~${silk}~~4~${clean(c.ref)}~~~${id()}~0~pinpart`);
       sub.push(`TEXT~N~${X(b[0])}~${n2(Y(b[3]) + 6)}~0.6~0~${bot ? 1 : 0}~${bot ? 14 : 13}~~4~${clean(c.value || '')}~~none~${id()}~0~pinpart`);
       // LIB: x ~ y ~ attributes ~ rotation ~ importFlag ~ id ~ layer (1 top, 2 bottom)
-      shapes.push([`LIB~${X(c.pcb.x)}~${Y(c.pcb.y)}~${para.join('`')}\`~${c.pcb.rot || 0}~0~${id()}~${bot ? 2 : 1}`, ...sub].join('#@$'));
+      const hexId = v => /^[0-9a-f]{16,40}$/i.test(v || '') ? v : '';
+      shapes.push([`LIB~${X(c.pcb.x)}~${Y(c.pcb.y)}~${para.join('`')}\`~${c.pcb.rot || 0}~0~${id()}~${bot ? 2 : 1}~${hexId(link && link.puuid)}`, ...sub].join('#@$'));
     }
     for (const t of S.pcb.traces || []) if (t.pts && t.pts.length >= 2) shapes.push(`TRACK~${u(t.w)}~${cuL(t.layer)}~${clean(t.net)}~${t.pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
     for (const v of S.pcb.vias || []) shapes.push(`VIA~${X(v.x)}~${Y(v.y)}~${u(v.d)}~${clean(v.net)}~${u((v.drill || 0.3) / 2)}~${id()}~0`);

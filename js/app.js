@@ -248,7 +248,7 @@ const App = (() => {
     }));
     const sch = EasyEDA.exportSchematic(ids);
     let pcb = null;
-    if (mode === 'project') { try { pcb = EasyEDA.exportPcb(); } catch (e) { pcb = null; } }
+    if (mode === 'project') { try { pcb = EasyEDA.exportPcb(ids); } catch (e) { pcb = null; } }
     if (mode === 'project') {
       const base = (S.name || 'Project').replace(/[\\/:*?"<>|]+/g, '_');
       const files = { [`SCH_${base}.json`]: sch }; if (pcb) files[`PCB_${base}.json`] = pcb;

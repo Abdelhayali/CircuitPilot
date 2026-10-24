@@ -160,19 +160,25 @@ const EasyEDA = (() => {
       // pads in the footprint's own orientation plus the part's rotation (board-oriented sizes would make every rotated
       // copy a different footprint for EasyEDA Pro, which then "fixes" them by turning the pads 90°)
       const rot = ((c.pcb.rot || 0) % 360 + 360) % 360, sw = rot === 90 || rot === 270;
+      // footprint shapes rounded relative to the part's origin: rounded on the board, two copies of a footprint could differ
+      // by 0.01 and EasyEDA Pro would see different footprints of the same name ("Modify Footprint 1206 → 1206")
+      const ox = X(c.pcb.x), oy = Y(c.pcb.y), FX = v => n2(ox + n2((v - c.pcb.x) / U)), FY = v => n2(oy + n2((v - c.pcb.y) / U));
       for (const p of Pcb.padsOf(c, idx)) {
-        const x = X(p.x), y = Y(p.y), w = u(p.w), h = u(p.h), layer = p.drill ? 11 : cuL(p.layer), lw = sw ? h : w, lh = sw ? w : h;
+        const x = FX(p.x), y = FY(p.y), w = u(p.w), h = u(p.h), layer = p.drill ? 11 : cuL(p.layer), lw = sw ? h : w, lh = sw ? w : h;
         const shape = p.shape === 'round' ? 'ELLIPSE' : p.shape === 'oval' ? 'OVAL' : 'RECT';
-        const pts = shape === 'RECT' ? [[x - w / 2, y - h / 2], [x + w / 2, y - h / 2], [x + w / 2, y + h / 2], [x - w / 2, y + h / 2]].map(q => n2(q[0]) + ' ' + n2(q[1])).join(' ') : '';
+        const x0 = FX(p.x - p.w / 2), x1 = FX(p.x + p.w / 2), y0 = FY(p.y - p.h / 2), y1 = FY(p.y + p.h / 2);
+        const pts = shape === 'RECT' ? `${x0} ${y0} ${x1} ${y0} ${x1} ${y1} ${x0} ${y1}` : '';
         sub.push(`PAD~${shape}~${x}~${y}~${lw}~${lh}~${layer}~${clean(p.net || '')}~${clean(p.num)}~${p.drill ? u(p.drill / 2) : 0}~${pts}~${rot}~${id()}~0~~Y~0~0~0.2~${x},${y}`);
       }
-      const b = Pcb.fpBox(c), silk = bot ? 4 : 3;
-      sub.push(`TRACK~0.6~${silk}~~${X(b[0])} ${Y(b[1])} ${X(b[2])} ${Y(b[1])} ${X(b[2])} ${Y(b[3])} ${X(b[0])} ${Y(b[3])} ${X(b[0])} ${Y(b[1])}~${id()}~0`);
-      sub.push(`TEXT~P~${X(b[0])}~${n2(Y(b[1]) - 2)}~0.6~0~${bot ? 1 : 0}~${silk}~~4~${clean(c.ref)}~~~${id()}~0~pinpart`);
-      sub.push(`TEXT~N~${X(b[0])}~${n2(Y(b[3]) + 6)}~0.6~0~${bot ? 1 : 0}~${bot ? 14 : 13}~~4~${clean(c.value || '')}~~none~${id()}~0~pinpart`);
+      // outline and texts from the footprint's own box, turned with the part (so they are the same in every copy)
+      const b0 = Lib.footprint(c.footprint).box, m = bot ? [-b0[2], b0[1], -b0[0], b0[3]] : b0, silk = bot ? 4 : 3;
+      const W = (x, y) => { const [rx, ry] = Lib.rot(x, y, rot); return FX(c.pcb.x + rx) + ' ' + FY(c.pcb.y + ry); }, WT = (x, y) => W(x, y).replace(' ', '~');
+      sub.push(`TRACK~0.6~${silk}~~${[[m[0], m[1]], [m[2], m[1]], [m[2], m[3]], [m[0], m[3]], [m[0], m[1]]].map(q => W(q[0], q[1])).join(' ')}~${id()}~0`);
+      sub.push(`TEXT~P~${WT(m[0], m[1] - 2 * U)}~0.6~${rot}~${bot ? 1 : 0}~${silk}~~4~${clean(c.ref)}~~~${id()}~0~pinpart`);
+      sub.push(`TEXT~N~${WT(m[0], m[3] + 6 * U)}~0.6~${rot}~${bot ? 1 : 0}~${bot ? 14 : 13}~~4~${clean(c.value || '')}~~none~${id()}~0~pinpart`);
       // LIB: x ~ y ~ attributes ~ rotation ~ importFlag ~ id ~ layer (1 top, 2 bottom)
       const hexId = v => /^[0-9a-f]{16,40}$/i.test(v || '') ? v : '';
-      shapes.push([`LIB~${X(c.pcb.x)}~${Y(c.pcb.y)}~${para.join('`')}\`~${c.pcb.rot || 0}~0~${libId(c.ref)}~${bot ? 2 : 1}~${hexId(link && link.puuid)}`, ...sub].join('#@$'));
+      shapes.push([`LIB~${ox}~${oy}~${para.join('`')}\`~${c.pcb.rot || 0}~0~${libId(c.ref)}~${bot ? 2 : 1}~${hexId(link && link.puuid)}`, ...sub].join('#@$'));
     }
     for (const t of S.pcb.traces || []) if (t.pts && t.pts.length >= 2) shapes.push(`TRACK~${u(t.w)}~${cuL(t.layer)}~${clean(t.net)}~${t.pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
     for (const v of S.pcb.vias || []) shapes.push(`VIA~${X(v.x)}~${Y(v.y)}~${u(v.d)}~${clean(v.net)}~${u((v.drill || 0.3) / 2)}~${id()}~0`);

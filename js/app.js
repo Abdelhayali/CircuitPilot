@@ -285,10 +285,12 @@ const App = (() => {
       if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', 2400, 1600); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, false, big); }
       if (v === 'enclosure') { const r = await EncView.snapshot({ w: 2400, h: 1600, explode: !!a.exploded }); if (!r) throw new Error('No enclosure yet'); return toAIImage(r, false, big); }
     }
-    if (v === 'schematic') { const i = Math.max(0, Math.min(Sch.sheets().length - 1, (+a.sheet || 1) - 1)); return toAIImage(await DocView.svgToPng(Sch.exportSVG(i), 2000)); }
-    if (v === 'pcb') { Pcb.render(); return toAIImage(await DocView.svgToPng(Pcb.exportSVG(), 2000, '#000')); }
-    if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', 1400, 940); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, true); }
-    if (v === 'enclosure') { const r = await EncView.snapshot({ w: 1400, h: 940, explode: !!a.exploded }); if (!r) throw new Error('No enclosure yet: set one up first (set_enclosure or set_enclosure_script)'); return toAIImage(r, true); }
+    // size: small (640 px JPEG, a quick look for few tokens) · normal (1400 px) · large (2000 px)
+    const lim = a.size === 'small' ? 640 : a.size === 'large' ? 2000 : 1400, small = a.size === 'small';
+    if (v === 'schematic') { const i = Math.max(0, Math.min(Sch.sheets().length - 1, (+a.sheet || 1) - 1)); return toAIImage(await DocView.svgToPng(Sch.exportSVG(i), Math.max(lim, 1000)), small, lim); }
+    if (v === 'pcb') { Pcb.render(); return toAIImage(await DocView.svgToPng(Pcb.exportSVG(), Math.max(lim, 1000), '#000'), small, lim); }
+    if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', small ? 900 : 1400, small ? 600 : 940); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, true, lim); }
+    if (v === 'enclosure') { const r = await EncView.snapshot({ w: small ? 900 : 1400, h: small ? 600 : 940, explode: !!a.exploded }); if (!r) throw new Error('No enclosure yet: set one up first (set_enclosure or set_enclosure_script)'); return toAIImage(r, true, lim); }
     throw new Error('Unknown view ' + v);
   }
 
@@ -527,7 +529,7 @@ const App = (() => {
     let text = '';
     try {
       if (!(S.board.w > 0) || !Pcb.placed().length) { clearInterval(tick); await runRouter({ place: { fit: true }, opt: { noRoute: true } }); busy.classList.remove('hidden'); }
-      const lay = await Engine.exec('get_pcb_layout', { pins: false });
+      const lay = await Engine.exec('get_pcb_layout', { pins: false, fields: ['value', 'type', 'size', 'edge'] });
       const idx = Model.pinIndex(), nets = {};
       for (const [n, keys] of Object.entries(Model.S.nets)) { const refs = [...new Set(keys.map(k => k.split('.')[0]))]; if (refs.length >= 2) nets[n] = refs; }
       const parts = lay.footprints.map(f => `${f.ref} | ${f.value} | ${f.type} | ${f.size[0]}x${f.size[1]} mm | ${Pcb.padsOf(Model.comp(f.ref), idx).length} pins${f.edge ? ' | CONNECTOR: must sit on a board edge' : ''}`).join('\n');
@@ -541,12 +543,12 @@ const App = (() => {
       const list = plan && Array.isArray(plan.placements) ? plan.placements.filter(p => p && Model.comp(p.ref) && isFinite(+p.x) && isFinite(+p.y)) : [];
       if (list.length < Math.max(1, lay.footprints.length * 0.6)) throw Object.assign(new Error(`The model's reply had no usable placement (${list.length} of ${lay.footprints.length} parts).`), { unusable: true });
       for (const p of list) { p.x = +p.x; p.y = +p.y; p.rot = [0, 90, 180, 270].includes(+p.rot) ? +p.rot : 0; if (!['left', 'right', 'top', 'bottom'].includes(p.edge)) delete p.edge; }
-      const r = await Engine.exec('place_footprints', { placements: list, refine: true });
+      const r = await Engine.exec('place_footprints', { placements: list, refine: true, move_others: true });
       const secs = Math.round((Date.now() - t0) / 1000);
       clearInterval(tick);
       const rr = await runRouter({ opt: {} }); Pcb.fit();
       const ro = rr && rr.routing;
-      report(`**AI place** with ${model} (${secs} s): placed ${r.placed} parts${list.length < lay.footprints.length ? ` (${lay.footprints.length - list.length} missing from the reply were kept)` : ''}${r.overlaps.length ? `, ${r.overlaps.length} overlaps resolved` : ''}, polished, then routed${ro ? `: **${ro.routed}/${ro.total} nets**${ro.failed && ro.failed.length ? ` — unrouted: ${ro.failed.join(', ')} → try ✨ Optimize` : ''}` : ''}.`);
+      report(`**AI place** with ${model} (${secs} s): placed ${r.placed} parts${list.length < lay.footprints.length ? ` (${lay.footprints.length - list.length} missing from the reply were kept)` : ''}${r.problems && r.problems.length ? `, ${r.problems.length} placement problems left` : ''}, polished, then routed${ro ? `: **${ro.routed}/${ro.total} nets**${ro.failed && ro.failed.length ? ` — unrouted: ${ro.failed.join(', ')} → try ✨ Optimize` : ''}` : ''}.`);
       toast(ro ? `✦ AI place + route: ${ro.routed}/${ro.total} nets` : 'AI place done', 8000);
       showDrc();
     } catch (e) {

@@ -45,7 +45,7 @@ Object.assign(Engine.env, {
   savePart: async def => { await api('PUT', '/api/library/' + encodeURIComponent(def.key), def); },
   ui: () => { },
   // screenshots (view_design): drawn by the CircuitPilot tab open in the browser, relayed by server.py
-  render: async args => { await ensureRenderTab(currentId); const r = await api('POST', '/api/render/request', { project: currentId, args }); touchHeadless(); return r; },   // view_design
+  render: args => renderSerial(currentId, args),   // view_design
 });
 
 // ---------- make sure the CircuitPilot app is running (Claude Desktop / Claude Code only start this MCP server) ----------
@@ -88,6 +88,12 @@ async function showProject(id) {
   try { const t = await api('GET', '/api/render/tabs'); if (!t.tabs && !browserOpened) openBrowser(BASE + '/?project=' + encodeURIComponent(id)); } catch { }
 }
 
+// one drawing at a time through the app window: concurrent requests (two exports, an export and a view_design) queue up
+let renderChain = Promise.resolve();
+function renderSerial(pid, args) {
+  const run = async () => { await ensureRenderTab(pid); const r = await api('POST', '/api/render/request', { project: pid, args }); touchHeadless(); return r; };
+  const p = renderChain.then(run, run); renderChain = p.catch(() => { }); return p;
+}
 // ---------- drawing without a window: a headless Edge / Chrome tab renders screenshots and PDFs ----------
 // Used only when no CircuitPilot tab shows the project; closed again after 10 idle minutes.
 let headless = null, headlessTimer = null;
@@ -189,7 +195,8 @@ async function withProject(fn, write = true, name = '') {
 }
 
 // ---------- background jobs: long tools run in a worker thread on a copy of the project ----------
-const LONG = new Set(['generate_pcb', 'route_pcb', 'optimize_pcb', 'auto_layout', 'place_footprints', 'update_pcb_from_schematic', 'export_project']);
+const LONG = new Set(['generate_pcb', 'route_pcb', 'optimize_pcb', 'auto_layout', 'place_footprints', 'update_pcb_from_schematic', 'export_project', 'reroute']);
+const isLong = (name, input) => LONG.has(name) || (name === 'batch' && Array.isArray(input.calls) && input.calls.some(c => c && LONG.has(c.tool || c.name)));
 const JOB_WAIT = +(process.env.CP_JOB_WAIT || 40000);   // answer directly when done within this time, else hand out a job id
 const jobs = new Map(); let jobSeq = 0;
 function workerRun(msg) {
@@ -253,7 +260,7 @@ async function exportJob(job, project, input) {
     if (!tab) skipped.push('PDFs and images: no CircuitPilot window could show this project (open ' + BASE + ' and run export_project again)');
     else for (const [args, rel] of shots) {
       if (job.status !== 'running') break;
-      try { const r = await api('POST', '/api/render/request', { project: job.project, args }); touchHeadless(); if (!r || !r.data) throw new Error('nothing drawn'); put(rel, new Uint8Array(Buffer.from(r.data, 'base64'))); }
+      try { const r = await renderSerial(job.project, args); if (!r || !r.data) throw new Error('nothing drawn'); put(rel, new Uint8Array(Buffer.from(r.data, 'base64'))); }
       catch (e) { skipped.push(rel + ': ' + e.message); }
     }
   }
@@ -273,6 +280,7 @@ const EXTRA = [
   { name: 'export_gerbers', description: 'Run DRC, then write Gerber (copper, mask, paste, silkscreen, outline) + Excellon drill files and a .zip for the fab into a folder on this machine. Refuses when DRC has errors unless force is true.', input_schema: { type: 'object', required: ['out_dir'], properties: { out_dir: { type: 'string', description: 'Absolute folder path (created if missing)' }, force: { type: 'boolean', description: 'export even with DRC errors' } } } },
   { name: 'export_enclosure', description: 'Write the 3D-printable enclosure for the current project into a folder on this machine: box mode → base + lid STL, parametric OpenSCAD .scad and notes; custom 3D mode → one STL per part, OpenSCAD source and the 3D script; plus a .zip.', input_schema: { type: 'object', required: ['out_dir'], properties: { out_dir: { type: 'string', description: 'Absolute folder path (created if missing)' } } } },
   { name: 'get_bom', description: 'Bill of materials of the current project as CSV text (qty, refs, type, value, footprint, LCSC part).', input_schema: { type: 'object', properties: {} } },
+  { name: 'add_to_report', description: 'Add the current project to a report file: kind "design" writes a summary entry (name, board, layers, parts, nets, routing, vias, DRC, datasheet title / description, project notes) — updated in place when the project is already there; kind "finding" adds a note (title, text, severity). JSON file {designs: [], findings: []} (default Documents/CircuitPilot exports/report.json), or Markdown when the path ends with .md.', input_schema: { type: 'object', properties: { path: { type: 'string' }, kind: { type: 'string', enum: ['design', 'finding'] }, title: { type: 'string' }, text: { type: 'string' }, severity: { type: 'string', enum: ['info', 'warning', 'error'] }, extra: { type: 'object', description: 'more fields for the entry' } } } },
   { name: 'import_folder', description: 'Add every project found in a folder and all its subfolders: CircuitPilot project files (.json / .circuit.json) and EasyEDA PCB files (.json, imported with tracks). Each becomes a new project; files that match a project already in CircuitPilot (same name and part count) are skipped unless skip_existing: false. dry_run: true only lists what would be imported. The first imported project becomes current.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: 'folder on this PC' }, recursive: { type: 'boolean', description: 'default true' }, dry_run: { type: 'boolean' }, skip_existing: { type: 'boolean', description: 'default true' } } } },
   { name: 'export_parts', description: 'Write parts of My Library (default: all) to a JSON file, to use them in another CircuitPilot database or on another PC (import_parts).', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, path: { type: 'string', description: 'file path (default Documents/CircuitPilot exports/my-library.json)' } } } },
   { name: 'import_parts', description: 'Add the parts of a JSON file from export_parts (or one part object) to My Library. Existing parts with the same key are kept unless overwrite: true.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, overwrite: { type: 'boolean' } } } },
@@ -300,8 +308,29 @@ async function callTool(name, input = {}) {
     else if (name === 'restore_project_version' && /^[\w.-]{4,80}$/.test(String(ref))) setCurrent(String(ref));   // a deleted project
     else throw new Error(`No project "${ref}" — list_projects shows the projects (ids and names)`);
   }
-  if (LONG.has(name)) { const j = await startJob(name, input); return awaitJob(j, JOB_WAIT); }
+  if (isLong(name, input)) { const j = await startJob(name, input); return awaitJob(j, JOB_WAIT); }
   switch (name) {
+    case 'add_to_report': return withProject(async () => {
+      const S = Model.S, file = path.resolve(String(input.path || path.join(os.homedir(), 'Documents', 'CircuitPilot exports', 'report.json'))), kind = input.kind || 'design';
+      const st = S.board.w ? Pcb.status() : null, d = S.board.w ? Pcb.drc() : null, doc = S.doc || {}, notes = S.notes || {};
+      const design = Object.assign({ project: S.name || 'Untitled', id: S.id, updated: new Date().toISOString().slice(0, 16),
+        board: S.board.w ? `${S.board.w} x ${S.board.h} mm, ${(S.board.shape && S.board.shape.type) || 'rect'}, ${Pcb.rules().layers} layers` : null,
+        parts: S.components.length, nets: Object.keys(S.nets).length, routed: st ? `${st.routed}/${st.nets}` : null, vias: st ? st.vias : null, track_mm: st ? st.trace_length_mm : null,
+        drc: d ? d.summary : null, via_sizes: S.board.w ? Pcb.viaSummary() : null, title: doc.title || null, tagline: doc.subtitle || doc.tagline || null, description: doc.description || null, notes: notes.values && Object.keys(notes.values).length ? notes.values : undefined }, input.extra || {});
+      const finding = Object.assign({ project: S.name || 'Untitled', id: S.id, date: new Date().toISOString().slice(0, 16), title: input.title || '', text: input.text || '', severity: input.severity || 'info' }, input.extra || {});
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      if (/\.md$/i.test(file)) {
+        const md = kind === 'design'
+          ? `\n## ${design.project}\n\n${Object.entries(design).filter(([k, v]) => v != null && k !== 'project').map(([k, v]) => `- **${k}**: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n')}\n`
+          : `\n### ${finding.severity.toUpperCase()}: ${finding.title || finding.project}\n\n${finding.project} · ${finding.date}\n\n${finding.text}\n`;
+        fs.appendFileSync(file, md); return { file, added: kind };
+      }
+      let R = { designs: [], findings: [] }; try { R = Object.assign(R, JSON.parse(fs.readFileSync(file, 'utf8'))); } catch { }
+      if (kind === 'design') { const i = R.designs.findIndex(x => x.id === S.id); if (i >= 0) R.designs[i] = design; else R.designs.push(design); }
+      else R.findings.push(finding);
+      fs.writeFileSync(file, JSON.stringify(R, null, 1));
+      return { file, kind, designs: R.designs.length, findings: R.findings.length, entry: kind === 'design' ? design : finding };
+    }, false, 'add_to_report');
     case 'import_folder': {
       const root = path.resolve(String(input.path || '')); if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error('No folder ' + root);
       const SKIP = /^(node_modules|\.git|__pycache__|dist|build)$/i, files = [];
@@ -406,7 +435,7 @@ async function callTool(name, input = {}) {
       return {
         app: BASE + ' (running; the user sees every change live in the browser)',
         projects_folder: dataDir + (sameDir ? '' : ` — NOTE: not the CircuitPilot app's folder (${DATA_DIR}); a server.py started by hand uses its own projects.db. Tell the user if projects seem to be missing.`),
-        current_project: cur ? { id, name: cur.name, parts: cur.parts, nets: cur.nets, pcb: cur.pcb } : null,
+        current_project: cur ? Object.assign({ id, name: cur.name, parts: cur.parts, nets: cur.nets, pcb: cur.pcb }, await (async () => { const d = await api('GET', '/api/projects/' + id).catch(() => ({})); return d.notes ? { notes: d.notes } : {}; })()) : null,
         projects: ps.slice(0, 12).map(p => ({ id: p.id, name: p.name, parts: p.parts, updated: new Date(p.updated * 1000).toISOString().slice(0, 16) })),
         rule: 'Pass project (the id) in every tool call. Long tools may return a job_id — then call job_status until it is done.',
         workflow: WORKFLOW,
@@ -419,7 +448,9 @@ async function callTool(name, input = {}) {
     }
     case 'open_project': {
       const p = await resolveProject(input.project); if (!p) throw new Error(`No project matching "${input.project}"`);
-      setCurrent(p.id); await showProject(currentId); return { opened: p.name, id: p.id, parts: p.parts, nets: p.nets };
+      setCurrent(p.id); await showProject(currentId);
+      const d = await api('GET', '/api/projects/' + p.id).catch(() => ({}));
+      return Object.assign({ opened: p.name, id: p.id, parts: p.parts, nets: p.nets }, d.notes && (d.notes.text || Object.keys(d.notes.values || {}).length) ? { notes: d.notes } : {});
     }
     case 'create_project': {
       const d = Model.blank(); d.name = input.name || 'Untitled';
@@ -488,6 +519,7 @@ const INSTRUCTIONS = `CircuitPilot is an AI schematic + PCB designer. These tool
 Workflow: search_parts → get_part for real ICs/modules (exact pinout + footprint) → add_components → connect (named nets; GND / +3V3 / +5V are power nets) → run_erc → generate_pcb → export_gerbers.
 Pins are "REF.PIN" using the pin number or name. Use create_part for parts missing from the database. If the project has a knowledge folder, read it (knowledge_list / knowledge_search / knowledge_read) and follow its rules.
 Always pass project (the project id) in every tool call. Long tools (generate_pcb, route_pcb, optimize_pcb, export_project …) may return a job_id: call job_status {job_id} until it reports the result.
+Save tokens: get_pcb_layout is compact (filter with refs / region / fields, add with include), run_drc lists 5 violations (full: true for all), view_design {size: "small"} for quick looks, get_tracks {near / region / vias_only}. One call for a full re-route: reroute (pours off → power nets first → rest → pours back → stitching → labels → DRC); batch runs many edits (routing too). Project notes (set_project_notes) come back with open_project.
 Keep-outs: add_keepout (antenna end, under a coin cell …), strict rule set_design_rules {noViaInPad: true}; place_in_free_area moves parts to free board space; copy_block / copy_project copy a circuit block or a whole project; list_project_versions / restore_project_version undo an overwrite.
 Draw single tracks yourself with add_track (pads "U1.3" + [x, y] corners, {x, y, via: true} to change layer; route_pcb keeps them), list them with get_tracks, delete with remove_tracks.
 Look at your work: view_design returns a screenshot (schematic, pcb, pcb_3d, enclosure) drawn by the CircuitPilot tab open in the browser. Check the result after changes and fix what looks wrong.

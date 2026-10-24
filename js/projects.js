@@ -109,7 +109,7 @@ const Projects = (() => {
   }
   // earlier versions of a project (desktop server keeps them: every ~10 min while editing, big part losses, deletes)
   const hasHistory = !(window.CPStatic && CPStatic.mode === 'static');
-  async function history(id, name) {
+  async function showHistory(id, name) {
     const list = $('#projList'), vs = await api('GET', '/api/projects/' + id + '/versions');
     const when = t => new Date(t * 1000).toLocaleString();
     list.innerHTML = `<div class="proj" data-id="${esc(id)}"><div class="pinfo"><div class="pname">${esc(name)}</div><div class="muted small">Earlier versions — newest first</div></div><div class="pact"><button data-a="back">← Back</button></div></div>` +
@@ -232,7 +232,7 @@ const Projects = (() => {
         if (b.dataset.a === 'dup') await duplicate(id);
         if (b.dataset.a === 'ren') { const n = prompt('Rename project', name); if (n && n.trim()) await rename(id, n.trim()); }
         if (b.dataset.a === 'del' && confirm(`Delete project “${name}”?${hasHistory ? ' (It can be brought back later from ⟲ Deleted projects.)' : ' This cannot be undone.'}`)) await remove(id);
-        if (b.dataset.a === 'hist') await history(id, name);
+        if (b.dataset.a === 'hist') await showHistory(id, name);
         if (b.dataset.a === 'restore') {
           const v = +b.dataset.v, d = b.dataset.when;
           if (confirm(`Restore “${name}” to the version of ${d}? The current state is kept as a version too.`)) {

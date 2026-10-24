@@ -211,7 +211,7 @@ Only document-type files inside the chosen folder are read (no `..` escapes, hid
 
 ## Control from Claude Code (MCP) and other tools
 
-`mcp/circuitpilot-mcp.mjs` exposes all 84 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
+`mcp/circuitpilot-mcp.mjs` exposes all 93 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
 
 **Claude Desktop (easiest)** — run once:
 
@@ -249,6 +249,13 @@ curl -H "Authorization: Bearer <password>" -X POST http://127.0.0.1:5174/tools/s
 - **Screenshots, PDFs and export images without a window**: when no CircuitPilot window shows the project, the MCP server opens it in a hidden (headless) Edge / Chrome, draws there and closes it after 10 idle minutes (with an app password it logs in with a one-time link).
 - `batch {calls: [{tool, args}]}` runs many quick edits in one call (e.g. side / rotation of 20 parts); `export_parts` / `import_parts` move My Library parts between databases or PCs.
 - `pcb_status` lists every unrouted net with its pad groups and the router's reason.
+- **Small answers**: results show the board as size + shape (outline points only with `verbose` / `get_pcb_layout {include: ["outline"]}`); `get_pcb_layout` is compact and filters by `refs`, `region`, `fields`, `include`; `run_drc` gives counts and the first 5 violations (`full: true` for all); `get_tracks` filters by `near` (a part or pad), `region`, `layer`, `vias_only`; `view_design {size: "small"}` returns a 640 px JPEG.
+- **One-call macros**: `reroute` (pours off → copper off → GND, +3V3, rest → saved pours back → stitching vias → labels → DRC, one summary line); `batch` may contain routing (then runs as a job); `transform_parts` moves / rotates / scales a group (refs or region) and reports edge margins; `save_pour_template` / `apply_pour_template`, and pours defined as the board clipped to limits (`add_copper_pour {clip: {x_max: 21.3}}` or `rect`) follow outline changes.
+- **Arguments are checked**: an unknown argument is an error listing the allowed ones; common other names are accepted (`rotation` → `rot`, `part` → `ref` …).
+- Placement keeps what you did: `place_footprints` and `optimize_pcb {refs}` move only the listed parts, locked parts never move (also in fresh arrangements), `update_pcb_from_schematic` places new parts and moves an existing part only when its pads clash.
+- `check_placement` gives the overlap in mm and whether pads are clear (courtyard only) or too close; `mark_overlap_ok` accepts known overlaps. `edge_margins` and `set_board_shape` report each part's distance to the edge (`auto_fit` nudges parts inward). The DRC outline check is an error only for copper outside; a body overhang is a warning with the amount.
+- Keep-outs made from a part (`add_keepout {ref, end}`) follow the part. With the strict no-via-in-pad rule, exposed pads get no vias either, and vias keep off plated through-hole pads (also `stitch_pour`).
+- `set_project_notes` keeps notes and named values with the project (shown again by `open_project`, `start_here`, `get_pcb_layout` and to the in-app copilot); `add_to_report` writes a design summary or a finding to a JSON or Markdown report file. Drawing requests are queued, so parallel exports no longer skip PDFs / images.
 
 ## Design rules (JLCPCB defaults) and DRC
 

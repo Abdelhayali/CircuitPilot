@@ -167,20 +167,42 @@ const PcbView = (() => {
   // foreign copper on a layer, for the live clearance check
   function obstacles(layer, net) {
     const out = [], S = Model.S;
-    for (const p of cache.pads) if (padLayers(p).includes(layer) && (!net || p.net !== net)) out.push({ s: G.padShape(p), what: 'pad ' + p.key, net: p.net });
-    for (const v of S.pcb.vias) if (!net || v.net !== net) out.push({ s: { k: 'circ', c: [v.x, v.y], r: v.d / 2 }, what: 'via', net: v.net });
-    for (const t of S.pcb.traces) if (t.layer === layer && (!net || t.net !== net)) for (let i = 1; i < t.pts.length; i++) out.push({ s: { k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, what: 'track ' + (t.net || ''), net: t.net });
+    for (const p of cache.pads) if (padLayers(p).includes(layer) && (!net || p.net !== net)) out.push({ s: G.padShape(p), what: 'pad ' + p.key, net: p.net, kind: 'pad', drill: p.drill, ring: p.drill ? (Math.min(p.w, p.h) - p.drill) / 2 : 0, c: [p.x, p.y] });
+    for (const v of S.pcb.vias) if (!net || v.net !== net) out.push({ s: { k: 'circ', c: [v.x, v.y], r: v.d / 2 }, what: 'via', net: v.net, kind: 'via', drill: v.drill || Pcb.rules().viaDrill, ring: (v.d - (v.drill || Pcb.rules().viaDrill)) / 2, c: [v.x, v.y] });
+    for (const t of S.pcb.traces) if (t.layer === layer && (!net || t.net !== net)) for (let i = 1; i < t.pts.length; i++) out.push({ s: { k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, what: 'track ' + (t.net || ''), net: t.net, kind: 'track' });
+    (S.pcb.holes || []).forEach((h, i) => out.push({ s: { k: 'circ', c: [h.x, h.y], r: h.d / 2 }, what: 'mounting hole ' + (i + 1), kind: 'hole', drill: h.d, ring: 0, c: [h.x, h.y] }));
+    const bp = Pcb.boardPoly(); for (let i = 0; i < bp.length; i++) out.push({ s: { k: 'seg', a: bp[i], b: bp[(i + 1) % bp.length], r: 0 }, what: 'board edge', kind: 'edge' });
     return out;
+  }
+  // gap a new track needs from an obstacle (the router's rules: pads, vias and drill holes keep more distance)
+  function trackNeed(o, R0) {
+    if (o.kind === 'pad') return o.drill ? Math.max(Pcb.padCl(R0), (+R0.minPthToTrack || 0) - o.ring) : Pcb.padCl(R0);
+    if (o.kind === 'via') return Math.max(Pcb.viaCl(R0), (+R0.minHoleToTrack || 0) - o.ring);
+    if (o.kind === 'hole') return Math.max(R0.clearance, +R0.minHoleToTrack || 0);
+    if (o.kind === 'edge') return R0.edgeClearance;
+    return R0.clearance;
+  }
+  // what a new via at p would violate (null when it fits): copper gaps on both layers, hole to track, hole to hole, edge
+  function viaProblem(p, net, R0 = Pcb.rules()) {
+    const d = R0.viaDiameter, drill = R0.viaDrill, vs = { k: 'circ', c: p, r: d / 2 }, ring = (d - drill) / 2; let worst = null;
+    for (const L of ['F', 'B']) for (const o of obstacles(L, net)) {
+      if (L === 'B' && o.kind !== 'track') continue;   // pads, vias, holes and the edge are listed for both layers: check once
+      const need = o.kind === 'track' ? Math.max(Pcb.viaCl(R0), (+R0.minHoleToTrack || 0) - ring) : o.kind === 'edge' ? R0.edgeClearance : Math.max(Pcb.viaCl(R0), o.kind === 'pad' ? Pcb.padCl(R0) : 0);
+      const gap = G.shapeDist(vs, o.s);
+      if (gap < need - 1e-3 && (!worst || gap - need < worst.d - worst.need)) worst = { d: gap, need, what: o.what };
+      if (o.drill && !worst) { const hh = Math.hypot(p[0] - o.c[0], p[1] - o.c[1]) - drill / 2 - o.drill / 2; if (hh < R0.minHoleToHole - 1e-3) worst = { d: hh, need: R0.minHoleToHole, what: o.what + ' (hole to hole)' }; }
+    }
+    return worst;
   }
   function checkClear(pts, w, route) {
     if (!route || pts.length < 2) return null;
-    const cl = Pcb.rules().clearance; let worst = null;
+    const R0 = Pcb.rules(); let worst = null;
     for (let i = 1; i < pts.length; i++) {
       const seg = { k: 'seg', a: pts[i - 1], b: pts[i], r: w / 2 };
       for (const o of route.obs) {
         if (route.startObj && o.what === 'pad ' + (route.startObj.p && route.startObj.p.key)) continue;
         if (route.net && o.net === route.net) continue;
-        const d = G.shapeDist(seg, o.s), need = o.what.startsWith('pad') ? Pcb.padCl(Pcb.rules()) : o.what === 'via' ? Pcb.viaCl(Pcb.rules()) : cl;
+        const d = G.shapeDist(seg, o.s), need = trackNeed(o, R0);
         if (d < need - 1e-3 && (!worst || d < worst.d)) worst = { d, what: o.what, need };
       }
     }
@@ -201,8 +223,10 @@ const PcbView = (() => {
     const o = sp.obj;
     if (o && o.net && R.net && o.net !== R.net) { App.toast(`Can't connect: this ${o.k} is on net ${o.net}, the track is on ${R.net}`); return false; }
     if (o && o.net && !R.net) { R.net = o.net; R.w = curWidth(o.net); R.obs = obstacles(R.layer, R.net); ui.hlNet = o.net; }
-    if (o && o.k === 'pad' && !o.p.drill && R.layer !== o.layer) { App.toast(`That SMD pad is on ${LNAME[o.layer]} — press ${o.layer === 'F' ? 'T' : 'B'} to switch layer (adds a via)`); return false; }
-    for (const q of bend(last, [sp.x, sp.y])) R.pts.push(q);
+    if (o && o.k === 'pad' && !o.p.drill && R.layer !== o.layer) { App.toast(`That SMD pad is on ${LNAME[o.layer]} — right-click (or T / B) to switch layer with a via`); return false; }
+    const seg = bend(last, [sp.x, sp.y]), bad = checkClear([last].concat(seg), R.w, R);
+    if (bad) { App.toast(`✋ Not placed: ${bad.d <= 0 ? 'it would short' : 'only ' + bad.d.toFixed(3) + ' mm'} to ${bad.what} (needs ${+bad.need.toFixed(3)} mm) — go around it, try the other bend (/) or change layer (right-click)`, 4500); return false; }
+    for (const q of seg) R.pts.push(q);
     const same = Math.hypot(sp.x - last[0], sp.y - last[1]) < 1e-6;
     // ending on copper (pad / via / track) finishes the track
     if (o && !(R.startObj && o.k === R.startObj.k && (o.p ? o.p === R.startObj.p : o.i === R.startObj.i) && R.pts.length <= 2)) return finishRoute();
@@ -214,12 +238,10 @@ const PcbView = (() => {
     to = to || (R.layer === 'F' ? 'B' : 'F');
     if (to === R.layer || Pcb.rules().layers === 1) return;
     const p = R.pts[R.pts.length - 1];
+    const bad = viaProblem(p, R.net);
+    if (bad) { App.toast(`✋ No via here: ${bad.d <= 0 ? 'it would short' : 'only ' + bad.d.toFixed(3) + ' mm'} to ${bad.what} (needs ${+bad.need.toFixed(3)} mm) — click a free spot first, then right-click`, 4500); return; }
     if (R.pts.length >= 2) R.done.push({ layer: R.layer, w: R.w, pts: R.pts });
     R.vias.push({ x: p[0], y: p[1] });
-    const R0 = Pcb.rules(), vs = { k: 'circ', c: p, r: R0.viaDiameter / 2 };
-    let worst = null;
-    for (const L of ['F', 'B']) for (const o of obstacles(L, R.net)) { const d = G.shapeDist(vs, o.s); if (d < Pcb.viaCl(R0) - 1e-3 && (!worst || d < worst.d)) worst = { d, what: o.what }; }
-    if (worst) App.toast(`⚠ Via ${worst.d <= 0 ? 'shorts' : 'is ' + worst.d.toFixed(3) + ' mm'} to ${worst.what} (rule ${Pcb.viaCl(R0)}) — Backspace to undo`, 5000);
     R.layer = to; R.pts = [p]; ui.active = to; ui.layers[to].on = true;
     R.obs = obstacles(to, R.net);
     renderLayers(); syncBar(); render();
@@ -338,6 +360,8 @@ const PcbView = (() => {
     if (ui.tool === 'via') {
       const sp = snapPoint(pt, null), R0 = Pcb.rules();
       if (Pcb.rules().layers === 1) { App.toast('Single-layer rules: vias are disabled'); return; }
+      const bad = viaProblem([sp.x, sp.y], sp.obj ? sp.obj.net || null : null, R0);
+      if (bad) { App.toast(`✋ No via here: ${bad.d <= 0 ? 'it would short' : 'only ' + bad.d.toFixed(3) + ' mm'} to ${bad.what} (needs ${+bad.need.toFixed(3)} mm)`, 4500); return; }
       Model.mutate(() => Model.S.pcb.vias.push({ net: sp.obj ? sp.obj.net || null : null, x: sp.x, y: sp.y, d: R0.viaDiameter, drill: R0.viaDrill, manual: true }));
       return;
     }
@@ -512,7 +536,7 @@ const PcbView = (() => {
     if (rdown && e.button === 2) {
       const moved = Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y) > 4, r = rdown; rdown = null;
       if (!moved) {
-        if (ui.route) finishRoute(); else if (ui.tool !== 'select') setTool('select');
+        if (ui.route) switchLayer(); else if (ui.tool !== 'select') setTool('select');   // routing: right-click = via + other layer
         else { // context menu
           if (r.ref && !isSel(r.ref)) setSelection([r.ref]);
           ui.mouse = vp.toWorld(e.clientX, e.clientY);
@@ -756,7 +780,7 @@ const PcbView = (() => {
     if (ui.tool === 'track' || ui.tool === 'arc') s += ` · width ${R ? R.w : curWidth(null)} mm · ${ui.angle === 'any' ? 'any angle' : ui.angle + '°'}`;
     if (R) s += ` · net <b>${esc(R.net || '(none)')}</b>`;
     if (R && R.bad) s += ` · <span class="bad">⚠ ${R.bad.d <= 0 ? 'short' : 'clearance ' + R.bad.d.toFixed(3) + ' mm'} to ${esc(R.bad.what)} (rule ${R.bad.need || Pcb.rules().clearance})</span>`;
-    if (ui.tool === 'track') s += ` <span class="muted">· T/B/V switch layer + via · Space angle · / bend · Backspace undo · Esc / right-click finish</span>`;
+    if (ui.tool === 'track') s += ` <span class="muted">· right-click (or V) via + other layer · Space angle · / bend · Backspace undo · Esc or double-click finish · rule breaks are not placed</span>`;
     if (ui.tool === 'arc') s += ` <span class="muted">· click start, click end, then click to set the curve · Esc cancels</span>`;
     if (ui.tool === 'pour' || ui.tool === 'outline' || ui.tool === 'keepout') s += ` <span class="muted">· click corners, click the first corner (or Enter) to close · Backspace removes a corner · Esc cancels</span>`;
     el.innerHTML = s;

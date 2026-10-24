@@ -28,7 +28,19 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = (process.env.CP_URL || 'http://localhost:5173').replace(/\/+$/, '');
 let PASSWORD = process.env.CP_PASSWORD || '';
 if (!PASSWORD) { try { PASSWORD = fs.readFileSync(path.join(ROOT, 'access-password.txt'), 'utf8').trim(); } catch { } }
-const log = (...a) => console.error('[circuitpilot]', ...a);
+// log to stderr and to a file (the MCP client may not keep stderr): %LOCALAPPDATA%/CircuitPilot/mcp.log or ~/.circuitpilot/mcp.log
+const LOG_FILE = path.join(process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'CircuitPilot') : path.join(os.homedir(), '.circuitpilot'), 'mcp.log');
+const log = (...a) => {
+  console.error('[circuitpilot]', ...a);
+  try {
+    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+    if ((fs.statSync(LOG_FILE, { throwIfNoEntry: false }) || { size: 0 }).size > 4e6) fs.renameSync(LOG_FILE, LOG_FILE + '.1');
+    fs.appendFileSync(LOG_FILE, new Date().toISOString() + ' [' + process.pid + '] ' + a.map(x => x instanceof Error ? x.stack : typeof x === 'string' ? x : JSON.stringify(x)).join(' ') + '\n');
+  } catch { }
+};
+// a stray error in one job must not take the server (and every other running job) down
+process.on('uncaughtException', e => log('uncaught exception (server keeps running):', e));
+process.on('unhandledRejection', e => log('unhandled rejection (server keeps running):', e instanceof Error ? e : String(e)));
 
 // ---------- load the shared engine (same code as the browser app) ----------
 const ctx = loadEngine(ROOT, log);
@@ -199,15 +211,32 @@ const LONG = new Set(['generate_pcb', 'route_pcb', 'optimize_pcb', 'auto_layout'
 const isLong = (name, input) => LONG.has(name) || (name === 'batch' && Array.isArray(input.calls) && input.calls.some(c => c && LONG.has(c.tool || c.name)));
 const JOB_WAIT = +(process.env.CP_JOB_WAIT || 40000);   // answer directly when done within this time, else hand out a job id
 const jobs = new Map(); let jobSeq = 0;
-function workerRun(msg) {
-  const w = new Worker(new URL('./job-worker.mjs', import.meta.url), { workerData: { root: ROOT } });
-  const p = new Promise((res, rej) => {
-    w.once('message', m => { w.terminate(); m.ok ? res(m) : rej(new Error(m.error)); });
-    w.once('error', e => rej(e));
-    w.once('exit', c => rej(new Error(c ? 'worker stopped (' + c + ')' : 'worker stopped')));
+// At most CP_MAX_JOBS workers at once (default 2); more jobs wait their turn instead of competing for memory. Each
+// worker has its own heap limit, so a job that runs out of memory fails alone. The handle's terminate() also takes a
+// job out of the queue.
+const MAX_WORKERS = Math.max(1, +(process.env.CP_MAX_JOBS || 2)), WORKER_MB = Math.max(512, +(process.env.CP_JOB_HEAP_MB || 3072));
+let activeWorkers = 0; const waiting = [];
+function workerRun(msg, label = msg.name || msg.kind) {
+  const h = { w: null, cancelled: false, queued: true, terminate() { h.cancelled = true; const i = waiting.indexOf(go); if (i >= 0) waiting.splice(i, 1); if (h.w) return h.w.terminate(); } };
+  let go;
+  h.p = new Promise((res, rej) => {
+    go = () => {
+      if (h.cancelled) return rej(new Error('cancelled'));
+      activeWorkers++; h.queued = false;
+      let done = false;
+      const end = (ok, v) => { if (done) return; done = true; activeWorkers--; const n = waiting.shift(); if (n) n(); ok ? res(v) : rej(v); };
+      let w;
+      try { w = h.w = new Worker(new URL('./job-worker.mjs', import.meta.url), { workerData: { root: ROOT }, resourceLimits: { maxOldGenerationSizeMb: WORKER_MB } }); }
+      catch (e) { return end(false, e); }
+      w.on('error', e => { log(`job ${label}: worker error`, e); end(false, e.code === 'ERR_WORKER_OUT_OF_MEMORY' ? new Error('the job ran out of memory (try again when fewer jobs run, or raise CP_JOB_HEAP_MB)') : e); });
+      w.once('message', m => { w.terminate().catch(() => { }); m.ok ? end(true, m) : end(false, new Error(m.error)); });
+      w.once('exit', c => end(false, new Error(h.cancelled ? 'cancelled' : c ? 'worker stopped (' + c + ')' : 'worker stopped')));
+      w.postMessage(msg);
+    };
+    if (activeWorkers < MAX_WORKERS) go(); else { waiting.push(go); log(`job ${label} queued (${activeWorkers} running)`); }
   });
-  w.postMessage(msg);
-  return { w, p };
+  h.p.catch(() => { });
+  return { w: h, p: h.p };
 }
 async function startJob(tool, input) {
   const id = await ensureProject(); assertIdle(id, tool);
@@ -225,18 +254,18 @@ async function startJob(tool, input) {
       return changed && m.result && typeof m.result === 'object' ? Object.assign({ warning: 'The project was edited while this job ran; those edits were replaced by the job result' }, m.result) : m.result;
     });
   }
-  job.promise.then(r => { job.status = 'done'; job.result = r; job.ended = Date.now(); }, e => { if (job.status === 'running') { job.status = 'failed'; job.error = e.message; job.ended = Date.now(); } });
+  job.promise.then(r => { job.status = 'done'; job.result = r; job.ended = Date.now(); }, e => { if (job.status === 'running') { job.status = 'failed'; job.error = e.message; job.ended = Date.now(); log(`job ${job.id} ${tool} failed:`, e.message); } });
   jobs.set(job.id, job);
   for (const [k, j] of jobs) if (j.status !== 'running' && Date.now() - (j.ended || j.started) > 3600e3) jobs.delete(k);   // forget old jobs after an hour
   return job;
 }
-const jobView = j => ({ job_id: j.id, tool: j.tool, project: j.project, project_name: j.name, status: j.status, seconds: Math.round(((j.ended || Date.now()) - j.started) / 1000) });
+const jobView = j => ({ job_id: j.id, tool: j.tool, project: j.project, project_name: j.name, status: j.status === 'running' && j.worker && j.worker.queued ? 'queued' : j.status, seconds: Math.round(((j.ended || Date.now()) - j.started) / 1000) });
 async function awaitJob(j, ms) {
   await Promise.race([j.promise.catch(() => { }), new Promise(r => setTimeout(r, ms))]);
   if (j.status === 'done') return j.result;
   if (j.status === 'failed') throw new Error(`${j.tool} failed: ${j.error}`);
   if (j.status === 'cancelled') return Object.assign(jobView(j), { note: 'cancelled — nothing was saved' });
-  return Object.assign(jobView(j), { note: `Still working. Call job_status {job_id: "${j.id}"} — it waits up to 55 s for the result. Other projects can be edited meanwhile; this one is locked until the job ends.` });
+  return Object.assign(jobView(j), { note: `${j.worker && j.worker.queued ? 'Waiting for another job to finish, then it starts by itself.' : 'Still working.'} Call job_status {job_id: "${j.id}"} — it waits up to 55 s for the result. Other projects can be edited meanwhile; this one is locked until the job ends.` });
 }
 // export: files from the worker, PDFs + images from the app window, all into one folder per project
 async function exportJob(job, project, input) {

@@ -252,12 +252,14 @@ const Pcb = (() => {
   // Raster of one pour: cells inside the pour and the board, away from other nets' copper. Labels = connected islands.
   // Islands that touch no copper of the pour's net (dead copper) or are smaller than the rule pourMinArea are dropped:
   // label 0 like blocked cells; `dead` keeps their cells so the drawing and the Gerber can clear them.
-  const pourMemo = new Map();
+  const pourMemo = new Map(); let pourCells = 0;
   function pourRaster(pr, gStep = 0.2) {
     const S0 = Model.S, key = JSON.stringify([pr, gStep, S0.board, S0.rules, S0.nets[pr.net], S0.pcb.traces, S0.pcb.vias, S0.pcb.holes, S0.pcb.keepouts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side])]);
     if (pourMemo.has(key)) return pourMemo.get(key);
     const r = pourRasterI(pr, gStep);
-    pourMemo.set(key, r); if (pourMemo.size > 48) pourMemo.delete(pourMemo.keys().next().value);
+    // cache bounded by size too: fine rasters (EasyEDA fills at 0.05 / 0.1 mm) are big, several jobs share one machine
+    pourMemo.set(key, r); pourCells += r.W * r.H;
+    while (pourMemo.size > 1 && (pourMemo.size > 48 || pourCells > 12e6)) { const [k0, r0] = pourMemo.entries().next().value; pourMemo.delete(k0); pourCells -= r0.W * r0.H; }
     return r;
   }
   function pourRasterI(pr, gStep) {

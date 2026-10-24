@@ -261,7 +261,7 @@ const Pcb = (() => {
     return r;
   }
   function pourRasterI(pr, gStep) {
-    const S = Model.S, R = rules(), cl = pr.clearance || R.clearance, poly = pourPoly(pr), bpoly = boardPoly(), idx = Model.pinIndex();
+    const S = Model.S, R = rules(), cl = pourCl(R, pr), poly = pourPoly(pr), bpoly = boardPoly(), idx = Model.pinIndex();
     const W = Math.ceil(S.board.w / gStep) + 1, H = Math.ceil(S.board.h / gStep) + 1, N = W * H, ok = new Uint8Array(N);
     const fill = (pl, val) => { for (let y = 0; y < H; y++) { const py = y * gStep, xs = []; for (let i = 0, j = pl.length - 1; i < pl.length; j = i++) { const [xi, yi] = pl[i], [xj, yj] = pl[j]; if ((yi > py) !== (yj > py)) xs.push((xj - xi) * (py - yi) / (yj - yi) + xi); } xs.sort((a, b) => a - b); for (let k = 0; k + 1 < xs.length; k += 2) for (let x = Math.max(0, Math.ceil(xs[k] / gStep)); x <= Math.min(W - 1, Math.floor(xs[k + 1] / gStep)); x++) ok[y * W + x] += val; } };
     fill(poly, 1); fill(bpoly, 1); for (let i = 0; i < N; i++) ok[i] = ok[i] === 2 ? 1 : 0;
@@ -915,7 +915,7 @@ const Pcb = (() => {
   // Defaults follow JLCPCB's standard 2-layer (1 oz) capabilities; verify current limits at jlcpcb.com/capabilities.
   // JLCPCB capabilities (1–2 layers, 1 oz, checked 2026-10-23): 0.1 / 0.1 mm track / space, vias down to 0.15 mm hole /
   // 0.25 mm diameter (extra cost), diameter ≥ hole + 0.1, plated through-hole ring ≥ 0.18 mm, copper ≥ 0.2 mm from the edge
-  const JLC_MIN = { minTraceWidth: 0.1, minClearance: 0.1, minViaDrill: 0.15, minViaDiameter: 0.25, minAnnularRing: 0.05, minPthRing: 0.18, minHoleToHole: 0.5, minEdgeClearance: 0.2, minHoleSize: 0.15 };
+  const JLC_MIN = { minTraceWidth: 0.1, minClearance: 0.1, minViaDrill: 0.15, minViaDiameter: 0.25, minAnnularRing: 0.05, minPthRing: 0.18, minHoleToHole: 0.5, minEdgeClearance: 0.2, minHoleSize: 0.15, minHoleToTrack: 0.2, minPthToTrack: 0.28 };
   // JLCPCB via pricing: no extra charge with hole ≥ 0.3 mm and diameter ≥ 0.4 mm; on boards with more than 2 layers a 0.2 mm
   // hole is also free when the diameter is ≥ 0.45 mm. Smaller vias cost extra. Diameter ≥ hole + 0.1 mm (0.15 preferred).
   const costsExtra = (v, layers = rules().layers) => !((v.drill >= 0.3 - 1e-9 && v.d >= 0.4 - 1e-9) || (layers > 2 && v.drill >= 0.2 - 1e-9 && v.d >= 0.45 - 1e-9));
@@ -928,13 +928,22 @@ const Pcb = (() => {
     return [...sizes.values()].map(v => `Vias ${v.d} mm diameter / ${v.drill} mm hole: ${costsExtra(v) ? 'COSTS EXTRA at JLCPCB — choose the matching via size when ordering' : 'JLCPCB standard, no extra cost'}`).join('; ');
   }
   const RULE_PRESETS = {
-    jlcpcb_free_min: { label: 'JLCPCB 2-layer — small, no extra cost (0.2 mm tracks, 0.1 mm gaps, vias 0.45/0.3) — default', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.1, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.2, layers: 2, neckDown: true, ...JLC_MIN } },
+    jlcpcb_free_min: { label: 'JLCPCB 2-layer — small, no extra cost, clean in EasyEDA Pro DRC (0.2 mm tracks, 0.105 / 0.16 mm gaps, vias 0.45/0.3) — default', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.105, padClearance: 0.16, viaClearance: 0.16, pourClearance: 0.26, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
+    jlcpcb_tight: { label: 'JLCPCB 2-layer — tightest at no extra cost (0.1 mm everywhere; EasyEDA Pro needs its rules lowered)', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.1, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.2, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb: { label: 'JLCPCB 2-layer — standard (0.25 mm tracks, vias 0.6/0.3)', values: { traceWidth: 0.25, powerTraceWidth: 0.5, clearance: 0.2, viaDiameter: 0.6, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_min: { label: 'JLCPCB 2-layer — 5/5 mil', values: { traceWidth: 0.127, powerTraceWidth: 0.3, clearance: 0.127, viaDiameter: 0.56, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_power: { label: 'JLCPCB 2-layer — power / robust', values: { traceWidth: 0.3, powerTraceWidth: 0.8, clearance: 0.25, viaDiameter: 0.8, viaDrill: 0.4, edgeClearance: 0.5, layers: 2, neckDown: true, ...JLC_MIN } },
     home: { label: 'Home etching / CNC milling (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6 } },
   };
-  const DEFAULT_PRESET = 'jlcpcb_free_min';   // smallest JLCPCB rules at no extra cost
+  const DEFAULT_PRESET = 'jlcpcb_free_min';
+  // JLCPCB measures tracks against drill holes too: via hole to track ≥ minHoleToTrack (0.2), plated hole to track
+  // ≥ minPthToTrack (0.28). As a copper gap: that minus the ring width — 0.125 mm for a 0.45 / 0.3 via
+  // gaps per object kind: tracks to tracks = clearance; anything to a pad = padClearance; anything to a via = viaClearance;
+  // copper pour to other copper = pourClearance (each at least clearance)
+  const padCl = R => Math.max(R.clearance, +R.padClearance || 0), viaCl = R => Math.max(R.clearance, +R.viaClearance || 0);
+  const pourCl = (R, pr) => (pr && pr.clearance) || Math.max(R.clearance, +R.pourClearance || 0);
+  const viaGap = (R, d = R.viaDiameter, drill = R.viaDrill) => Math.max(viaCl(R), (+R.minHoleToTrack || 0) - (d - drill) / 2);
+  const pthGap = (R, p) => Math.max(padCl(R), p.drill ? (+R.minPthToTrack || 0) - (Math.min(p.w, p.h) - p.drill) / 2 : 0);   // smallest JLCPCB rules at no extra cost
   function rules() {
     const r = Model.S.rules || {}, p = RULE_PRESETS[r.preset] || RULE_PRESETS[DEFAULT_PRESET];
     return Object.assign({ preset: DEFAULT_PRESET, netWidths: {}, routeTime: 90, trackStyle: '45', noViaInPad: true, pourMinArea: 0.5, warnUnderMetal: false }, p.values, r, { netWidths: Object.assign({}, r.netWidths || {}) });
@@ -958,7 +967,7 @@ const Pcb = (() => {
     for (const [n, v] of Object.entries(R.netWidths)) if (+v < R.minTraceWidth) w.push(`Net ${n} width ${v} < fab minimum ${R.minTraceWidth} mm`);
     return w;
   }
-  const NUM_KEYS = ['traceWidth', 'powerTraceWidth', 'clearance', 'viaDiameter', 'viaDrill', 'edgeClearance', 'minTraceWidth', 'minClearance', 'minViaDrill', 'minViaDiameter', 'minAnnularRing', 'minPthRing', 'minHoleToHole', 'minEdgeClearance', 'minHoleSize'];
+  const NUM_KEYS = ['traceWidth', 'powerTraceWidth', 'clearance', 'viaDiameter', 'viaDrill', 'edgeClearance', 'minTraceWidth', 'minClearance', 'minViaDrill', 'minViaDiameter', 'minAnnularRing', 'minPthRing', 'minHoleToHole', 'minEdgeClearance', 'minHoleSize', 'minHoleToTrack', 'minPthToTrack', 'padClearance', 'viaClearance', 'pourClearance'];
   // Merge a partial rule update into the project (preset first, then overrides).
   function setRules(u = {}) {
     let base = Model.S.rules || {};
@@ -968,7 +977,7 @@ const Pcb = (() => {
       base = Object.assign({ preset: u.preset, netWidths: base.netWidths || {} }, keep);
     }
     const next = Object.assign({}, base);
-    for (const k of NUM_KEYS) if (u[k] != null && u[k] !== '') { const v = +u[k]; if (!(v > 0 && v < 20)) throw new Error(`${k} must be a positive number in mm`); next[k] = v; }
+    for (const k of NUM_KEYS) if (u[k] != null && u[k] !== '') { const v = +u[k]; if (!(v >= 0 && v < 20) || (v === 0 && !/Clearance$|ToTrack$/.test(k))) throw new Error(`${k} must be a positive number in mm`); next[k] = v; }
     if (u.layers != null) { if (![1, 2].includes(+u.layers)) throw new Error('layers must be 1 or 2'); next.layers = +u.layers; }
     if (u.neckDown != null) next.neckDown = !!u.neckDown;
     if (u.powerWider != null) next.powerWider = !!u.powerWider;
@@ -1217,7 +1226,7 @@ const Pcb = (() => {
       for (let i = 0; i < d.length; i += 2) { const x = cx + d[i], y = cy + d[i + 1]; if (x >= 0 && y >= 0 && x < W && y < H) map[layerOff + y * W + x] += sgn; }
     };
     function padAdd(MT, MV, p, w, sgn) {
-      const rT = w / 2 + R.clearance + safe, rV = vr + R.clearance + safe, nr = p.near, hole = R.viaDrill / 2 + R.minHoleToHole;
+      const rT = w / 2 + pthGap(R, p) + safe, rV = vr + Math.max(padCl(R), viaCl(R)) + safe, nr = p.near, hole = R.viaDrill / 2 + R.minHoleToHole;
       for (let k = 0; k < nr.length; k += 3) {
         const i = nr[k], d = nr[k + 1];
         if (d < rT) for (const l of p.layers) MT[l * N + i] += sgn;
@@ -1225,11 +1234,11 @@ const Pcb = (() => {
       }
     }
     function cuAdd(MT, MV, t, w, sgn) {
-      const r1 = w / 2 + t.w / 2 + R.clearance + slack, r2 = vr + t.w / 2 + R.clearance + slack;
+      const r1 = w / 2 + t.w / 2 + R.clearance + slack, r2 = vr + t.w / 2 + viaGap(R) + slack;
       for (const c of t.cells) { const x = c % W, y = (c / W) | 0; diskAdd(MT, t.l * N, x, y, r1, sgn); diskAdd(MV, 0, x, y, r2, sgn); }
     }
     function viaAdd(MT, MV, v, w, sgn) {
-      const rt = w / 2 + v.d / 2 + R.clearance + safe, rv = Math.max(v.d / 2 + vr + R.clearance, (v.hole ? v.d : R.viaDrill) / 2 + R.viaDrill / 2 + R.minHoleToHole);
+      const rt = w / 2 + v.d / 2 + (v.hole ? Math.max(R.clearance, +R.minHoleToTrack || 0) : viaGap(R, v.d, v.drill || R.viaDrill)) + safe, rv = Math.max(v.d / 2 + vr + viaCl(R), (v.hole ? v.d : R.viaDrill) / 2 + R.viaDrill / 2 + R.minHoleToHole);
       for (let l = 0; l < L; l++) diskAdd(MT, l * N, v.x, v.y, rt, sgn);
       diskAdd(MV, 0, v.x, v.y, rv, sgn);
     }
@@ -1682,7 +1691,7 @@ const Pcb = (() => {
     if (!cs.length || !S.board.w) return { violations: out, summary: 'No PCB' };
     const L = R.layers === 1 ? 1 : 2, objs = [];
     let orphan = 0;
-    for (const c of cs) for (const p of padsOf(c, idx)) objs.push({ s: padShape(p), net: p.net || '~' + (orphan++), layers: L === 1 ? ['F'] : padCu(p, ['F', 'B']), what: `pad ${p.key}`, drill: p.drill, x: p.x, y: p.y });
+    for (const c of cs) for (const p of padsOf(c, idx)) objs.push({ s: padShape(p), net: p.net || '~' + (orphan++), layers: L === 1 ? ['F'] : padCu(p, ['F', 'B']), what: `pad ${p.key}`, drill: p.drill, ring: p.drill ? (Math.min(p.w, p.h) - p.drill) / 2 : undefined, x: p.x, y: p.y });
     { const bp = boardPoly(); for (const c of cs) {
       const m = partMargin(c, bp);
       if (m.copper_mm < 0) add('outline', `${c.ref}: copper ${(-m.copper_mm).toFixed(2)} mm outside the board outline`, c.pcb.x, c.pcb.y);
@@ -1702,7 +1711,7 @@ const Pcb = (() => {
     if (R.minPthRing) for (const c of cs) for (const p of padsOf(c, idx)) if (p.drill && (Math.min(p.w, p.h) - p.drill) / 2 < R.minPthRing - 1e-6)
       add('pad', `Pad ${p.key} ring ${((Math.min(p.w, p.h) - p.drill) / 2).toFixed(2)} < ${R.minPthRing} mm (plated through-hole)`, p.x, p.y, 'warning');
     for (const v of S.pcb.vias) {
-      objs.push({ s: { k: 'circ', c: [v.x, v.y], r: v.d / 2 }, net: v.net || '~v' + S.pcb.vias.indexOf(v), layers: ['F', 'B'], what: `via ${v.net || '(no net)'}`, drill: v.drill, x: v.x, y: v.y });
+      objs.push({ s: { k: 'circ', c: [v.x, v.y], r: v.d / 2 }, net: v.net || '~v' + S.pcb.vias.indexOf(v), layers: ['F', 'B'], what: `via ${v.net || '(no net)'}`, drill: v.drill, ring: (v.d - v.drill) / 2, x: v.x, y: v.y });
       if (v.drill < R.minViaDrill - 1e-6) add('via', `Via drill ${v.drill} < ${R.minViaDrill} mm`, v.x, v.y);
       if ((v.d - v.drill) / 2 < R.minAnnularRing - 1e-6) add('via', `Via annular ring ${((v.d - v.drill) / 2).toFixed(3)} < ${R.minAnnularRing} mm`, v.x, v.y);
       if (costsExtra(v) && !costWarned.has(v.d + '/' + v.drill)) { costWarned.add(v.d + '/' + v.drill); add('via-cost', costNote(v), v.x, v.y, 'warning'); }
@@ -1714,7 +1723,7 @@ const Pcb = (() => {
         add('via-in-pad', `${R.noViaInPad ? 'Not allowed (rule: no via in pad): via' : 'Via'} on SMD pad ${p.key} (${v.net}) — solder wicks into the hole. ${Model.isGround(v.net) ? 'Add a GND copper pour (⬛ Pour GND) and route again — the pour connects GND without these vias — or' : 'Route again /'} ✨ Optimize to make room, or allow via-in-pad in the rules (filled vias cost extra at JLCPCB)`, v.x, v.y, R.noViaInPad ? 'error' : 'warning');
       }
     }
-    (S.pcb.holes || []).forEach((h, i) => objs.push({ s: { k: 'circ', c: [h.x, h.y], r: h.d / 2 }, net: '~hole' + i, layers: ['F', 'B'], what: `mounting hole ${i + 1}`, drill: h.d, x: h.x, y: h.y }));
+    (S.pcb.holes || []).forEach((h, i) => objs.push({ s: { k: 'circ', c: [h.x, h.y], r: h.d / 2 }, net: '~hole' + i, layers: ['F', 'B'], what: `mounting hole ${i + 1}`, drill: h.d, ring: 0, x: h.x, y: h.y }));
     const boxes = objs.map(o => bboxOf(o.s));
     // Trace copper that lies inside a pad of the same net adds no copper: measure only the part outside own pads.
     const padsByNet = {};
@@ -1745,8 +1754,8 @@ const Pcb = (() => {
       const i = order[ii], A = objs[i], ba = boxes[i];
       for (let jj = ii + 1; jj < order.length; jj++) {
         const j = order[jj], bb = boxes[j];
-        if (bb[0] > ba[2] + Math.max(cl, R.minHoleToHole) + 2) break;
-        if (bb[1] > ba[3] + cl + 2 || bb[3] < ba[1] - cl - 2) continue;
+        if (bb[0] > ba[2] + Math.max(cl, R.minHoleToHole, +R.minPthToTrack || 0) + 2) break;
+        if (bb[1] > ba[3] + cl + 2.3 || bb[3] < ba[1] - cl - 2.3) continue;
         const B = objs[j];
         if (A.drill && B.drill && A.what !== B.what) {
           const hd = Math.hypot(A.x - B.x, A.y - B.y) - A.drill / 2 - B.drill / 2;
@@ -1754,12 +1763,24 @@ const Pcb = (() => {
             add('hole', `Holes ${A.what} / ${B.what} are ${hd.toFixed(3)} mm apart (minimum ${R.minHoleToHole})`, (A.x + B.x) / 2, (A.y + B.y) / 2, 'warning');
         }
         if (A.net === B.net || !A.layers.some(l => B.layers.includes(l))) continue;
+        // tracks keep more distance from drill holes (vias, plated pads, mounting holes)
+        let pc = cl, holeRule = false;
+        if (A.what.startsWith('via') || B.what.startsWith('via')) pc = viaCl(R);
+        else if ((A.what.startsWith('pad') && !B.what.startsWith('pad')) || (B.what.startsWith('pad') && !A.what.startsWith('pad'))) pc = padCl(R);
+        for (const [X, Y] of [[A, B], [B, A]]) if (X.drill && Y.what.startsWith('trace')) {
+          const ring = X.ring != null ? X.ring : 0, need = (X.what.startsWith('pad') ? (+R.minPthToTrack || 0) : (+R.minHoleToTrack || 0)) - ring;
+          if (need > pc + 1e-9) { pc = +need.toFixed(3); holeRule = true; }
+        }
         let d = shapeDist(A.s, B.s);
-        if (d < cl - 1e-3 && (A.s.k === 'seg' && A.what.startsWith('trace') || B.s.k === 'seg' && B.what.startsWith('trace'))) d = refine(A, B, d);
-        if (d < cl - 1e-3) {
+        if (d < pc - 1e-3 && (A.s.k === 'seg' && A.what.startsWith('trace') || B.s.k === 'seg' && B.what.startsWith('trace'))) d = refine(A, B, d);
+        if (d < pc - 1e-3) {
           const key = [A.what, B.what].sort().join('|'); if (seen.has(key)) continue; seen.add(key);
           const both = A.what.startsWith('pad') && B.what.startsWith('pad');
-          add(d <= 0 ? 'short' : 'clearance', `${d <= 0 ? 'Short' : 'Clearance ' + d.toFixed(3) + ' mm'} between ${A.what} and ${B.what} (rule ${cl})`, (A.x + B.x) / 2, (A.y + B.y) / 2,
+          if (holeRule && d >= cl - 1e-3) {
+            const H = A.what.startsWith('trace') ? B : A, T = H === A ? B : A, min = H.what.startsWith('pad') ? R.minPthToTrack : R.minHoleToTrack;
+            add('hole-to-track', `${H.what} hole is ${(d + (H.ring || 0)).toFixed(3)} mm from ${T.what} (JLCPCB minimum ${min} mm hole to track)`, (A.x + B.x) / 2, (A.y + B.y) / 2, 'error');
+          }
+          else add(d <= 0 ? 'short' : 'clearance', `${d <= 0 ? 'Short' : 'Clearance ' + d.toFixed(3) + ' mm'} between ${A.what} and ${B.what} (rule ${pc})`, (A.x + B.x) / 2, (A.y + B.y) / 2,
             both ? 'warning' : (d < R.minClearance || d <= 0 ? 'error' : 'warning'));
         }
       }
@@ -1961,10 +1982,10 @@ const Pcb = (() => {
     for (const c of placed()) for (const p of padsOf(c, idx)) {
       if (p.drill) {   // a through-hole pad: no via on it, and the drill holes keep their spacing
         const holeGap = Math.hypot(v.x - p.x, v.y - p.y) - p.drill / 2 - v.drill / 2;
-        if (padDist(p, v.x, v.y) < v.d / 2 + (p.net === v.net ? 0 : R.clearance) || holeGap < R.minHoleToHole) on.push(p.key + ' (through-hole)');
+        if (padDist(p, v.x, v.y) < v.d / 2 + (p.net === v.net ? 0 : Math.max(padCl(R), viaCl(R))) || holeGap < R.minHoleToHole) on.push(p.key + ' (through-hole)');
         continue;
       }
-      if (padDist(p, v.x, v.y) >= v.d / 2 + (p.net === v.net ? 0 : R.clearance)) continue;
+      if (padDist(p, v.x, v.y) >= v.d / 2 + (p.net === v.net ? 0 : Math.max(padCl(R), viaCl(R)))) continue;
       if (!R.noViaInPad && p.ep && p.net === v.net && Math.min(p.w / 2 - Math.abs(v.x - p.x), p.h / 2 - Math.abs(v.y - p.y)) >= v.d / 2 + 0.15) continue;   // thermal via in an exposed pad (only when the strict rule is off)
       on.push(p.key);
     }
@@ -2218,7 +2239,7 @@ const Pcb = (() => {
       if (pours.length) {
         b.push('G01*');
         for (const pr of pours) {
-          const poly = pourPoly(pr), cl = pr.clearance || R.clearance;
+          const poly = pourPoly(pr), cl = pourCl(R, pr);
           b.push('%LPD*%', 'G36*', X(...poly[0]) + 'D02*'); for (const q of poly.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...poly[0]) + 'D01*', 'G37*');
           b.push('%LPC*%'); drawCopper(A, b, layer, 2 * cl, pr.net);
           b.push(A(`C,${f6(2 * R.edgeClearance)}`) + '*', X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*');
@@ -2563,7 +2584,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

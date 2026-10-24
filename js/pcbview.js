@@ -180,8 +180,8 @@ const PcbView = (() => {
       for (const o of route.obs) {
         if (route.startObj && o.what === 'pad ' + (route.startObj.p && route.startObj.p.key)) continue;
         if (route.net && o.net === route.net) continue;
-        const d = G.shapeDist(seg, o.s);
-        if (d < cl - 1e-3 && (!worst || d < worst.d)) worst = { d, what: o.what };
+        const d = G.shapeDist(seg, o.s), need = o.what.startsWith('pad') ? Pcb.padCl(Pcb.rules()) : o.what === 'via' ? Pcb.viaCl(Pcb.rules()) : cl;
+        if (d < need - 1e-3 && (!worst || d < worst.d)) worst = { d, what: o.what, need };
       }
     }
     return worst;
@@ -218,8 +218,8 @@ const PcbView = (() => {
     R.vias.push({ x: p[0], y: p[1] });
     const R0 = Pcb.rules(), vs = { k: 'circ', c: p, r: R0.viaDiameter / 2 };
     let worst = null;
-    for (const L of ['F', 'B']) for (const o of obstacles(L, R.net)) { const d = G.shapeDist(vs, o.s); if (d < R0.clearance - 1e-3 && (!worst || d < worst.d)) worst = { d, what: o.what }; }
-    if (worst) App.toast(`⚠ Via ${worst.d <= 0 ? 'shorts' : 'is ' + worst.d.toFixed(3) + ' mm'} to ${worst.what} (rule ${R0.clearance}) — Backspace to undo`, 5000);
+    for (const L of ['F', 'B']) for (const o of obstacles(L, R.net)) { const d = G.shapeDist(vs, o.s); if (d < Pcb.viaCl(R0) - 1e-3 && (!worst || d < worst.d)) worst = { d, what: o.what }; }
+    if (worst) App.toast(`⚠ Via ${worst.d <= 0 ? 'shorts' : 'is ' + worst.d.toFixed(3) + ' mm'} to ${worst.what} (rule ${Pcb.viaCl(R0)}) — Backspace to undo`, 5000);
     R.layer = to; R.pts = [p]; ui.active = to; ui.layers[to].on = true;
     R.obs = obstacles(to, R.net);
     renderLayers(); syncBar(); render();
@@ -603,7 +603,7 @@ const PcbView = (() => {
       // copper pours: filled polygon with other nets' copper (+ clearance) and the edge band masked out
       (S.pcb.pours || []).forEach((pr, i) => {
         if (pr.layer !== L) return;
-        const cl = pr.clearance || R0.clearance, poly = Pcb.pourPoly(pr), m = [];
+        const cl = Pcb.pourCl(R0, pr), poly = Pcb.pourPoly(pr), m = [];
         m.push(`<rect x="-50" y="-50" width="${S.board.w + 100}" height="${S.board.h + 100}" fill="white"/>`);
         for (const t of S.pcb.traces) if (t.layer === L && t.net !== pr.net) m.push(`<polyline points="${t.pts.map(q => q.join(',')).join(' ')}" fill="none" stroke="black" stroke-width="${t.w + 2 * cl}" stroke-linecap="round" stroke-linejoin="round"/>`);
         for (const p of cache.pads) if (p.net !== pr.net && padLayers(p).includes(L)) m.push(padEl(p, 'black', '', cl));
@@ -755,7 +755,7 @@ const PcbView = (() => {
     s += ` · <b style="color:${col(ui.active)}">${LNAME[ui.active]}</b> · ${(TOOLS.find(t => t.id === ui.tool) || {}).name}`;
     if (ui.tool === 'track' || ui.tool === 'arc') s += ` · width ${R ? R.w : curWidth(null)} mm · ${ui.angle === 'any' ? 'any angle' : ui.angle + '°'}`;
     if (R) s += ` · net <b>${esc(R.net || '(none)')}</b>`;
-    if (R && R.bad) s += ` · <span class="bad">⚠ ${R.bad.d <= 0 ? 'short' : 'clearance ' + R.bad.d.toFixed(3) + ' mm'} to ${esc(R.bad.what)} (rule ${Pcb.rules().clearance})</span>`;
+    if (R && R.bad) s += ` · <span class="bad">⚠ ${R.bad.d <= 0 ? 'short' : 'clearance ' + R.bad.d.toFixed(3) + ' mm'} to ${esc(R.bad.what)} (rule ${R.bad.need || Pcb.rules().clearance})</span>`;
     if (ui.tool === 'track') s += ` <span class="muted">· T/B/V switch layer + via · Space angle · / bend · Backspace undo · Esc / right-click finish</span>`;
     if (ui.tool === 'arc') s += ` <span class="muted">· click start, click end, then click to set the curve · Esc cancels</span>`;
     if (ui.tool === 'pour' || ui.tool === 'outline' || ui.tool === 'keepout') s += ` <span class="muted">· click corners, click the first corner (or Enter) to close · Backspace removes a corner · Esc cancels</span>`;

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610241230">
+<link rel="stylesheet" href="styles.css?v=202610241400">
 </head>
 <body>
 <header id="top">
@@ -293,7 +293,10 @@
       <label title="JLCPCB makes tracks down to 0.1 mm (4 mil) at no extra cost — use it on very tight boards; with Neck down the router already narrows a track to the fab minimum where 0.2 mm does not fit">Trace width <span class="hint">JLCPCB: down to 0.1</span><input data-r="traceWidth" type="number" step="0.01" min="0.05"><span>mm</span></label>
       <label class="chk"><input data-r="powerWider" type="checkbox"> Wider tracks for power / GND nets</label>
       <label>Power / GND trace width<input data-r="powerTraceWidth" type="number" step="0.01" min="0.05"><span>mm</span></label>
-      <label>Clearance (copper–copper)<input data-r="clearance" type="number" step="0.01" min="0.05"><span>mm</span></label>
+      <label title="Track to track (EasyEDA Pro default 0.102 mm, JLCPCB minimum 0.1 mm)">Clearance track–track<input data-r="clearance" type="number" step="0.005" min="0.05"><span>mm</span></label>
+      <label title="Track or via to a pad, SMD or through-hole (EasyEDA Pro default 0.152 mm, JLCPCB minimum 0.1 mm)">Clearance to pads<input data-r="padClearance" type="number" step="0.005" min="0"><span>mm</span></label>
+      <label title="Track, pad or via to a via (EasyEDA Pro default 0.152 mm; JLCPCB also wants 0.2 mm from the via hole)">Clearance to vias<input data-r="viaClearance" type="number" step="0.005" min="0"><span>mm</span></label>
+      <label title="Copper pour to other nets' copper (EasyEDA Pro default 0.254 mm)">Copper pour clearance<input data-r="pourClearance" type="number" step="0.01" min="0"><span>mm</span></label>
       <label>Via diameter<input data-r="viaDiameter" type="number" step="0.01" min="0.1"><span>mm</span></label>
       <label>Via drill<input data-r="viaDrill" type="number" step="0.01" min="0.1"><span>mm</span></label>
       <label>Copper to board edge<input data-r="edgeClearance" type="number" step="0.05" min="0"><span>mm</span></label>
@@ -315,6 +318,8 @@
       <label>Min edge clearance<input data-r="minEdgeClearance" type="number" step="0.05"><span>mm</span></label>
       <label>Min through-hole pad ring<input data-r="minPthRing" type="number" step="0.01"><span>mm</span></label>
       <label>Min hole size<input data-r="minHoleSize" type="number" step="0.05"><span>mm</span></label>
+      <label title="JLCPCB: 0.2 mm from a via's drill hole to a track (the router keeps this, so tracks pass a 0.45/0.3 via 0.125 mm from its copper)">Via hole to track<input data-r="minHoleToTrack" type="number" step="0.01"><span>mm</span></label>
+      <label title="JLCPCB: 0.28 mm from a plated through-hole to a track">Plated hole to track<input data-r="minPthToTrack" type="number" step="0.01"><span>mm</span></label>
     </div>
     <div class="rh">Per-net trace widths</div>
     <div id="rNets"></div>
@@ -351,33 +356,33 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610241230"></script>
-<script src="js/static-backend.js?v=202610241230"></script>
-<script src="js/lib.js?v=202610241230"></script>
-<script src="js/view.js?v=202610241230"></script>
-<script src="js/model.js?v=202610241230"></script>
-<script src="js/schematic.js?v=202610241230"></script>
-<script src="js/pcb.js?v=202610241230"></script>
-<script src="js/pcbview.js?v=202610241230"></script>
-<script src="js/enclosure.js?v=202610241230"></script>
-<script src="js/shape3d.js?v=202610241230"></script>
-<script src="js/easyeda.js?v=202610241230"></script>
-<script src="js/libpanel.js?v=202610241230"></script>
-<script src="js/openlib.js?v=202610241230"></script>
-<script src="js/kicad.js?v=202610241230"></script>
-<script src="js/easyedapro.js?v=202610241230"></script>
-<script src="js/encview.js?v=202610241230"></script>
-<script src="js/docview.js?v=202610241230"></script>
-<script src="js/pcb3d.js?v=202610241230"></script>
-<script src="js/blocks.js?v=202610241230"></script>
-<script src="js/engine.js?v=202610241230"></script>
-<script src="js/ai.js?v=202610241230"></script>
-<script src="js/exports.js?v=202610241230"></script>
-<script src="js/pcbpdf.js?v=202610241230"></script>
-<script src="js/folder.js?v=202610241230"></script>
-<script src="js/projects.js?v=202610241230"></script>
-<script src="js/editor.js?v=202610241230"></script>
-<script src="js/app.js?v=202610241230"></script>
+<script src="js/config.js?v=202610241400"></script>
+<script src="js/static-backend.js?v=202610241400"></script>
+<script src="js/lib.js?v=202610241400"></script>
+<script src="js/view.js?v=202610241400"></script>
+<script src="js/model.js?v=202610241400"></script>
+<script src="js/schematic.js?v=202610241400"></script>
+<script src="js/pcb.js?v=202610241400"></script>
+<script src="js/pcbview.js?v=202610241400"></script>
+<script src="js/enclosure.js?v=202610241400"></script>
+<script src="js/shape3d.js?v=202610241400"></script>
+<script src="js/easyeda.js?v=202610241400"></script>
+<script src="js/libpanel.js?v=202610241400"></script>
+<script src="js/openlib.js?v=202610241400"></script>
+<script src="js/kicad.js?v=202610241400"></script>
+<script src="js/easyedapro.js?v=202610241400"></script>
+<script src="js/encview.js?v=202610241400"></script>
+<script src="js/docview.js?v=202610241400"></script>
+<script src="js/pcb3d.js?v=202610241400"></script>
+<script src="js/blocks.js?v=202610241400"></script>
+<script src="js/engine.js?v=202610241400"></script>
+<script src="js/ai.js?v=202610241400"></script>
+<script src="js/exports.js?v=202610241400"></script>
+<script src="js/pcbpdf.js?v=202610241400"></script>
+<script src="js/folder.js?v=202610241400"></script>
+<script src="js/projects.js?v=202610241400"></script>
+<script src="js/editor.js?v=202610241400"></script>
+<script src="js/app.js?v=202610241400"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

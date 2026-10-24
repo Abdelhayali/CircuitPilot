@@ -17,6 +17,7 @@ const EasyEDA = (() => {
     const add = (px, py) => { if (!cur) { cur = [[x, y]]; out.push(cur); } cur.push([px, py]); x = px; y = py; };
     while (i < toks.length) {
       if (/[a-zA-Z]/.test(toks[i])) cmd = toks[i++];
+      if (!cmd) cmd = cur ? 'L' : 'M';   // numbers without a command: a plain point list
       const rel = cmd === cmd.toLowerCase(), C = cmd.toUpperCase();
       if (C === 'Z') { if (cur) { cur.push([sx, sy]); x = sx; y = sy; } cur = null; continue; }
       if (i >= toks.length) break;
@@ -168,9 +169,12 @@ const EasyEDA = (() => {
     for (const t of S.pcb.traces || []) if (t.pts && t.pts.length >= 2) shapes.push(`TRACK~${u(t.w)}~${cuL(t.layer)}~${clean(t.net)}~${t.pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
     for (const v of S.pcb.vias || []) shapes.push(`VIA~${X(v.x)}~${Y(v.y)}~${u(v.d)}~${clean(v.net)}~${u((v.drill || 0.3) / 2)}~${id()}~0`);
     for (const h of S.pcb.holes || []) shapes.push(`HOLE~${X(h.x)}~${Y(h.y)}~${u(h.d / 2)}~${id()}~0`);
+    // copper pours: COPPERAREA ~ stroke ~ layer ~ net ~ points "x y x y …" ~ clearance ~ solid ~ id ~ thermal ~ keep island ~ fill
+    // (empty: EasyEDA fills it — Rebuild copper areas) ~ locked. The outline is the pour's real one (whole board, polygon or clipped);
+    // EasyEDA keeps the fill off the board edge with its own rule.
     for (const p of S.pcb.pours || []) {
-      const pts = (p.pts && p.pts.length >= 3) ? p.pts : Pcb.boardPoly();
-      shapes.push(`COPPERAREA~1~${cuL(p.layer)}~${clean(p.net)}~M ${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' L ')} Z~${u(p.clearance || Pcb.rules().clearance || 0.2)}~solid~${id()}~spoke~none~~0~~2~1~1~1~yes`);
+      const pts = Pcb.pourPoly(p); if (!pts || pts.length < 3 || !S.nets[p.net]) continue;
+      shapes.push(`COPPERAREA~${u(0.254)}~${cuL(p.layer)}~${clean(p.net)}~${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${u(p.clearance || Pcb.rules().clearance || 0.2)}~solid~${id()}~spoke~none~[]~0`);
     }
     const poly = Pcb.boardPoly(), loop = poly.concat([poly[0]]);
     shapes.push(`TRACK~1~10~~${loop.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
@@ -242,7 +246,8 @@ const EasyEDA = (() => {
         const x = P(f[1]), y = P(f[2]), w = P(f[3]), h = P(f[4]); outline.push([[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]]);
       } else if (k === 'VIA') vias.push({ x: P(f[1]), y: P(f[2]), d: P(f[3]), net: f[4] || '', drill: 2 * (+f[5] || 0) * U });
       else if (k === 'HOLE') holes.push({ x: P(f[1]), y: P(f[2]), d: 2 * (+f[3] || 0) * U });
-      else if (k === 'COPPERAREA' && copper(f[2])) { const pl = pathToPolys(f[4], 6)[0]; if (pl && pl.length >= 3) areas.push({ net: f[3] || '', layer: copper(f[2]), pts: pl.map(q => [P(q[0]), P(q[1])]), clearance: P(f[5] || 0) }); }
+      // COPPERAREA points: EasyEDA writes a plain point list "x y x y …" (older CircuitPilot exports: an SVG path)
+      else if (k === 'COPPERAREA' && copper(f[2])) { const pl = pathToPolys(/[a-zA-Z]/.test(f[4]) ? f[4] : 'M ' + f[4] + ' Z', 6)[0]; if (pl && pl.length >= 3) areas.push({ net: f[3] || '', layer: copper(f[2]), pts: pl.map(q => [P(q[0]), P(q[1])]), clearance: P(f[5] || 0) }); }
     }
     if (!libs.length) throw new Error('No footprints found in this EasyEDA PCB');
     for (const p of pads) if (p.drill && !p.plated) holes.push({ x: p.x, y: p.y, d: p.drill });

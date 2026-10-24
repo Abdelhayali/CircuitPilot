@@ -261,7 +261,7 @@ const Pcb = (() => {
     return r;
   }
   function pourRasterI(pr, gStep) {
-    const S = Model.S, R = rules(), cl = pourCl(R, pr), poly = pourPoly(pr), bpoly = boardPoly(), idx = Model.pinIndex();
+    const S = Model.S, R = rules(), cl = pourCl(R, pr) + (+pr._margin || 0), poly = pourPoly(pr), bpoly = boardPoly(), idx = Model.pinIndex();
     const W = Math.ceil(S.board.w / gStep) + 1, H = Math.ceil(S.board.h / gStep) + 1, N = W * H, ok = new Uint8Array(N);
     const fill = (pl, val) => { for (let y = 0; y < H; y++) { const py = y * gStep, xs = []; for (let i = 0, j = pl.length - 1; i < pl.length; j = i++) { const [xi, yi] = pl[i], [xj, yj] = pl[j]; if ((yi > py) !== (yj > py)) xs.push((xj - xi) * (py - yi) / (yj - yi) + xi); } xs.sort((a, b) => a - b); for (let k = 0; k + 1 < xs.length; k += 2) for (let x = Math.max(0, Math.ceil(xs[k] / gStep)); x <= Math.min(W - 1, Math.floor(xs[k + 1] / gStep)); x++) ok[y * W + x] += val; } };
     fill(poly, 1); fill(bpoly, 1); for (let i = 0; i < N; i++) ok[i] = ok[i] === 2 ? 1 : 0;
@@ -285,7 +285,7 @@ const Pcb = (() => {
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (koDist(k, x * gStep, y * gStep) < gStep * 0.5) ok[y * W + x] = 0;
     }
     // board edge clearance
-    for (let i = 0; i < bpoly.length; i++) block({ k: 'seg', a: bpoly[i], b: bpoly[(i + 1) % bpoly.length], r: 0 }, R.edgeClearance);
+    for (let i = 0; i < bpoly.length; i++) block({ k: 'seg', a: bpoly[i], b: bpoly[(i + 1) % bpoly.length], r: 0 }, R.edgeClearance + (+pr._margin || 0));
     // islands: 8-connected, so copper touching only at a corner counts as one piece (nothing is cleared between them)
     const label = new Int32Array(N), size = [0]; let n = 0;
     const NB = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -356,6 +356,41 @@ const Pcb = (() => {
     }
     for (const v of placedV) S.pcb.vias.push(v);
     return { net, added: placedV.length, pieces_joined: joined, max_spacing: step, note: placedV.length ? 'Run run_drc; route_pcb is not needed for the pour itself' : 'No room for stitching vias (both pours must be solid at the same spot)' };
+  }
+  // The filled copper of a pour as outlines: one entry per live island, each a list of closed rings (outer + holes),
+  // traced around the 0.1 mm raster cells. The raster keeps an extra margin (cell corners reach 0.07 mm past a cell
+  // centre), so the traced copper never comes closer to other copper or the edge than the rules. For EasyEDA exports.
+  function pourFillRings(pr, g = 0.1, margin = 0.08) {
+    const r = pourRaster(Object.assign({}, pr, { _margin: margin }), g), W = r.W, H = r.H, L = r.label, out = [];
+    for (let k = 1; k <= r.islands; k++) {
+      // directed boundary edges around the island's cells (doubled integer coordinates: cell centre 2x, corners 2x ± 1)
+      const next = new Map(), key = (x, y) => x * 100003 + y;
+      const edge = (x0, y0, x1, y1) => { const kk = key(x0, y0); let a = next.get(kk); if (!a) next.set(kk, a = []); a.push([x0, y0, x1, y1]); };
+      const isK = (x, y) => x >= 0 && y >= 0 && x < W && y < H && L[y * W + x] === k;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        if (L[y * W + x] !== k) continue;
+        const X0 = 2 * x - 1, X1 = 2 * x + 1, Y0 = 2 * y - 1, Y1 = 2 * y + 1;
+        if (!isK(x, y - 1)) edge(X0, Y0, X1, Y0);
+        if (!isK(x + 1, y)) edge(X1, Y0, X1, Y1);
+        if (!isK(x, y + 1)) edge(X1, Y1, X0, Y1);
+        if (!isK(x - 1, y)) edge(X0, Y1, X0, Y0);
+      }
+      const rings = [];
+      for (const [, list] of next) while (list.length) {
+        const e0 = list.pop(), ring = [[e0[0], e0[1]]];
+        let cx = e0[2], cy = e0[3], guard = 0;
+        while (!(cx === e0[0] && cy === e0[1]) && guard++ < 4e6) {
+          ring.push([cx, cy]);
+          const a = next.get(key(cx, cy)); if (!a || !a.length) break;
+          const e = a.pop(); cx = e[2]; cy = e[3];
+        }
+        // drop the corners in the middle of straight runs
+        const pts = ring.filter((q, i) => { const p0 = ring[(i - 1 + ring.length) % ring.length], p1 = ring[(i + 1) % ring.length]; return (q[0] - p0[0]) * (p1[1] - q[1]) !== (q[1] - p0[1]) * (p1[0] - q[0]); });
+        if (pts.length >= 3) rings.push(pts.map(q => [+(q[0] * g / 2).toFixed(4), +(q[1] * g / 2).toFixed(4)]));
+      }
+      if (rings.length) out.push(rings);
+    }
+    return out;
   }
   const pourInfo = pr => { try { const r = pourRaster(pr); return { islands: r.islands, removed: r.removed, removed_mm2: r.removedArea }; } catch (e) { return {}; } };
   // pour templates: the project's pour recipe, re-applied after re-routing / outline changes (reroute does it by itself)
@@ -2584,7 +2619,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

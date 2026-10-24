@@ -179,7 +179,10 @@ const EasyEDA = (() => {
     // EasyEDA keeps the fill off the board edge with its own rule.
     for (const p of S.pcb.pours || []) {
       const pts = Pcb.pourPoly(p); if (!pts || pts.length < 3 || !S.nets[p.net]) continue;
-      shapes.push(`COPPERAREA~${u(0.254)}~${cuL(p.layer)}~${clean(p.net)}~${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${u(Pcb.pourCl(Pcb.rules(), p))}~solid~${id()}~spoke~none~[]~0`);
+      // the fill as EasyEDA stores it: [[ring, ring …], …] — one array per piece of copper, its outer ring and holes
+      let fill = '[]';
+      try { fill = JSON.stringify(Pcb.pourFillRings(p).map(rings => rings.map(rg => 'M' + rg.map(q => X(q[0]) + ',' + Y(q[1])).join(' ') + 'z'))); } catch (e) { fill = '[]'; }
+      shapes.push(`COPPERAREA~${u(0.254)}~${cuL(p.layer)}~${clean(p.net)}~${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${u(Pcb.pourCl(Pcb.rules(), p))}~solid~${id()}~direct~none~${fill}~0`);
     }
     const poly = Pcb.boardPoly(), loop = poly.concat([poly[0]]);
     shapes.push(`TRACK~1~10~~${loop.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);

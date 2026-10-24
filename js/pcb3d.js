@@ -78,11 +78,26 @@ const Pcb3D = (() => {
   // ---------- board textures (drawn as SVG in board coordinates, then rasterised) ----------
   function sideSVG(side, px) {
     const S = Model.S, idx = Model.pinIndex(), R = Pcb.rules(), w = S.board.w, h = S.board.h, L = side;
-    const mask = $('#p3mask').value, cu = shade(mask, 0.25), pad = ui.finish === 'enig' ? '#d8b04a' : '#c9cdd2', silk = mask === '#e8e8e8' ? '#111' : '#f4f4f4';
+    const mask = $("#p3mask").value, cu = shade(mask, 0.32), pad = ui.finish === 'enig' ? '#d8b04a' : '#c9cdd2', silk = mask === '#e8e8e8' ? '#111' : '#f4f4f4';
     const poly = Pcb.boardPoly(), d = 'M' + poly.map(q => q.join(' ')).join('L') + 'Z', o = [];
     o.push(`<path d="${d}" fill="${mask}"/>`);
     // copper under the mask: pours, tracks, (tented) vias
-    for (const pr of S.pcb.pours || []) if (pr.layer === L) { const pp = Pcb.pourPoly(pr); o.push(`<path d="M${pp.map(q => q.join(' ')).join('L')}Z" fill="${cu}" clip-path="url(#b)"/>`); }
+    // pours with the clearance gaps around other nets' copper (as in the 2D view): that is what makes tracks show
+    const pads = Pcb.placed().flatMap(c => Pcb.padsOf(c, idx)), masks = [];
+    const padAt = (p, f, e) => p.shape === 'round' ? `<circle cx="${p.x}" cy="${p.y}" r="${p.w / 2 + e}" fill="${f}"/>` : `<rect x="${p.x - p.w / 2 - e}" y="${p.y - p.h / 2 - e}" width="${p.w + 2 * e}" height="${p.h + 2 * e}" rx="${p.shape === 'oval' ? Math.min(p.w, p.h) / 2 + e : e}" fill="${f}"/>`;
+    (S.pcb.pours || []).forEach((pr, i) => {
+      if (pr.layer !== L) return;
+      const cl = Pcb.pourCl(R, pr), pp = Pcb.pourPoly(pr), m = [`<rect x="-50" y="-50" width="${w + 100}" height="${h + 100}" fill="white"/>`];
+      for (const t of S.pcb.traces) if (t.layer === L && t.net !== pr.net) m.push(`<polyline points="${t.pts.map(q => q.join(',')).join(' ')}" fill="none" stroke="black" stroke-width="${t.w + 2 * cl}" stroke-linecap="round" stroke-linejoin="round"/>`);
+      for (const p of pads) if (p.net !== pr.net && (p.drill || (p.layer || 'F') === L)) m.push(padAt(p, 'black', cl));
+      for (const v of S.pcb.vias) if (v.net !== pr.net) m.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2 + cl}" fill="black"/>`);
+      for (const hh of S.pcb.holes || []) m.push(`<circle cx="${hh.x}" cy="${hh.y}" r="${hh.d / 2 + cl}" fill="black"/>`);
+      m.push(`<path d="${d}" fill="none" stroke="black" stroke-width="${2 * R.edgeClearance}"/>`);
+      for (const k of Pcb.keepouts()) if (k.pours && (k.layer === 'both' || k.layer === L)) m.push(`<path d="M${k.pts.map(q => q.join(' ')).join('L')}Z" fill="black"/>`);
+      try { for (const [x0, y0, x1, y1] of Pcb.pourDeadRects(pr)) m.push(`<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="black"/>`); } catch (e) { }
+      masks.push(`<mask id="pm${i}" maskUnits="userSpaceOnUse" x="-50" y="-50" width="${w + 100}" height="${h + 100}">${m.join('')}</mask>`);
+      o.push(`<path d="M${pp.map(q => q.join(' ')).join('L')}Z" fill="${cu}" mask="url(#pm${i})"/>`);
+    });
     for (const t of S.pcb.traces) if (t.layer === L) o.push(`<polyline points="${t.pts.map(q => q.join(',')).join(' ')}" fill="none" stroke="${cu}" stroke-width="${t.w}" stroke-linecap="round" stroke-linejoin="round"/>`);
     for (const v of S.pcb.vias) o.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2}" fill="${cu}"/>`);
     // exposed pads (mask openings)
@@ -100,7 +115,7 @@ const Pcb3D = (() => {
     }
     // part references and board name: the same strokes as the Gerber silkscreen
     for (const l of Pcb.silkLabels(L)) o.push(`<path d="${l.lines.map(pl => 'M' + pl.map(q => q.join(' ')).join('L')).join('')}" fill="none" stroke="${silk}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round"/>`);
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(w * px)}" height="${Math.round(h * px)}" viewBox="0 0 ${w} ${h}"><defs><clipPath id="b"><path d="${d}"/></clipPath></defs><g clip-path="url(#b)">${o.join('')}</g></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(w * px)}" height="${Math.round(h * px)}" viewBox="0 0 ${w} ${h}"><defs><clipPath id="b"><path d="${d}"/></clipPath>${masks.join('')}</defs><g clip-path="url(#b)">${o.join('')}</g></svg>`;
   }
   function shade(hex, k) { const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255, f = v => Math.max(0, Math.min(255, Math.round(v + (255 - v) * k))); return `rgb(${f(r)},${f(g)},${f(b)})`; }
   function texture(side) {

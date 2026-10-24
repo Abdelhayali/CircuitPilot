@@ -185,7 +185,9 @@ const EasyEDA = (() => {
     return JSON.stringify({
       head: { docType: '3', editorVersion: '6.5.22', newgId: true, c_para: {}, x: OX, y: OY, hasIdFlag: true, importFlag: 0, transformList: '', title: (S.name || 'PCB') + ' PCB' },
       canvas: `CA~${n2(OX * 2)}~${n2(OY * 2)}~#000000~yes~#FFFFFF~10~1000~1000~line~0.5~mm~1~45~visible~0.5~${OX}~${OY}~0~yes`,
-      shape: shapes, layers, objects: [], BBox: { x: OX - 10, y: OY - 10, width: bw + 20, height: bh + 20 }, preference: { hideFootprints: '', hideNets: '' }, DRCRULE: {}, netColors: [],
+      shape: shapes, layers, objects: [], BBox: { x: OX - 10, y: OY - 10, width: bw + 20, height: bh + 20 }, preference: { hideFootprints: '', hideNets: '' },
+      // the design rules the board was routed with (EasyEDA units, 10 mil): otherwise EasyEDA checks against its own default (6 mil)
+      DRCRULE: (R => ({ Default: { trackWidth: u(R.traceWidth), clearance: u(R.clearance), viaHoleDiameter: u(R.viaDiameter), viaHoleD: u(R.viaDrill) }, isRealtime: true, isDrcOnRoutingOrPlaceVia: false, checkObjectToCopperarea: true, showDRCRangeLine: true }))(Pcb.rules()), netColors: [],
     });
   }
 

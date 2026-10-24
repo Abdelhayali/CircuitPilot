@@ -2,7 +2,7 @@
 // Schematic renderer + editor (select, drag, rotate, click pin-to-pin to wire).
 const Sch = (() => {
   let svg, world, grid, vp, boxEl;
-  const ui = { sel: null, multi: new Set(), selNet: null, pending: null, mouse: { x: 0, y: 0 }, drag: null, pan: null, box: null, rdown: null, onSelect: () => { }, onContext: () => { }, sheet: 0 };
+  const ui = { sel: null, multi: new Set(), selNet: null, selPin: null, pending: null, mouse: { x: 0, y: 0 }, drag: null, pan: null, box: null, rdown: null, onSelect: () => { }, onContext: () => { }, sheet: 0 };
   // ---------- sheets (multi-page schematic) and the drawing frame ----------
   const sheets = () => (Model.S.sheets && Model.S.sheets.length ? Model.S.sheets : [{ name: 'Main' }]);
   const onSheet = c => Model.sheetOf(c) === ui.sheet;
@@ -123,7 +123,7 @@ const Sch = (() => {
         const gnd = Model.isGround(net);
         for (const p of pts) {
           const ex = p.x + p.dx * 10, ey = p.y + p.dy * 10;
-          out.push(`<g class="pwr${selC}" data-net="${esc(net)}"><path class="wire" d="M${p.x} ${p.y}L${ex} ${ey}"/>`);
+          out.push(`<g class="pwr${selC}" data-net="${esc(net)}" data-npin="${esc(p.key)}"><path class="wire" d="M${p.x} ${p.y}L${ex} ${ey}"/>`);
           if (gnd) out.push(`<path class="wire" transform="translate(${ex} ${ey}) rotate(${angFor(p, false)})" d="M-9 0H9M-6 4H6M-3 8H3"/>`);
           else {
             out.push(`<path class="wire" transform="translate(${ex} ${ey}) rotate(${angFor(p, true)})" d="M-7 0H7"/>`);
@@ -141,7 +141,7 @@ const Sch = (() => {
         for (const p of pts) {
           const ex = p.x + p.dx * 10, ey = p.y + p.dy * 10;
           const anchor = p.dx > 0 ? 'start' : p.dx < 0 ? 'end' : 'middle';
-          out.push(`<g class="netl${selC}" data-net="${esc(net)}"><path class="wire" d="M${p.x} ${p.y}L${ex} ${ey}"/><path class="hitw" d="M${p.x} ${p.y}L${ex} ${ey}"/>` +
+          out.push(`<g class="netl${selC}" data-net="${esc(net)}" data-npin="${esc(p.key)}"><path class="wire" d="M${p.x} ${p.y}L${ex} ${ey}"/><path class="hitw" d="M${p.x} ${p.y}L${ex} ${ey}"/>` +
             `<text class="netlabel" x="${ex + p.dx * 2}" y="${ey + (p.dy < 0 ? -3 : p.dy > 0 ? 9 : 3)}" text-anchor="${anchor}">${esc(net)}</text></g>`);
         }
         continue;
@@ -209,8 +209,16 @@ const Sch = (() => {
   // selection: ui.sel is the primary part (Properties), ui.multi every selected part
   const isSel = ref => ui.sel === ref || ui.multi.has(ref);
   function selected() { const r = ui.multi.size ? [...ui.multi] : ui.sel ? [ui.sel] : []; return r.filter(x => Model.comp(x)); }
-  function setSelection(refs) { ui.multi = new Set(refs); ui.sel = refs[0] || null; ui.selNet = null; ui.onSelect(ui.sel, null); render(); }
-  function select(ref, net) { ui.sel = ref || null; ui.multi = new Set(ref ? [ref] : []); ui.selNet = net || null; ui.onSelect(ui.sel, ui.selNet); render(); }
+  function setSelection(refs) { ui.multi = new Set(refs); ui.sel = refs[0] || null; ui.selNet = null; ui.selPin = null; ui.onSelect(ui.sel, null); render(); }
+  // pin: the pin whose symbol / label / wire end was clicked — Delete then disconnects only that pin
+  function select(ref, net, pin) { ui.sel = ref || null; ui.multi = new Set(ref ? [ref] : []); ui.selNet = net || null; ui.selPin = (net && pin) || null; ui.onSelect(ui.sel, ui.selNet); render(); }
+  // the pin of a net clicked: the symbol's own pin, else the net's pin on this sheet nearest to the click
+  function netPin(el, pt) {
+    if (el.dataset.npin) return el.dataset.npin;
+    const keys = new Set(Model.S.nets[el.dataset.net] || []); let best = null, bd = Infinity;
+    for (const c of Model.S.components.filter(onSheet)) for (const p of Model.pinsWorld(c)) if (keys.has(p.key)) { const d = Math.hypot(p.x - pt.x, p.y - pt.y); if (d < bd) { bd = d; best = p.key; } }
+    return best;
+  }
   function drawBox() {
     const b = ui.box; if (!b) { boxEl.style.display = 'none'; return; }
     boxEl.style.display = ''; boxEl.setAttribute('x', Math.min(b.x0, b.x1)); boxEl.setAttribute('y', Math.min(b.y0, b.y1));
@@ -219,7 +227,7 @@ const Sch = (() => {
   function down(e) {
     const pt = vp.toWorld(e.clientX, e.clientY);
     const pinEl = e.target.closest('[data-pin]'), compEl = e.target.closest('[data-ref]'), netEl = e.target.closest('[data-net]');
-    if (e.button === 2) { ui.rdown = { x: e.clientX, y: e.clientY, ref: compEl ? compEl.dataset.ref : null, net: !compEl && netEl ? netEl.dataset.net : null }; ui.pan = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
+    if (e.button === 2) { ui.rdown = { x: e.clientX, y: e.clientY, ref: compEl ? compEl.dataset.ref : null, net: !compEl && netEl ? netEl.dataset.net : null, pin: !compEl && netEl ? netPin(netEl, vp.toWorld(e.clientX, e.clientY)) : null }; ui.pan = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
     if (e.button === 1) { ui.pan = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
     if (pinEl) {
       const k = pinEl.dataset.pin;
@@ -239,7 +247,7 @@ const Sch = (() => {
       if (ui.multi.size > 1 && ui.multi.has(c.ref)) { ui.sel = c.ref; ui.onSelect(c.ref, null); render(); }   // keep the group
       else select(c.ref);
       ui.drag = { x0: pt.x, y0: pt.y, orig: selected().map(r => { const o = Model.comp(r); return [o, o.x, o.y]; }), moved: false };
-    } else if (netEl) select(null, netEl.dataset.net);
+    } else if (netEl) select(null, netEl.dataset.net, netPin(netEl, pt));
     else { // drag on empty space: selection box (Shift adds to the selection)
       if (!e.shiftKey) select(null);
       ui.box = { x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y, add: e.shiftKey ? selected() : [] }; drawBox();
@@ -271,7 +279,7 @@ const Sch = (() => {
     if (ui.rdown && e && e.button === 2) {
       const r = ui.rdown; ui.rdown = null;
       if (Math.hypot(e.clientX - r.x, e.clientY - r.y) <= 4) {   // right click (not a pan): context menu
-        if (r.ref && !isSel(r.ref)) select(r.ref); else if (r.net) select(null, r.net);
+        if (r.ref && !isSel(r.ref)) select(r.ref); else if (r.net) select(null, r.net, r.pin);
         ui.mouse = vp.toWorld(e.clientX, e.clientY);
         ui.onContext({ x: e.clientX, y: e.clientY, ref: r.ref, net: r.net });
       }
@@ -284,9 +292,14 @@ const Sch = (() => {
     if ((e.key === 'r' || e.key === 'R') && selected().length) { rotate(); return true; }
     if ((e.key === 'Delete' || e.key === 'Backspace')) {
       if (selected().length) { del(); return true; }
-      if (ui.selNet) { const n = ui.selNet; select(null); Model.mutate(() => Model.removeNet(n)); return true; }
+      if (ui.selNet) { disconnectSel(); return true; }
     }
     return false;
+  }
+  // Delete on a net: only the clicked pin leaves it (the whole net goes only with "Delete net")
+  function disconnectSel() {
+    const n = ui.selNet, pin = ui.selPin; select(null);
+    if (pin) Model.mutate(() => Model.disconnect([pin])); else Model.mutate(() => Model.removeNet(n));
   }
   function rotate() { const refs = selected(); Model.mutate(() => { for (const r of refs) { const c = Model.comp(r); c.rot = ((c.rot || 0) + 90) % 360; } }); }
   function del() { const refs = selected(); select(null); Model.mutate(() => { for (const r of refs) if (Model.comp(r)) Model.removeComponent(r); }); }
@@ -306,5 +319,5 @@ const Sch = (() => {
     return out;
   }
   const setSheet = i => { ui.sheet = Math.max(0, Math.min(sheets().length - 1, +i || 0)); select(null); render(); fit(); };
-  return { init, render, fit, offscreen, key, select, selected, setSelection, selectAll, rotate, del, placeNew, exportSVG, ui, sheets, setSheet, onSheet, get vp() { return vp; } };
+  return { init, render, fit, offscreen, key, select, disconnectSel, selected, setSelection, selectAll, rotate, del, placeNew, exportSVG, ui, sheets, setSheet, onSheet, get vp() { return vp; } };
 })();

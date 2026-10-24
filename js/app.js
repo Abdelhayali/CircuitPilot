@@ -204,9 +204,10 @@ const App = (() => {
     } else if (net && Model.S.nets[net]) {
       el.innerHTML = `<div class="ph">Net</div><label>Name<input id="pNet" value="${esc(net)}"></label>
         <div class="ph small">Pins (${Model.S.nets[net].length})</div><div class="netpins">${Model.S.nets[net].map(esc).join(', ')}</div>
-        <div class="row"><button id="pNetDel" class="danger">Delete net</button></div>`;
+        <div class="row">${Sch.ui.selPin ? `<button id="pNetPin">Disconnect ${esc(Sch.ui.selPin)}</button>` : ''}<button id="pNetDel" class="danger">Delete whole net</button></div>`;
       $('#pNet').onchange = e => { try { const to = e.target.value.trim(); Model.mutate(() => Model.renameNet(net, to)); Sch.select(null, to); } catch (err) { toast(err.message); } };
       $('#pNetDel').onclick = () => { Sch.select(null); Model.mutate(() => Model.removeNet(net)); };
+      if ($('#pNetPin')) $('#pNetPin').onclick = () => Sch.disconnectSel();
     } else {
       el.innerHTML = `<div class="muted help">${view === 'sch'
         ? '<b>Click</b> a part to select · <b>drag</b> to move · <b>R</b> rotate · <b>Del</b> delete<br><b>Click a pin, then another pin</b> to wire them<br><b>Drag a box</b> on empty space to select several · <b>Shift+click</b> adds · <b>right-click</b> for Copy / Cut / Paste / Rotate…<br><b>Right- or middle-drag</b> to pan · <b>wheel</b> to zoom'
@@ -360,7 +361,8 @@ const App = (() => {
     else if (a === 'cut') copySel(true);
     else if (a === 'paste') pasteClip(clip, { at });
     else if (a === 'dup') { if (refs.length) pasteClip(Model.copyParts(refs), { offset: 2 }); else toast('Select parts to duplicate'); }
-    else if (a === 'del') { if (refs.length) V.del(); else if (view === 'sch' && Sch.ui.selNet) { const n = Sch.ui.selNet; Sch.select(null); Model.mutate(() => Model.removeNet(n)); } }
+    else if (a === 'del') { if (refs.length) V.del(); else if (view === 'sch' && Sch.ui.selNet) Sch.disconnectSel(); }
+    else if (a === 'delnet') { if (view === 'sch' && Sch.ui.selNet) { const n = Sch.ui.selNet; Sch.select(null); Model.mutate(() => Model.removeNet(n)); } }
     else if (a === 'rot') { if (refs.length) V.rotate(); }
     else if (a === 'flip') { if (refs.length) { try { PcbView.flip(); } catch (e) { toast(e.message); } } }
     else if (a === 'lock') { const lock = !refs.every(r => Model.comp(r).pcb.locked); Model.mutate(() => { for (const r of refs) Pcb.placeFootprint(r, { lock }); }); toast(`${nParts(refs.length)} ${lock ? 'locked (Optimize and Auto-place keep them in place)' : 'unlocked'}`); }
@@ -383,7 +385,7 @@ const App = (() => {
       items.push(it('del', 'Delete', 'Del'), '<hr>');
       if (one) items.push(it('props', 'Properties', ''), it('edit', one.type === 'part' ? 'Edit symbol & footprint…' : 'Make editable part…', ''));
     } else {
-      if (view === 'sch' && Sch.ui.selNet) items.push(`<div class="cm-h">Net ${esc(Sch.ui.selNet)}</div>`, it('del', 'Delete net', 'Del'), '<hr>');
+      if (view === 'sch' && Sch.ui.selNet) items.push(`<div class="cm-h">Net ${esc(Sch.ui.selNet)}</div>`, ...(Sch.ui.selPin ? [it('del', `Disconnect ${esc(Sch.ui.selPin)}`, 'Del')] : []), it('delnet', 'Delete whole net', Sch.ui.selPin ? '' : 'Del'), '<hr>');
       items.push(it('paste', 'Paste', 'Ctrl+V', !clip), it('all', 'Select all', 'Ctrl+A'), it('fit', 'Fit view', 'F'));
     }
     while (items[items.length - 1] === '<hr>') items.pop();

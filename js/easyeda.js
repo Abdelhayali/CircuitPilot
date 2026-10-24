@@ -1,6 +1,6 @@
 'use strict';
 // Interchange with EasyEDA (Standard edition "EasyEDA Source" JSON, also importable into EasyEDA Pro):
-//  - exportSchematic(): the current schematic as an EasyEDA schematic document (docType 1)
+//  - exportSchematic(): the current schematic as an EasyEDA schematic document (docType 1; several sheets: docType 5, one page per sheet)
 //  - exportPcb():       the current PCB as an EasyEDA PCB document (docType 3): footprints with their pads, tracks, vias,
 //                       holes, copper pours and the board outline (EasyEDA Pro: File → Import → EasyEDA (Standard))
 //  - importPcb(json):   an EasyEDA PCB document (docType 3) → parts, footprints, placement, nets, tracks, vias, pours, outline
@@ -64,20 +64,29 @@ const EasyEDA = (() => {
   }
 
   // ---------- schematic export ----------
-  // multi-sheet designs: each sheet gets its own area (3000 units apart) so parts never overlap in the export
+  // One sheet: an EasyEDA schematic document (docType 1). Several sheets: a multi-sheet schematic (docType 5) with one
+  // page per sheet, named like the sheets here; net labels with the same name connect the pages, as they do here.
   // ids: { LCSC number: { uuid, puuid, package } } from the EasyEDA library — with them EasyEDA links each part to its
   // library symbol and footprint (otherwise "Footprints Verification: can't find this footprint on the server").
   function exportSchematic(ids = {}) {
-    const shifts = Model.S.components.map(c => [c, (Model.sheetOf ? Model.sheetOf(c) : 0) * 3000]);
-    for (const [c, d] of shifts) c.x += d;
-    try { return exportSchematicRaw(ids); } finally { for (const [c, d] of shifts) c.x -= d; }
+    const S = Model.S, sheetOf = c => (Model.sheetOf ? Model.sheetOf(c) : 0);
+    const used = [...new Set(S.components.map(sheetOf))].sort((a, b) => a - b);
+    if (used.length <= 1) return exportSchematicRaw(ids, null, S.name || 'Sheet_1');
+    const names = (S.sheets || []).map(s => s && s.name);
+    const pages = used.map((i, k) => {
+      const title = String(names[i] || `Sheet_${k + 1}`).replace(/[~^`]/g, '-');
+      // the page data both at the top of the sheet entry and in dataStr: readers take either form
+      const doc = JSON.parse(exportSchematicRaw(ids, S.components.filter(c => sheetOf(c) === i), title));
+      return Object.assign({ docType: '1', title, description: '' }, doc, { dataStr: doc });
+    });
+    return JSON.stringify({ editorVersion: '6.5.22', docType: '5', title: S.name || 'Schematic', description: 'Exported by CircuitPilot', colors: {}, schematics: pages });
   }
-  function exportSchematicRaw(ids) {
+  function exportSchematicRaw(ids, only = null, title = null) {
     const S = Model.S, shapes = [];
     let gid = 0; const id = () => 'gge' + (++gid).toString(36) + 'cp';
     const bb = [Infinity, Infinity, -Infinity, -Infinity], grow = (x, y) => { bb[0] = Math.min(bb[0], x); bb[1] = Math.min(bb[1], y); bb[2] = Math.max(bb[2], x); bb[3] = Math.max(bb[3], y); };
     const idx = Model.pinIndex();
-    for (const c of S.components) {
+    for (const c of only || S.components) {
       const d = Lib.type(c.type); if (!d) continue;
       const tf = (x, y) => { const [rx, ry] = Lib.rot(x, y, c.rot || 0); return [n2(c.x + rx), n2(c.y + ry)]; };
       const lib = c.lcsc && S.lib[c.lcsc];
@@ -121,7 +130,7 @@ const EasyEDA = (() => {
     }
     if (!isFinite(bb[0])) { bb[0] = bb[1] = 0; bb[2] = bb[3] = 100; }
     const doc = {
-      head: { docType: '1', editorVersion: '6.5.22', newgId: true, c_para: { 'Prefix Start': '1' }, c_spiceCmd: null, hasIdFlag: true, title: S.name || 'Sheet_1' },
+      head: { docType: '1', editorVersion: '6.5.22', newgId: true, c_para: { 'Prefix Start': '1' }, c_spiceCmd: null, hasIdFlag: true, title: title || S.name || 'Sheet_1' },
       canvas: `CA~1000~1000~#FFFFFF~yes~#CCCCCC~5~1000~1000~line~5~pixel~5~0~0`,
       shape: shapes, BBox: { x: bb[0] - 20, y: bb[1] - 20, width: bb[2] - bb[0] + 40, height: bb[3] - bb[1] + 40 }, colors: {},
     };

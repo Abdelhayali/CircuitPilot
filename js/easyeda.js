@@ -69,6 +69,8 @@ const EasyEDA = (() => {
   // page per sheet, named like the sheets here; net labels with the same name connect the pages, as they do here.
   // ids: { LCSC number: { uuid, puuid, package } } from the EasyEDA library — with them EasyEDA links each part to its
   // library symbol and footprint (otherwise "Footprints Verification: can't find this footprint on the server").
+  // EasyEDA Pro pairs a schematic symbol with its PCB footprint by the LIB id, so both exports derive it from the designator
+  const libId = ref => 'ggeL' + String(ref).replace(/[^A-Za-z0-9]/g, '_');
   function exportSchematic(ids = {}) {
     const S = Model.S, sheetOf = c => (Model.sheetOf ? Model.sheetOf(c) : 0);
     const used = [...new Set(S.components.map(sheetOf))].sort((a, b) => a - b);
@@ -119,7 +121,7 @@ const EasyEDA = (() => {
       sub.unshift(`T~P~${n2(b[0])}~${n2(b[1] - 4)}~0~#000080~Arial~~~~~comment~${c.ref}~1~start~${id()}~0~`);
       // LIB tail as EasyEDA writes it: rotation ~ importFlag ~ id ~ footprint uuid (puuid) ~ symbol uuid ~ 0 ~ ~ yes ~ yes
       const hex = v => /^[0-9a-f]{16,40}$/i.test(v || '') ? v : '';
-      shapes.push([`LIB~${n2(c.x)}~${n2(c.y)}~${para.join('`')}\`~${c.rot || 0}~0~${id()}~${hex(link && link.puuid)}~${hex(link && link.uuid)}~0~~yes~yes`, ...sub].join('#@$'));
+      shapes.push([`LIB~${n2(c.x)}~${n2(c.y)}~${para.join('`')}\`~${c.rot || 0}~0~${libId(c.ref)}~${hex(link && link.puuid)}~${hex(link && link.uuid)}~0~~yes~yes`, ...sub].join('#@$'));
       // nets: a short stub wire and a net label at every connected pin (labels with the same name are connected)
       for (const p of pins) {
         const net = idx[p.key]; if (!net) continue;
@@ -167,7 +169,7 @@ const EasyEDA = (() => {
       sub.push(`TEXT~N~${X(b[0])}~${n2(Y(b[3]) + 6)}~0.6~0~${bot ? 1 : 0}~${bot ? 14 : 13}~~4~${clean(c.value || '')}~~none~${id()}~0~pinpart`);
       // LIB: x ~ y ~ attributes ~ rotation ~ importFlag ~ id ~ layer (1 top, 2 bottom)
       const hexId = v => /^[0-9a-f]{16,40}$/i.test(v || '') ? v : '';
-      shapes.push([`LIB~${X(c.pcb.x)}~${Y(c.pcb.y)}~${para.join('`')}\`~${c.pcb.rot || 0}~0~${id()}~${bot ? 2 : 1}~${hexId(link && link.puuid)}`, ...sub].join('#@$'));
+      shapes.push([`LIB~${X(c.pcb.x)}~${Y(c.pcb.y)}~${para.join('`')}\`~${c.pcb.rot || 0}~0~${libId(c.ref)}~${bot ? 2 : 1}~${hexId(link && link.puuid)}`, ...sub].join('#@$'));
     }
     for (const t of S.pcb.traces || []) if (t.pts && t.pts.length >= 2) shapes.push(`TRACK~${u(t.w)}~${cuL(t.layer)}~${clean(t.net)}~${t.pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
     for (const v of S.pcb.vias || []) shapes.push(`VIA~${X(v.x)}~${Y(v.y)}~${u(v.d)}~${clean(v.net)}~${u((v.drill || 0.3) / 2)}~${id()}~0`);

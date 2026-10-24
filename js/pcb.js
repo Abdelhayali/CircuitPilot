@@ -257,7 +257,7 @@ const Pcb = (() => {
     const S0 = Model.S, key = JSON.stringify([pr, gStep, S0.board, S0.rules, S0.nets[pr.net], S0.pcb.traces, S0.pcb.vias, S0.pcb.holes, S0.pcb.keepouts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side])]);
     if (pourMemo.has(key)) return pourMemo.get(key);
     const r = pourRasterI(pr, gStep);
-    pourMemo.set(key, r); if (pourMemo.size > 12) pourMemo.delete(pourMemo.keys().next().value);
+    pourMemo.set(key, r); if (pourMemo.size > 48) pourMemo.delete(pourMemo.keys().next().value);
     return r;
   }
   function pourRasterI(pr, gStep) {
@@ -1888,7 +1888,10 @@ const Pcb = (() => {
     const pourNodes = [];
     (S.pcb.pours || []).forEach((pr, pi) => {
       if (!S.nets[pr.net] || !L2.includes(pr.layer)) return;
-      const ras = pourRaster(pr), first = nodes.length;
+      // islands of real copper: cells kept 0.075 mm further from other copper, so two neighbouring cells (also diagonal) have
+      // copper at the full clearance between them (the plain raster could bridge a gap narrower than the clearance,
+      // which EasyEDA and the fab see as unconnected)
+      const ras = pourRaster(Object.assign({}, pr, { _margin: 0.075 })), first = nodes.length;
       for (let k = 1; k <= ras.islands; k++) nodes.push({ k: 'pour', net: pr.net, layers: [pr.layer], shapes: [], pour: pi, island: k });
       pourNodes.push({ pr, ras, first });
     });

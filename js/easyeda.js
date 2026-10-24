@@ -163,7 +163,7 @@ const EasyEDA = (() => {
         const g = new Map(); for (const p of pads) g.set(p.key, find('p' + p.key)); return g;
       };
       const exp = groups((f, x, y) => { const k = f.fr.findIndex(rs => inside(rs, x, y)); return k < 0 ? '' : 'x' + k; });
-      const own = groups((f, x, y) => { const r = f.raster || (f.raster = Pcb.pourRaster(f.p)), k = r.at(x, y); return k ? 'r' + k : ''; });
+      const own = groups((f, x, y) => { const r = f.raster || (f.raster = Pcb.pourRaster(Object.assign({}, f.p, { _margin: 0.075 }))), k = r.at(x, y); return k ? 'r' + k : ''; });
       // a piece of the exported copper that CircuitPilot's own pour joins to other pads
       const seen = new Set();
       for (const p of pads) {

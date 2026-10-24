@@ -141,6 +141,40 @@ const EasyEDA = (() => {
     return JSON.stringify(doc);
   }
 
+  // Pads of a pour's net that the exported copper (pour fills, tracks, vias) does not join to the rest: the pour reaches
+  // them only through a neck thinner than its clearance allows, so EasyEDA reports them unconnected
+  function pourSplits(fills, idx) {
+    const inside = (rings, x, y) => { let n = 0; for (const rg of rings) for (let i = 0, k = rg.length - 1; i < rg.length; k = i++) { const [xi, yi] = rg[i], [xk, yk] = rg[k]; if ((yi > y) !== (yk > y) && x < (xk - xi) * (y - yi) / (yk - yi) + xi) n++; } return n % 2 === 1; };
+    const out = [];
+    for (const net of [...new Set(fills.map(f => f.p.net))]) {
+      const pads = []; for (const c of Pcb.placed()) for (const p of Pcb.padsOf(c, idx)) if (p.net === net) pads.push(p);
+      const vias = Model.S.pcb.vias.filter(v => v.net === net), on = (p, L) => p.drill || p.layer === L, mine = fills.filter(f => f.p.net === net);
+      // pads grouped by what connects them; island(f, x, y) names the piece of pour copper at a point (or '')
+      const groups = island => {
+        const par = new Map(), add = a => { if (!par.has(a)) par.set(a, a); }, find = a => { while (par.get(a) !== a) a = par.get(a); return a; }, uni = (a, b) => { add(a); add(b); par.set(find(a), find(b)); };
+        pads.forEach(p => add('p' + p.key));
+        Model.S.pcb.traces.filter(t => t.net === net).forEach((t, ti) => { add('t' + ti); for (const q of t.pts) {
+          for (const p of pads) if (on(p, t.layer) && Math.abs(q[0] - p.x) <= p.w / 2 && Math.abs(q[1] - p.y) <= p.h / 2) uni('t' + ti, 'p' + p.key);
+          vias.forEach((v, i) => { if (Math.hypot(q[0] - v.x, q[1] - v.y) <= v.d / 2) uni('t' + ti, 'v' + i); }); } });
+        mine.forEach((f, fi) => {
+          for (const p of pads) if (on(p, f.p.layer)) for (let a = -0.45; a <= 0.45; a += 0.15) for (let b = -0.45; b <= 0.45; b += 0.15) { const k = island(f, p.x + a * p.w, p.y + b * p.h); if (k) uni(fi + ':' + k, 'p' + p.key); }
+          vias.forEach((v, i) => { for (let a = 0; a < 8; a++) { const k = island(f, v.x + Math.cos(a * Math.PI / 4) * v.d * 0.45, v.y + Math.sin(a * Math.PI / 4) * v.d * 0.45); if (k) uni(fi + ':' + k, 'v' + i); } });
+        });
+        const g = new Map(); for (const p of pads) g.set(p.key, find('p' + p.key)); return g;
+      };
+      const exp = groups((f, x, y) => { const k = f.fr.findIndex(rs => inside(rs, x, y)); return k < 0 ? '' : 'x' + k; });
+      const own = groups((f, x, y) => { const r = f.raster || (f.raster = Pcb.pourRaster(f.p)), k = r.at(x, y); return k ? 'r' + k : ''; });
+      // a piece of the exported copper that CircuitPilot's own pour joins to other pads
+      const seen = new Set();
+      for (const p of pads) {
+        const g = exp.get(p.key); if (seen.has(g)) continue; seen.add(g);
+        const part = pads.filter(q => exp.get(q.key) === g), joined = pads.some(q => exp.get(q.key) !== g && own.get(q.key) === own.get(p.key));
+        if (joined && part.length < pads.length / 2 + 0.1) out.push(`${net}: ${part.map(q => q.key).join(', ')} reach the rest of ${net} only through pour copper thinner than the clearance — add a via or a track`);
+      }
+    }
+    return out;
+  }
+
   // ---------- PCB export ----------
   // Same records the importer below reads. Footprints are written in full (pads in board coordinates), so EasyEDA needs no
   // library lookup; net names on pads, tracks, vias and pours are the schematic's net names.
@@ -150,7 +184,7 @@ const EasyEDA = (() => {
     const OX = 4000, OY = 3000, u = v => n2(v / U), X = x => n2(OX + x / U), Y = y => n2(OY + y / U);
     let gid = 0; const id = () => 'gge' + (++gid).toString(36) + 'cp';
     const clean = s => String(s == null ? '' : s).replace(/[~`#@$^]/g, '_');
-    const shapes = [], cuL = l => l === 'B' ? 2 : 1;
+    const shapes = [], cuL = l => l === 'B' ? 2 : 1, dn = v => Math.floor(v / U * 100 + 1e-6) / 100;   // minimums: rounded down
     for (const c of cs) {
       const lib = c.type === 'part' ? S.lib[c.lcsc] : null, bot = Pcb.isBottom(c), lcsc = Model.lcscOf(c);
       const link = (lcsc && ids[lcsc]) || null;   // the EasyEDA library footprint the schematic symbol points to
@@ -187,14 +221,18 @@ const EasyEDA = (() => {
     // copper pours: COPPERAREA ~ stroke ~ layer ~ net ~ points "x y x y …" ~ clearance ~ solid ~ id ~ thermal ~ keep island ~ fill
     // (empty: EasyEDA fills it — Rebuild copper areas) ~ locked. The outline is the pour's real one (whole board, polygon or clipped);
     // EasyEDA keeps the fill off the board edge with its own rule.
+    // fill grid: 0.05 mm on small boards (the traced copper then needs only 0.04 mm extra margin), 0.1 mm on big ones
+    const fineFill = S.board.w * S.board.h <= 2500, fg = fineFill ? 0.05 : 0.1, fm = fineFill ? 0.04 : 0.08, fills = [];
+    exportPcb.warnings = [];
     for (const p of S.pcb.pours || []) {
       const pts = Pcb.pourPoly(p); if (!pts || pts.length < 3 || !S.nets[p.net]) continue;
       // the fill as EasyEDA stores it: one path per piece of copper, its outer ring and holes as sub-paths of the same
       // string (a hole as a separate string would be drawn as copper)
       let fill = '[]';
-      try { fill = JSON.stringify(Pcb.pourFillRings(p).map(rings => [rings.map(rg => 'M' + rg.map(q => X(q[0]) + ',' + Y(q[1])).join(' ') + 'z').join(' ')])); } catch (e) { fill = '[]'; }
+      try { const fr = Pcb.pourFillRings(p, fg, fm); fills.push({ p, fr }); fill = JSON.stringify(fr.map(rings => [rings.map(rg => 'M' + rg.map(q => X(q[0]) + ',' + Y(q[1])).join(' ') + 'z').join(' ')])); } catch (e) { fill = '[]'; }
       shapes.push(`COPPERAREA~${u(0.254)}~${cuL(p.layer)}~${clean(p.net)}~${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${u(Pcb.pourCl(Pcb.rules(), p))}~solid~${id()}~direct~none~${fill}~0`);
     }
+    try { exportPcb.warnings = pourSplits(fills, idx); } catch (e) { }
     const poly = Pcb.boardPoly(), loop = poly.concat([poly[0]]);
     shapes.push(`TRACK~1~10~~${loop.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
     const layers = ['1~TopLayer~#FF0000~true~true~true~', '2~BottomLayer~#0000FF~true~false~true~', '3~TopSilkLayer~#FFCC00~true~false~true~', '4~BottomSilkLayer~#66CC33~true~false~true~',
@@ -206,7 +244,7 @@ const EasyEDA = (() => {
       canvas: `CA~${n2(OX * 2)}~${n2(OY * 2)}~#000000~yes~#FFFFFF~10~1000~1000~line~0.5~mm~1~45~visible~0.5~${OX}~${OY}~0~yes`,
       shape: shapes, layers, objects: [], BBox: { x: OX - 10, y: OY - 10, width: bw + 20, height: bh + 20 }, preference: { hideFootprints: '', hideNets: '' },
       // the design rules the board was routed with (EasyEDA units, 10 mil): otherwise EasyEDA checks against its own default (6 mil)
-      DRCRULE: (R => ({ Default: { trackWidth: u(R.traceWidth), clearance: u(R.clearance), viaHoleDiameter: u(R.viaDiameter), viaHoleD: u(R.viaDrill) }, isRealtime: true, isDrcOnRoutingOrPlaceVia: false, checkObjectToCopperarea: true, showDRCRangeLine: true }))(Pcb.rules()), netColors: [],
+      DRCRULE: (R => ({ Default: { trackWidth: dn(Math.min(R.traceWidth, ...(S.pcb.traces || []).map(t => +t.w || R.traceWidth))), clearance: dn(R.clearance), viaHoleDiameter: u(R.viaDiameter), viaHoleD: u(R.viaDrill) }, isRealtime: true, isDrcOnRoutingOrPlaceVia: false, checkObjectToCopperarea: true, showDRCRangeLine: true }))(Pcb.rules()), netColors: [],
     });
   }
 

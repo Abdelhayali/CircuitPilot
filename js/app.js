@@ -234,13 +234,15 @@ const App = (() => {
 
   // EasyEDA schematic: each part with an LCSC number is linked to its EasyEDA library symbol + footprint (uuid / puuid)
   // mode: 'sch' (schematic .json), 'pcb' (PCB .json) or 'project' (both in one .zip, for EasyEDA Pro / Standard import)
+  // pads the exported pour copper does not join (EasyEDA would report them unconnected)
+  const pourWarn = () => { const w = EasyEDA.exportPcb.warnings || []; return w.length ? ' · ⚠ ' + w.join(' · ') : ''; };
   async function easyedaExport(mode = 'sch') {
     // filling the pours for EasyEDA takes a while on big boards: say so before the page is busy
     const filling = () => (Model.S.pcb.pours || []).length ? (toast('Filling the copper pours for EasyEDA…', 60000), new Promise(r => setTimeout(r, 60))) : null;
     if (mode === 'pcb') {
       await filling();
       download(fname('-pcb.easyeda.json'), EasyEDA.exportPcb(), 'application/json');
-      toast('EasyEDA PCB saved: footprints, tracks, vias, copper pours and the board outline. EasyEDA Pro: File → Import → EasyEDA (Standard) · Standard: File → Open → EasyEDA Source · the copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B) · EasyEDA Pro checks with its own rules: set the clearance to ' + Pcb.rules().clearance + ' mm (Design → Design Rule) or it reports gaps under 6 mil as errors', 12000);
+      toast('EasyEDA PCB saved: footprints, tracks, vias, copper pours and the board outline. EasyEDA Pro: File → Import → EasyEDA (Standard) · Standard: File → Open → EasyEDA Source · the copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B) · EasyEDA Pro checks with its own rules: set the clearance to ' + Pcb.rules().clearance + ' mm (Design → Design Rule) or it reports gaps under 6 mil as errors' + pourWarn(), 20000);
       return;
     }
     const S = Model.S, codes = [...new Set(S.components.map(c => Model.lcscOf(c)).filter(Boolean))], ids = {}, failed = [];
@@ -264,7 +266,7 @@ const App = (() => {
       failed.length && `not found in the EasyEDA library: ${failed.join(', ')}`,
       edited.length && `footprint edited here, EasyEDA uses the part's own footprint: ${edited.join(', ')}`].filter(Boolean);
     if (mode === 'project' && !pcb) notes.unshift('no PCB yet, so only the schematic is in the zip');
-    toast(`EasyEDA ${mode === 'project' ? 'project (schematic' + (pcb ? ' + PCB)' : ')') : 'schematic'} saved — ${S.components.length - noCode.length - failed.length}/${S.components.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Pro: File → Import → EasyEDA (Standard) and choose the file · Standard: File → Open → EasyEDA Source${pcb && (Model.S.pcb.pours || []).length ? ' · The copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B)' : ''}${pcb ? ` · EasyEDA Pro checks with its own rules: set the clearance to ${Pcb.rules().clearance} mm (Design → Design Rule) or it reports gaps under 6 mil as errors` : ''}`, 15000);
+    toast(`EasyEDA ${mode === 'project' ? 'project (schematic' + (pcb ? ' + PCB)' : ')') : 'schematic'} saved — ${S.components.length - noCode.length - failed.length}/${S.components.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Pro: File → Import → EasyEDA (Standard) and choose the file · Standard: File → Open → EasyEDA Source${pcb && (Model.S.pcb.pours || []).length ? ' · The copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B)' : ''}${pcb ? ` · EasyEDA Pro checks with its own rules: set the clearance to ${Pcb.rules().clearance} mm (Design → Design Rule) or it reports gaps under 6 mil as errors` : ''}${pcb ? pourWarn() : ''}`, 20000);
   }
 
   // ---------- screenshots for the AI (view_design): schematic, 2D PCB, 3D board, enclosure ----------

@@ -209,10 +209,8 @@ const EasyEDA = (() => {
       const b0 = Lib.footprint(c.footprint).box, m = bot ? [-b0[2], b0[1], -b0[0], b0[3]] : b0, silk = bot ? 4 : 3;
       const W = (x, y) => { const [rx, ry] = Lib.rot(x, y, rot); return FX(c.pcb.x + rx) + ' ' + FY(c.pcb.y + ry); }, WT = (x, y) => W(x, y).replace(' ', '~');
       sub.push(`TRACK~0.6~${silk}~~${[[m[0], m[1]], [m[2], m[1]], [m[2], m[3]], [m[0], m[3]], [m[0], m[1]]].map(q => W(q[0], q[1])).join(' ')}~${id()}~0`);
-      // texts carry their letter strokes as the path: EasyEDA draws a text from it (without one, Pro asks for a font)
-      const tpath = (str, x, y) => Pcb.strokeText(str, 0, 0, 4 * U, 'start', bot).map(pl => 'M' + pl.map(q => W(x + q[0], y + q[1])).join(' L')).join(' ');
-      sub.push(`TEXT~P~${WT(m[0], m[1] - 2 * U)}~0.6~${erot}~${bot ? 1 : 0}~${silk}~~4~${clean(c.ref)}~${tpath(clean(c.ref), m[0], m[1] - 2 * U)}~~${id()}~0~pinpart`);
-      sub.push(`TEXT~N~${WT(m[0], m[3] + 6 * U)}~0.6~${erot}~${bot ? 1 : 0}~${bot ? 14 : 13}~~4~${clean(c.value || '')}~${tpath(clean(c.value || ''), m[0], m[3] + 6 * U)}~none~${id()}~0~pinpart`);
+      sub.push(`TEXT~P~${WT(m[0], m[1] - 2 * U)}~0.6~${erot}~${bot ? 1 : 0}~${silk}~~4~${clean(c.ref)}~~~${id()}~0~pinpart`);
+      sub.push(`TEXT~N~${WT(m[0], m[3] + 6 * U)}~0.6~${erot}~${bot ? 1 : 0}~${bot ? 14 : 13}~~4~${clean(c.value || '')}~~none~${id()}~0~pinpart`);
       // LIB: x ~ y ~ attributes ~ rotation ~ importFlag ~ id ~ layer (1 top, 2 bottom)
       const hexId = v => /^[0-9a-f]{16,40}$/i.test(v || '') ? v : '';
       shapes.push([`LIB~${ox}~${oy}~${para.join('`')}\`~${erot}~0~${libId(c.ref)}~${bot ? 2 : 1}~${hexId(link && link.puuid)}`, ...sub].join('#@$'));
@@ -235,15 +233,11 @@ const EasyEDA = (() => {
       shapes.push(`COPPERAREA~${u(0.254)}~${cuL(p.layer)}~${clean(p.net)}~${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${u(Pcb.pourCl(Pcb.rules(), p))}~solid~${id()}~direct~none~${fill}~0`);
     }
     try { exportPcb.warnings = pourSplits(fills, idx); } catch (e) { }
-    // free silkscreen text and the board name (part designators travel inside their footprints). EasyEDA anchors a
-    // text at the start of its baseline and turns it counter-clockwise, as CircuitPilot's labels do
+    // free silkscreen text and the board name as silkscreen lines — the same strokes as the Gerber silkscreen. As TEXT
+    // objects EasyEDA Pro wanted a font it does not have, and a stroke path came out filled (blobs)
     for (const side of ['F', 'B']) for (const l of Pcb.silkLabels(side)) {
       if (l.kind !== 'text' && l.kind !== 'board') continue;
-      const r0 = l.rect0, rot = ((+l.rot || 0) % 360 + 360) % 360, bot = side === 'B';
-      let ax = bot ? r0[2] - 0.1 : r0[0] + 0.1, ay = r0[3] - 0.1;
-      if (rot) [ax, ay] = Pcb.rotPt(ax, ay, (r0[0] + r0[2]) / 2, (r0[1] + r0[3]) / 2, rot);
-      const path = (l.lines || []).map(pl => 'M' + pl.map(q => X(q[0]) + ' ' + Y(q[1])).join(' L')).join(' ');
-      shapes.push(`TEXT~L~${X(ax)}~${Y(ay)}~${u(l.w)}~${rot}~${bot ? 1 : 0}~${bot ? 4 : 3}~~${u(l.h)}~${clean(l.text)}~${path}~~${id()}~0`);
+      for (const pl of l.lines || []) if (pl.length >= 2) shapes.push(`TRACK~${u(l.w)}~${side === 'B' ? 4 : 3}~~${pl.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
     }
     const poly = Pcb.boardPoly(), loop = poly.concat([poly[0]]);
     shapes.push(`TRACK~1~10~~${loop.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);

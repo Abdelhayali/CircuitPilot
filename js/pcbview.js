@@ -118,6 +118,7 @@ const PcbView = (() => {
     $('#pAngle').onchange = e => { ui.angle = e.target.value; persist(); render(); };
     $('#pGrid').onchange = e => { ui.grid = +e.target.value; persist(); };
     $('#pWidth').oninput = e => { ui.width = +e.target.value > 0 ? +e.target.value : null; if (ui.route) { ui.route.w = curWidth(ui.route.net); render(); } };
+    if ($('#pFree')) $('#pFree').onchange = e => { ui.free = e.target.checked; App.toast(ui.free ? 'No rules: tracks and vias go where you click — run DRC afterwards' : 'Rules on: segments and vias that break a clearance rule are not placed'); coord(); };
     syncBar();
   }
   const curWidth = net => ui.width || (net ? Pcb.netWidth(net) : Pcb.rules().traceWidth);
@@ -225,7 +226,7 @@ const PcbView = (() => {
     if (o && o.net && !R.net) { R.net = o.net; R.w = curWidth(o.net); R.obs = obstacles(R.layer, R.net); ui.hlNet = o.net; }
     if (o && o.k === 'pad' && !o.p.drill && R.layer !== o.layer) { App.toast(`That SMD pad is on ${LNAME[o.layer]} — right-click (or T / B) to switch layer with a via`); return false; }
     const seg = bend(last, [sp.x, sp.y]), bad = checkClear([last].concat(seg), R.w, R);
-    if (bad) { App.toast(`✋ Not placed: ${bad.d <= 0 ? 'it would short' : 'only ' + bad.d.toFixed(3) + ' mm'} to ${bad.what} (needs ${+bad.need.toFixed(3)} mm) — go around it, try the other bend (/) or change layer (right-click)`, 4500); return false; }
+    if (bad && !ui.free) { App.toast(`✋ Not placed: ${bad.d <= 0 ? 'it would short' : 'only ' + bad.d.toFixed(3) + ' mm'} to ${bad.what} (needs ${+bad.need.toFixed(3)} mm) — go around it, try the other bend (/) or change layer (right-click)`, 4500); return false; }
     for (const q of seg) R.pts.push(q);
     const same = Math.hypot(sp.x - last[0], sp.y - last[1]) < 1e-6;
     // ending on copper (pad / via / track) finishes the track
@@ -238,7 +239,7 @@ const PcbView = (() => {
     to = to || (R.layer === 'F' ? 'B' : 'F');
     if (to === R.layer || Pcb.rules().layers === 1) return;
     const p = R.pts[R.pts.length - 1];
-    const bad = viaProblem(p, R.net);
+    const bad = ui.free ? null : viaProblem(p, R.net);
     if (bad) { App.toast(`✋ No via here: ${bad.d <= 0 ? 'it would short' : 'only ' + bad.d.toFixed(3) + ' mm'} to ${bad.what} (needs ${+bad.need.toFixed(3)} mm) — click a free spot first, then right-click`, 4500); return; }
     if (R.pts.length >= 2) R.done.push({ layer: R.layer, w: R.w, pts: R.pts });
     R.vias.push({ x: p[0], y: p[1] });
@@ -360,7 +361,7 @@ const PcbView = (() => {
     if (ui.tool === 'via') {
       const sp = snapPoint(pt, null), R0 = Pcb.rules();
       if (Pcb.rules().layers === 1) { App.toast('Single-layer rules: vias are disabled'); return; }
-      const bad = viaProblem([sp.x, sp.y], sp.obj ? sp.obj.net || null : null, R0);
+      const bad = ui.free ? null : viaProblem([sp.x, sp.y], sp.obj ? sp.obj.net || null : null, R0);
       if (bad) { App.toast(`✋ No via here: ${bad.d <= 0 ? 'it would short' : 'only ' + bad.d.toFixed(3) + ' mm'} to ${bad.what} (needs ${+bad.need.toFixed(3)} mm)`, 4500); return; }
       Model.mutate(() => Model.S.pcb.vias.push({ net: sp.obj ? sp.obj.net || null : null, x: sp.x, y: sp.y, d: R0.viaDiameter, drill: R0.viaDrill, manual: true }));
       return;
@@ -780,7 +781,7 @@ const PcbView = (() => {
     if (ui.tool === 'track' || ui.tool === 'arc') s += ` · width ${R ? R.w : curWidth(null)} mm · ${ui.angle === 'any' ? 'any angle' : ui.angle + '°'}`;
     if (R) s += ` · net <b>${esc(R.net || '(none)')}</b>`;
     if (R && R.bad) s += ` · <span class="bad">⚠ ${R.bad.d <= 0 ? 'short' : 'clearance ' + R.bad.d.toFixed(3) + ' mm'} to ${esc(R.bad.what)} (rule ${R.bad.need || Pcb.rules().clearance})</span>`;
-    if (ui.tool === 'track') s += ` <span class="muted">· right-click (or V) via + other layer · Space angle · / bend · Backspace undo · Esc or double-click finish · rule breaks are not placed</span>`;
+    if (ui.tool === 'track') s += ` <span class="muted">· right-click (or V) via + other layer · Space angle · / bend · Backspace undo · Esc or double-click finish · ${ui.free ? '<b>no rules</b> (DRC checks later)' : 'rule breaks are not placed'}</span>`;
     if (ui.tool === 'arc') s += ` <span class="muted">· click start, click end, then click to set the curve · Esc cancels</span>`;
     if (ui.tool === 'pour' || ui.tool === 'outline' || ui.tool === 'keepout') s += ` <span class="muted">· click corners, click the first corner (or Enter) to close · Backspace removes a corner · Esc cancels</span>`;
     el.innerHTML = s;

@@ -233,6 +233,15 @@ const EasyEDA = (() => {
       shapes.push(`COPPERAREA~${u(0.254)}~${cuL(p.layer)}~${clean(p.net)}~${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${u(Pcb.pourCl(Pcb.rules(), p))}~solid~${id()}~direct~none~${fill}~0`);
     }
     try { exportPcb.warnings = pourSplits(fills, idx); } catch (e) { }
+    // free silkscreen text and the board name (part designators travel inside their footprints). EasyEDA anchors a
+    // text at the start of its baseline and turns it counter-clockwise, as CircuitPilot's labels do
+    for (const side of ['F', 'B']) for (const l of Pcb.silkLabels(side)) {
+      if (l.kind !== 'text' && l.kind !== 'board') continue;
+      const r0 = l.rect0, rot = ((+l.rot || 0) % 360 + 360) % 360, bot = side === 'B';
+      let ax = bot ? r0[2] - 0.1 : r0[0] + 0.1, ay = r0[3] - 0.1;
+      if (rot) [ax, ay] = Pcb.rotPt(ax, ay, (r0[0] + r0[2]) / 2, (r0[1] + r0[3]) / 2, rot);
+      shapes.push(`TEXT~L~${X(ax)}~${Y(ay)}~${u(l.w)}~${rot}~${bot ? 1 : 0}~${bot ? 4 : 3}~~${u(l.h)}~${clean(l.text)}~~~${id()}~0`);
+    }
     const poly = Pcb.boardPoly(), loop = poly.concat([poly[0]]);
     shapes.push(`TRACK~1~10~~${loop.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${id()}~0`);
     const layers = ['1~TopLayer~#FF0000~true~true~true~', '2~BottomLayer~#0000FF~true~false~true~', '3~TopSilkLayer~#FFCC00~true~false~true~', '4~BottomSilkLayer~#66CC33~true~false~true~',
@@ -266,7 +275,7 @@ const EasyEDA = (() => {
 
   function importPcb(json) {
     const j = unwrap(json), log = [], P = v => +v * U;
-    const pads = [], libs = [], tracks = [], vias = [], holes = [], outline = [], areas = [];
+    const pads = [], libs = [], tracks = [], vias = [], holes = [], outline = [], areas = [], texts = [];
     const copper = l => l === '1' ? 'F' : l === '2' ? 'B' : null;
     const arcPoly = (path, w) => pathToPolys(path, 6).map(pl => pl.map(q => [P(q[0]), P(q[1])]));
     function padRec(f) {
@@ -305,6 +314,8 @@ const EasyEDA = (() => {
         const x = P(f[1]), y = P(f[2]), w = P(f[3]), h = P(f[4]); outline.push([[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]]);
       } else if (k === 'VIA') vias.push({ x: P(f[1]), y: P(f[2]), d: P(f[3]), net: f[4] || '', drill: 2 * (+f[5] || 0) * U });
       else if (k === 'HOLE') holes.push({ x: P(f[1]), y: P(f[2]), d: 2 * (+f[3] || 0) * U });
+      // free text on a silkscreen layer: x / y = start of the baseline (end when mirrored on the bottom)
+      else if (k === 'TEXT' && (f[7] === '3' || f[7] === '4') && String(f[10] || '').trim()) texts.push({ text: String(f[10]).trim(), x: P(f[2]), y: P(f[3]), h: P(f[9]) || 1.2, rot: ((+f[5] || 0) % 360 + 360) % 360, side: f[7] === '4' ? 'B' : 'F' });
       // COPPERAREA points: EasyEDA writes a plain point list "x y x y …" (older CircuitPilot exports: an SVG path)
       else if (k === 'COPPERAREA' && copper(f[2])) { const pl = pathToPolys(/[a-zA-Z]/.test(f[4]) ? f[4] : 'M ' + f[4] + ' Z', 6)[0]; if (pl && pl.length >= 3) areas.push({ net: f[3] || '', layer: copper(f[2]), pts: pl.map(q => [P(q[0]), P(q[1])]), clearance: P(f[5] || 0) }); }
     }
@@ -388,6 +399,11 @@ const EasyEDA = (() => {
       traces: tracks.map(t => ({ net: netName(t.net), layer: t.layer, w: n4(t.w), pts: t.pts.map(mv) })),
       vias: vias.map(v => ({ net: netName(v.net), x: mv([v.x, v.y])[0], y: mv([v.x, v.y])[1], d: n4(v.d), drill: n4(v.drill || 0.3) })),
       holes: holes.map(h => ({ x: mv([h.x, h.y])[0], y: mv([h.x, h.y])[1], d: n4(h.d) })),
+      texts: texts.map(t => {   // CircuitPilot text: x / y = middle of the text, before turning
+        const tw = Pcb.textWidth(t.text, t.h), cx = t.side === 'B' ? t.x - tw / 2 : t.x + tw / 2, cy = t.y - t.h / 2;
+        const [mx, my] = t.rot ? Pcb.rotPt(cx, cy, t.x, t.y, t.rot) : [cx, cy], q = mv([mx, my]);
+        return Object.assign({ text: t.text, x: q[0], y: q[1], h: n4(t.h), side: t.side }, t.rot ? { rot: t.rot } : {});
+      }),
       pours: areas.filter(a => !a.net || S.nets[netName(a.net)]).map(a => Object.assign({ net: netName(a.net) || 'GND', layer: a.layer, pts: a.pts.map(mv) }, a.clearance > 0 ? { clearance: n4(a.clearance) } : {})),
       routed: {},
     };

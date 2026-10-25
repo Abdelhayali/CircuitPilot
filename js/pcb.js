@@ -2031,15 +2031,149 @@ const Pcb = (() => {
     }
     return on.length ? `Via at (${v.x}, ${v.y}) touches SMD pad ${on.join(', ')} — move it at least ${(v.d / 2 + R.clearance).toFixed(2)} mm from the pad edge (rule: no via in pad)` : null;
   }
+  // copper, holes and the edge a new via / track must keep clear of (the 2D editor's live checks: pcbview obstacles)
+  function viaObstacles(net, box) {
+    const S = Model.S, R = rules(), idx = Model.pinIndex(), out = [], L2 = R.layers === 1 ? ['F'] : ['F', 'B'];
+    const inBox = b => !box || !(b[0] > box[2] || b[2] < box[0] || b[1] > box[3] || b[3] < box[1]);
+    const push = o => { if (inBox(bboxOf(o.s))) out.push(o); };
+    for (const c of placed()) for (const p of padsOf(c, idx)) push({ s: padShape(p), what: 'pad ' + p.key, net: p.net || null, kind: 'pad', layers: padCu(p, L2), drill: p.drill, ring: p.drill ? (Math.min(p.w, p.h) - p.drill) / 2 : 0, c: [p.x, p.y], p });
+    for (const v of S.pcb.vias) push({ s: { k: 'circ', c: [v.x, v.y], r: v.d / 2 }, what: `via (${v.x}, ${v.y})${v.net ? ' ' + v.net : ''}`, net: v.net || null, kind: 'via', layers: L2, drill: v.drill || R.viaDrill, ring: (v.d - (v.drill || R.viaDrill)) / 2, c: [v.x, v.y] });
+    for (const t of S.pcb.traces) for (let i = 1; i < t.pts.length; i++) push({ s: { k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, what: `${t.net || ''} track (${t.layer === 'B' ? 'bottom' : 'top'})`, net: t.net || null, kind: 'track', layers: [t.layer] });
+    (S.pcb.holes || []).forEach((h, i) => push({ s: { k: 'circ', c: [h.x, h.y], r: h.d / 2 }, what: 'mounting hole ' + (i + 1), net: null, kind: 'hole', layers: L2, drill: h.d, ring: 0, c: [h.x, h.y] }));
+    const bp = boardPoly(); for (let i = 0; i < bp.length; i++) out.push({ s: { k: 'seg', a: bp[i], b: bp[(i + 1) % bp.length], r: 0 }, what: 'board edge', net: null, kind: 'edge', layers: L2 });
+    return out;
+  }
+  const foreign = (o, net) => o.kind === 'edge' || o.kind === 'hole' || !net || o.net !== net;
+  // what a via at (x, y) of `net` breaks (null when it fits): copper gaps on both layers, hole to track, hole to hole, edge, keep-outs, via in pad
+  function viaSpotProblem(x, y, net, obs, R = rules(), d = R.viaDiameter, drill = R.viaDrill) {
+    if (!inPoly(x, y, boardPoly())) return { what: 'outside the board', gap: -1, need: 0 };
+    const vs = { k: 'circ', c: [x, y], r: d / 2 }, ring = (d - drill) / 2; let worst = null;
+    const bad = (gap, need, what) => { if (gap < need - 1e-3 && (!worst || gap - need < worst.gap - worst.need)) worst = { gap: +gap.toFixed(3), need: +need.toFixed(3), what }; };
+    for (const o of obs) {
+      if (o.drill) bad(Math.hypot(x - o.c[0], y - o.c[1]) - drill / 2 - o.drill / 2, R.minHoleToHole, o.what + ' (hole to hole)');
+      if (!foreign(o, net)) continue;
+      const need = o.kind === 'track' ? Math.max(viaCl(R), (+R.minHoleToTrack || 0) - ring) : o.kind === 'edge' ? R.edgeClearance
+        : o.kind === 'hole' ? Math.max(R.clearance, +R.minHoleToTrack || 0) : Math.max(viaCl(R), o.kind === 'pad' ? (o.drill ? pthGap(R, o.p) : padCl(R)) : 0);
+      bad(shapeDist(vs, o.s), need, o.what);
+    }
+    for (const k of keepouts()) if (k.vias) bad(koDist(k, x, y) - d / 2, 0.05, `keep-out "${k.name}"`);
+    if (!worst && net) { const vp = viaPadProblem({ net, x, y, d, drill }, R); if (vp) worst = { gap: 0, need: 0, what: vp.replace(/^Via at \([^)]*\) touches /, '').replace(/ — .*$/, '') + ' (no via in pad)' }; }
+    return worst;
+  }
+  // what a straight track a→b of `net` on `layer` breaks (pads, vias and drill holes keep the router's larger gaps)
+  function trackSpotProblem(a, b, w, layer, net, obs, R = rules(), skip) {
+    const seg = { k: 'seg', a, b, r: w / 2 }; let worst = null;
+    for (const o of obs) {
+      if (!foreign(o, net) || o === skip || !o.layers.includes(layer)) continue;
+      const need = o.kind === 'pad' ? (o.drill ? Math.max(padCl(R), (+R.minPthToTrack || 0) - o.ring) : padCl(R)) : o.kind === 'via' ? Math.max(viaCl(R), (+R.minHoleToTrack || 0) - o.ring)
+        : o.kind === 'hole' ? Math.max(R.clearance, +R.minHoleToTrack || 0) : o.kind === 'edge' ? R.edgeClearance : R.clearance;
+      const gap = shapeDist(seg, o.s); if (gap < need - 1e-3 && (!worst || gap - need < worst.gap - worst.need)) worst = { gap: +gap.toFixed(3), need: +need.toFixed(3), what: o.what };
+    }
+    if (!worst) for (const k of keepouts()) if (k.tracks && koOn(k, layer)) {
+      const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.05));
+      for (let i = 0; i <= n; i++) if (koDist(k, a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n) < w / 2) { worst = { gap: 0, need: w / 2, what: `keep-out "${k.name}"` }; break; }
+    }
+    return worst;
+  }
+  // is pad `key` in the biggest copper group of its net (or the net complete)?
+  const padJoined = (net, key) => { const c = connectivity()[net]; if (!c || c.complete) return true; const main = c.groups.reduce((a, g) => g.length > a.length ? g : a, []); return main.some(p => p.key === key); };
+  const say = b => `${b.gap <= 0 ? 'it would touch' : 'only ' + b.gap + ' mm to'} ${b.what}${b.need ? ` (needs ${b.need} mm)` : ''}`;
+  // The closest legal via spot near a pad (or a point), placed; from a pad also a short straight track on the pad's layer.
+  // From a pad of a net with a pour on the other layer, spots on that pour come first and the result is checked with connectivity().
+  function viaNear(o, R = rules()) {
+    const S = Model.S, nearPad = typeof o.near === 'string' ? findPad(o.near) : null;
+    const p0 = nearPad ? [nearPad.x, nearPad.y] : Array.isArray(o.near) ? o.near.map(Number) : [+o.near.x, +o.near.y];
+    if (!p0.every(isFinite)) throw new Error('near must be a pad ("U2.9") or a point [x, y] (board mm)');
+    if (nearPad && !nearPad.net && !o.net) throw new Error(`${nearPad.key} is not on any net — connect it in the schematic first (connect), or give net`);
+    const net = o.net || (nearPad && nearPad.net) || null; if (net && !S.nets[net]) throw new Error(`No net "${net}"`);
+    if (nearPad && nearPad.net && net !== nearPad.net) throw new Error(`${nearPad.key} is on net ${nearPad.net}, not ${net}`);
+    const d = +(o.diameter || R.viaDiameter), drill = +(o.drill || R.viaDrill), maxD = Math.max(0.2, Math.min(15, +(o.max_distance ?? 3))), w = net ? netWidth(R, net) : R.traceWidth;
+    const layer = nearPad ? (nearPad.layer || 'F') : null, other = layer === 'B' ? 'F' : 'B';
+    const reach = maxD + d + 2, obs = viaObstacles(net, [p0[0] - reach, p0[1] - reach, p0[0] + reach, p0[1] + reach]);
+    const padObs = nearPad && obs.find(q => q.p && q.p.key === nearPad.key);
+    // the net's pour on the other layer (from a pad) or on any layer (from a point), as connectivity() sees it
+    const pours = (S.pcb.pours || []).filter(pr => net && pr.net === net && (!layer || pr.layer === other)).map(pr => pourRaster(Object.assign({}, pr, { _margin: 0.075 })));
+    const onPour = (x, y) => { for (let i = 0; i < pours.length; i++) { const l = pours[i].at(x, y); if (l) return i * 1e6 + l; } return 0; };
+    const step = Math.max(0.025, Math.min(0.1, +(o.grid || 0.05))), cand = [];
+    for (let dy = -maxD; dy <= maxD + 1e-9; dy += step) for (let dx = -maxD; dx <= maxD + 1e-9; dx += step) { const r = Math.hypot(dx, dy); if (r <= maxD) cand.push([+(p0[0] + dx).toFixed(3), +(p0[1] + dy).toFixed(3), r]); }
+    cand.sort((a, b) => a[2] - b[2]);
+    const blockers = {}, note = what => { blockers[what] = (blockers[what] || 0) + 1; }, legal = [];
+    for (const [x, y, r] of cand) {
+      if (nearPad && padDist(nearPad, x, y) < d / 2 + 0.1) continue;   // on (or right at the edge of) the pad itself: solder would wick in
+      const b = viaSpotProblem(x, y, net, obs, R, d, drill); if (b) { if (r < maxD * 0.6) note(b.what); continue; }
+      const tb = nearPad ? trackSpotProblem([nearPad.x, nearPad.y], [x, y], w, layer, net, obs, R, padObs) : null;
+      if (tb) { if (r < maxD * 0.6) note('track to the via: ' + tb.what); continue; }
+      legal.push([x, y, r, pours.length ? onPour(x, y) : 0]);
+    }
+    const top = Object.entries(blockers).sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => e[0]), at = nearPad ? nearPad.key : `(${p0.join(', ')})`;
+    if (!legal.length) throw new Error(`No legal via spot within ${maxD} mm of ${at}${net ? ` (${net})` : ''}: ${top.length ? 'blocked by ' + top.join('; ') : 'too close to the pad itself'}. Try max_distance ${Math.min(15, maxD + 2)}, move that copper (remove_tracks + route again / move a part), or draw add_track from ${at} to a spot you choose`);
+    const place = (x, y) => {
+      const v = { net, x, y, d, drill, manual: true }, tr = nearPad ? { net, layer, w: +w.toFixed(4), pts: [[+nearPad.x.toFixed(4), +nearPad.y.toFixed(4)], [x, y]], manual: true } : null;
+      S.pcb.vias.push(v); if (tr) S.pcb.traces.push(tr);
+      return { v, tr, undo: () => { S.pcb.vias.splice(S.pcb.vias.indexOf(v), 1); if (tr) S.pcb.traces.splice(S.pcb.traces.indexOf(tr), 1); } };
+    };
+    let pick = null;
+    if (nearPad && net && pours.length && !padJoined(net, nearPad.key)) {
+      // spots on the other layer's pour first; one try per pour island (same island, same result)
+      const tried = new Set();
+      for (const c of legal) {
+        if (!c[3] || tried.has(c[3]) || tried.size >= 10) continue; tried.add(c[3]);
+        const t = place(c[0], c[1]); if (padJoined(net, nearPad.key)) { pick = { c, t }; break; } t.undo();
+      }
+      if (!pick) throw new Error(`${legal.length} legal via spots within ${maxD} mm of ${at}, but ${tried.size ? `none of them (${tried.size} pour pieces tried) joins it to the rest of ${net}` : `none is on the ${other === 'B' ? 'bottom' : 'top'} ${net} pour`} — try max_distance ${Math.min(15, maxD + 2)}, add_copper_pour {net: "${net}", layer: "both"}, or draw add_track from ${at} to ${net} copper`);
+    } else { const c = legal.find(q => q[3]) || legal[0]; pick = { c, t: place(c[0], c[1]) }; }
+    const cn = net ? connectivity()[net] : null;
+    return {
+      net, via: { index: S.pcb.vias.indexOf(pick.t.v), x: pick.c[0], y: pick.c[1], diameter: d, drill }, distance_mm: +pick.c[2].toFixed(3),
+      track: pick.t.tr ? { index: S.pcb.traces.indexOf(pick.t.tr), layer: layer === 'B' ? 'bottom' : 'top', width: pick.t.tr.w, points: pick.t.tr.pts } : null,
+      on_pour: !!pick.c[3], pad_joined: nearPad && net ? padJoined(net, nearPad.key) : undefined, net_complete: cn ? cn.complete : undefined, islands_left: cn ? cn.groups.length : undefined,
+      ...(costsExtra({ d, drill }) ? { cost_note: costNote({ d, drill }) } : {}),
+    };
+  }
+  // Every pad group of a pour net that connectivity() finds cut off from the main group gets a via (+ short track) from one of
+  // its pads to the other layer's pour (viaNear); groups that cannot be joined say why.
+  function connectPadsToPour(o = {}) {
+    const S = Model.S, R = rules(), net = o.net || 'GND';
+    if (R.layers === 1) throw new Error('The board has 1 copper layer — no vias');
+    if (!S.nets[net]) throw new Error(`No net "${net}"`);
+    if (!(S.pcb.pours || []).some(p => p.net === net)) throw new Error(`Net ${net} has no copper pour — add_copper_pour {net: "${net}", layer: "both"} first (or route it: route_pcb)`);
+    const c0 = connectivity()[net];
+    if (!c0 || c0.complete) return { net, net_complete: true, groups_fixed: 0, note: `${net} is already connected — nothing to do` };
+    const before = new Set(drc().violations.map(v => v.msg)), report = [], keys = g => g.map(p => p.key).join();
+    for (let round = 0; round < 40; round++) {
+      const c = connectivity()[net]; if (!c || c.complete) break;
+      const main = c.groups.reduce((a, g) => g.length > a.length ? g : a, []);
+      const g = c.groups.find(gr => gr !== main && !report.some(r => r.pads.join() === keys(gr)));
+      if (!g) break;
+      const entry = { pads: g.map(p => p.key) }, tried = [];
+      for (const p of g.slice().sort((a, b) => (a.drill ? 1 : 0) - (b.drill ? 1 : 0))) {   // SMD pads first
+        try {
+          const r = viaNear({ near: p.key, net, max_distance: o.max_distance, diameter: o.diameter, drill: o.drill }, R);
+          if (r.pad_joined === false) { tried.push(`${p.key}: via placed but still not joined`); continue; }
+          Object.assign(entry, { done: true, from: p.key, via: { x: r.via.x, y: r.via.y }, track: r.track && r.track.points, distance_mm: r.distance_mm }); break;
+        } catch (e) { tried.push(`${p.key}: ${e.message}`); }
+      }
+      if (!entry.done) entry.why_not = tried.slice(0, 3);
+      report.push(entry);
+    }
+    const c = connectivity()[net], fresh = drc().violations.filter(v => !before.has(v.msg) && v.type !== 'unrouted').slice(0, 20);
+    return {
+      net, groups: report, groups_fixed: report.filter(r => r.done).length, net_complete: !!(c && c.complete), islands_left: c ? c.groups.length : 0, new_drc_problems: fresh,
+      note: c && !c.complete ? `Still ${c.groups.length} separate ${net} groups — for the rest: add_via {near: "PAD", max_distance: 5}, add_track from the pad to ${net} copper, move parts to make room, or reroute` : fresh.length ? 'New DRC problems — check them (run_drc) or undo' : undefined,
+    };
+  }
   function addVia(o = {}) {
     const S = Model.S, R = rules();
     if (R.layers === 1) throw new Error('The board has 1 copper layer — no vias');
-    const x = +o.x, y = +o.y; if (!isFinite(x) || !isFinite(y)) throw new Error('x and y (board mm) are needed');
+    if (o.near != null) return viaNear(o, R);
+    const x = +o.x, y = +o.y; if (!isFinite(x) || !isFinite(y)) throw new Error('x and y (board mm) are needed — or near: "U2.9" (a pad) / near: [x, y] to let CircuitPilot find the closest legal spot');
     if (o.net && !S.nets[o.net]) throw new Error(`No net "${o.net}"`);
     const v = { net: o.net || null, x: +x.toFixed(4), y: +y.toFixed(4), d: +(o.diameter || R.viaDiameter), drill: +(o.drill || R.viaDrill), manual: true };
-    const bad = viaPadProblem(v, R); if (bad) throw new Error(bad);
+    const bad = viaPadProblem(v, R); if (bad) throw new Error(bad + ` — or add_via {near: [${v.x}, ${v.y}]${v.net ? `, net: "${v.net}"` : ''}} finds the closest legal spot`);
+    const rb = viaSpotProblem(v.x, v.y, v.net, viaObstacles(v.net, [x - 3, y - 3, x + 3, y + 3]), R, v.d, v.drill);
     S.pcb.vias.push(v);
-    return Object.assign({ index: S.pcb.vias.length - 1 }, costsExtra(v) ? { note: costNote(v) } : {});
+    const i = S.pcb.vias.length - 1;
+    return Object.assign({ index: i }, costsExtra(v) ? { note: costNote(v) } : {}, rb ? { warning: `This via breaks a rule: ${say(rb)} — remove_tracks {vias: [${i}]}, then add_via {near: [${v.x}, ${v.y}]${v.net ? `, net: "${v.net}"` : ''}} for the closest legal spot` } : {});
   }
   const trackLen = t => { let l = 0; for (let i = 1; i < t.pts.length; i++) l += Math.hypot(t.pts[i][0] - t.pts[i - 1][0], t.pts[i][1] - t.pts[i - 1][1]); return +l.toFixed(2); };
   function trackList(o = {}) {
@@ -2624,7 +2758,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

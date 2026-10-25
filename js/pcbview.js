@@ -682,10 +682,12 @@ const PcbView = (() => {
       }
     }
     if (vis('OL')) out.push(`<path d="${bpath}" fill="none" stroke="${col('OL')}" stroke-width="0.15" pointer-events="none"/>`);
+    // flex stiffeners: dashed purple outlines
+    const fx = S.pcb.flex; if (fx && fx.on) for (const st of fx.stiffeners || []) out.push(`<path d="M${st.pts.map(q => q.join(' ')).join('L')}Z" fill="#a46bff" fill-opacity="0.08" stroke="#a46bff" stroke-width="0.12" stroke-dasharray="0.5 0.3" pointer-events="none"><title>${esc(st.name)} · ${st.material} ${st.thickness} mm · ${st.side}</title></path>`);
     Pcb.keepouts().forEach((k, i) => {
       const d = `M${k.pts.map(q => q.join(' ')).join('L')}Z`, on = ui.item && ui.item.k === 'ko' && ui.item.i === i;
       out.push(`<path d="${d}" fill="url(#kohatch)" stroke="none" pointer-events="none" opacity="0.5"/>`);
-      out.push(`<path data-k="ko" data-i="${i}" class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="#ff5a5a" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="stroke"><title>Keep-out "${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')}</title></path>`);
+      out.push(`<path ${k.auto ? '' : `data-k="ko" data-i="${i}" `}class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="#ff5a5a" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="${k.auto ? 'none' : 'stroke'}"><title>${k.auto ? 'Automatic keep-out (rule epKeepout) ' : 'Keep-out '}"${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')}</title></path>`);
     });
     out.push(`<g id="prats">${ratsHtml()}</g>`);
     if (vis('DRC') && ui.drc) for (const v of ui.drc.violations) if (v.x != null) out.push(`<g class="drcmark" transform="translate(${v.x} ${v.y})" stroke="${v.severity === 'error' ? col('DRC') : '#f0b429'}"><circle r="0.9" fill="none" stroke-width="0.12"/><path d="M-0.45 -0.45L0.45 0.45M0.45 -0.45L-0.45 0.45" stroke-width="0.14"/><title>${esc(v.msg)}</title></g>`);

@@ -366,7 +366,7 @@ const Shape3D = (() => {
   // ---------- running a script ----------
   const HELP = `3D SCRIPT API (JavaScript; units mm; Z up). Build shapes, then register printable parts with part(name, shape, options).
 COORDINATES: origin = centre of the PCB outline, X right, Y up (board "top" edge = +Y), Z = 0 at the PCB bottom face; PCB top at z = pcb.thickness.
-CONTEXT: pcb = {w, h, thickness, outline:[[x,y],…], holes:[{x,y,d}], parts:[{ref,type,value,x0,y0,x1,y1,cx,cy,h,side:'top'|'bottom',edge:'left'|'right'|'front'|'back'|null,plug}]} or null when there is no PCB.
+CONTEXT: pcb = {w, h, thickness, shape:'round'|'ellipse'|'rect'|'rounded'|'polygon', radius (min(w,h)/2), center:[0,0], outline:[[x,y],…], holes:[{x,y,d}], parts:[{ref,type,value,x0,y0,x1,y1,cx,cy,h,side:'top'|'bottom',edge:'left'|'right'|'front'|'back'|null,plug, pads:[{num,net,x,y,w,h,shape,drill}]}]} or null when there is no PCB. part("E1") → that part; pad("E1.1") → that pad (electrode plates, contacts). Use these instead of numbers so the enclosure follows a board resize or a moved part.
   Component boxes: x0..x1, y0..y1; top parts span z = pcb.thickness … pcb.thickness + h, bottom parts z = -h … 0. edge = board edge a connector opens to (front = -Y, back = +Y).
 2D: square([w,h],{center}), rect(w,h) (centred), circle(r|{d,fn}), ellipse(rx,ry), roundedRect(w,h,r) (centred), polygon([[x,y],…]), hull2d(...shapes), pcbOutline(offset=0)
     2D methods: .translate([x,y]) .rotate(deg) .scale(s|[sx,sy]) .mirror([x,y]) .offset(r) (outward > 0) .bounds .area .extrude(h,{center,scale}) .revolve({angle,fn})
@@ -580,9 +580,14 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       const x0 = p.x0 - ox, x1 = p.x1 - ox, y0 = p.y0 - oy, y1 = p.y1 - oy;
       let edge = null;
       if (p.edge) { const d = [['left', x0 + w / 2], ['right', w / 2 - x1], ['front', y0 + h / 2], ['back', h / 2 - y1]].sort((a, b) => a[1] - b[1]); edge = d[0][0]; }
-      return { ref: p.ref, type: p.type, value: p.value, x0: r(x0), y0: r(y0), x1: r(x1), y1: r(y1), cx: r((x0 + x1) / 2), cy: r((y0 + y1) / 2), h: p.h, side: p.bottom ? 'bottom' : 'top', edge, plug: !!(p.edge && p.edge.plug) };
+      // pads in script coordinates too (electrode plates, test pads, contacts): no more hard-coded positions
+      let pads = [];
+      try { if (p.c && typeof Pcb !== 'undefined') pads = Pcb.padsOf(p.c, Model.pinIndex()).map(q => ({ num: q.num, net: q.net || null, x: r(q.x - ox), y: r(-q.y - oy), w: r(q.w), h: r(q.h), shape: q.shape || 'rect', drill: q.drill || 0 })); } catch (e) { pads = []; }
+      return { ref: p.ref, type: p.type, value: p.value, x0: r(x0), y0: r(y0), x1: r(x1), y1: r(y1), cx: r((x0 + x1) / 2), cy: r((y0 + y1) / 2), h: p.h, side: p.bottom ? 'bottom' : 'top', edge, plug: !!(p.edge && p.edge.plug), pads };
     });
-    return { pcb: { w: r(w), h: r(h), thickness: L.P.pcbThickness, outline: L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), holes: L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts }, origin: [ox, oy, L.pcbZ] };
+    // board shape in words, and the radius of a round board (so scripts follow a resize)
+    const sh = (typeof Model !== 'undefined' && Model.S.board.shape) || { type: 'rect' }, shape = sh.type === 'ellipse' ? (Math.abs(w - h) < 0.01 ? 'round' : 'ellipse') : sh.type === 'polygon' ? 'polygon' : sh.type === 'rounded' ? 'rounded' : 'rect';
+    return { pcb: { w: r(w), h: r(h), thickness: L.P.pcbThickness, shape, radius: r(Math.min(w, h) / 2), center: [0, 0], outline: L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), holes: L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts }, origin: [ox, oy, L.pcbZ] };
   }
 
   function run(code, ctx = {}, opts = {}) {
@@ -596,6 +601,8 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       cube, box: cube, roundedBox, cylinder, sphere, torus, extrude, linearExtrude: extrude, revolve, rotateExtrude: revolve, hull, union, difference, intersection,
       pcbOutline: (off = 0) => { if (!pcb) throw new Error('pcbOutline(): this project has no PCB yet'); const s = new Shape2D(pcb.outline); return off ? s.offset(off) : s; },
       board: (extra = 0) => { if (!pcb) throw new Error('board(): this project has no PCB yet'); return extrude(lib.pcbOutline(extra), pcb.thickness); },
+      part: ref => { if (!pcb) throw new Error('part(): this project has no PCB yet'); const q = pcb.parts.find(x => x.ref === ref); if (!q) throw new Error(`part(): no part ${ref} on the board`); return q; },
+      pad: key => { if (!pcb) throw new Error('pad(): this project has no PCB yet'); const i = String(key).lastIndexOf('.'), q = pcb.parts.find(x => x.ref === String(key).slice(0, i)), d = q && q.pads.find(x => String(x.num) === String(key).slice(i + 1)); if (!d) throw new Error(`pad(): no pad ${key} (use "REF.PIN")`); return d; },
       partBoxes: (o = {}) => {
         if (!pcb) throw new Error('partBoxes(): this project has no PCB yet');
         const c = o.clearance ?? 0.5, ps = pcb.parts.filter(p => !o.side || p.side === o.side);

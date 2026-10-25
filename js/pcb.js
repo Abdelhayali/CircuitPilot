@@ -689,9 +689,10 @@ const Pcb = (() => {
       const pts = []; for (const c of placed()) if (!own.has(c.ref)) for (const p of padsOf(c, idx)) if (nets.has(p.net)) pts.push([p.x, p.y]);
       T = pts.length ? [pts.reduce((a, q) => a + q[0], 0) / pts.length, pts.reduce((a, q) => a + q[1], 0) / pts.length] : reg ? [(reg[0] + reg[2]) / 2, (reg[1] + reg[3]) / 2] : [S.board.w / 2, S.board.h / 2];
     }
-    const step = +o.step || 0.25, cand = [];
-    for (let y = 0; y <= S.board.h; y += step) for (let x = 0; x <= S.board.w; x += step) cand.push([x, y, Math.hypot(x - T[0], y - T[1])]);
-    cand.sort((a, b) => a[2] - b[2]);
+    const step = +o.step || 0.25, grid = [];
+    for (let y = 0; y <= S.board.h; y += step) for (let x = 0; x <= S.board.w; x += step) grid.push([x, y]);
+    const near = t => grid.map(q => [q[0], q[1], Math.hypot(q[0] - t[0], q[1] - t[1])]).sort((a, b) => a[2] - b[2]);
+    const cand = near(T);
     const moves = [];
     if (o.group) {
       const b0 = cs.map(c => fpBox(c)).reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]);
@@ -704,16 +705,32 @@ const Pcb = (() => {
       for (const [c, x0, y0] of start) { c.pcb.x = x0; c.pcb.y = y0; }
       throw new Error('No free area on the board is big enough for these parts together — grow the board (set_board_shape) or place them one by one');
     }
-    const failed = [];
-    for (const c of cs) {
+    const failed = [], kept = [], idx2 = Model.pinIndex();
+    // each part heads for what it connects to (signal nets first, else its supply pin), not for the middle of the whole
+    // list: a block's parts stay next to their own IC instead of being scattered
+    const targetFor = c => {
+      if (o.near) return T;
+      const sig = new Set(), sup = new Set();
+      for (const p of padsOf(c, idx2)) if (p.net) { if (!Model.isPower(p.net)) sig.add(p.net); else if (!Model.isGround(p.net)) sup.add(p.net); }
+      const nets = sig.size ? sig : sup, pts = [];
+      for (const q of placed()) if (q !== c && (!own.has(q.ref) || placedNow.has(q.ref))) for (const p of padsOf(q, idx2)) if (nets.has(p.net)) pts.push([p.x, p.y]);
+      return pts.length ? [pts.reduce((a, q) => a + q[0], 0) / pts.length, pts.reduce((a, q) => a + q[1], 0) / pts.length] : T;
+    };
+    const placedNow = new Set();
+    // bigger parts first (the small ones fit around them); with only_overlapping (default) a part already clear of
+    // everything stays where it is
+    const order = cs.slice().sort((a, b) => { const A = fpBox(a), B = fpBox(b); return (B[2] - B[0]) * (B[3] - B[1]) - (A[2] - A[0]) * (A[3] - A[1]); });
+    for (const c of order) {
+      if (o.only_overlapping !== false && !o.near && !reg && c.pcb && free(c)) { kept.push(c.ref); placedNow.add(c.ref); fixed.push({ b: fpBox(c, gap / 2), side: isBottom(c) ? 'B' : 'F', th: thBoxes(c, gap) }); continue; }
       const x0 = c.pcb.x, y0 = c.pcb.y, r0 = c.pcb.rot || 0, rots = o.rotate === false ? [r0] : [r0, ...[0, 90, 180, 270].filter(r => r !== r0)];
       let ok = false;
-      for (const [x, y] of cand) { for (const r of rots) { c.pcb.x = +x.toFixed(3); c.pcb.y = +y.toFixed(3); c.pcb.rot = r; if (free(c)) { ok = true; break; } } if (ok) break; }
+      for (const [x, y] of (o.near ? cand : near(targetFor(c)))) { for (const r of rots) { c.pcb.x = +x.toFixed(3); c.pcb.y = +y.toFixed(3); c.pcb.rot = r; if (free(c)) { ok = true; break; } } if (ok) break; }
       if (!ok) { c.pcb.x = x0; c.pcb.y = y0; c.pcb.rot = r0; failed.push(c.ref); continue; }
       fixed.push({ b: fpBox(c, gap / 2), side: isBottom(c) ? 'B' : 'F', th: thBoxes(c, gap) });   // the next part avoids this one
-      moves.push({ ref: c.ref, x: c.pcb.x, y: c.pcb.y, rot: c.pcb.rot });
+      placedNow.add(c.ref);
+      moves.push({ ref: c.ref, x: c.pcb.x, y: c.pcb.y, rot: c.pcb.rot, moved_mm: +Math.hypot(c.pcb.x - x0, c.pcb.y - y0).toFixed(2) });
     }
-    return { placed: moves, failed: failed.length ? failed : undefined, note: failed.length ? 'No free spot for these — grow the board or make room' : 'Tracks to the moved parts need routing: route_pcb' };
+    return { placed: moves, kept_in_place: kept.length ? kept : undefined, failed: failed.length ? failed : undefined, note: failed.length ? 'No free spot for these — grow the board or make room' : 'Tracks to the moved parts need routing: route_pcb' };
   }
   // what a part blocks on the other side of the board: only its through-hole pins (pad box + gap), not its body
   const thBoxes = (c, gap = 0) => padsOf(c).filter(p => p.drill).map(p => [p.x - p.w / 2 - gap / 2, p.y - p.h / 2 - gap / 2, p.x + p.w / 2 + gap / 2, p.y + p.h / 2 + gap / 2]);
@@ -2185,6 +2202,29 @@ const Pcb = (() => {
     S.pcb.vias.push(...out);
     return { pad: pad.key, net, added: out.length, replaced: removed || undefined, grid: `${nx} × ${ny}`, pitch, via: `${d}/${drill}`, note: costsExtra({ d, drill }) ? costNote({ d, drill }) : undefined };
   }
+  // Flex PCB: S.pcb.flex = { on, thickness, stiffeners: [{ name, pts, side, material, thickness }] }. A stiffener is a
+  // rectangle, a polygon, or the area of a part (+ margin) — e.g. the solder-pad end of an electrode lead.
+  const STIFF = { PI: [0.1, 0.25], FR4: [0.1, 1.6], steel: [0.1, 0.3] };
+  function setFlex(o = {}) {
+    const S = Model.S, f = Object.assign({ on: false, thickness: 0.12, stiffeners: [] }, S.pcb.flex || {});
+    if (o.flex != null) f.on = !!o.flex; else if (o.thickness != null || o.stiffeners) f.on = true;
+    if (o.thickness != null) { const t = +o.thickness; if (!(t >= 0.05 && t <= 0.4)) throw new Error('thickness: flex board thickness in mm (JLCPCB flex: 0.11 or 0.12; 0.2 with two layers and thicker copper)'); f.thickness = t; }
+    if (o.clear_stiffeners) f.stiffeners = [];
+    for (const st of o.stiffeners || []) {
+      let pts = null;
+      if (Array.isArray(st.rect) && st.rect.length === 4) { const [x0, y0, x1, y1] = st.rect.map(Number); pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]; }
+      else if (Array.isArray(st.pts) && st.pts.length >= 3) pts = st.pts.map(q => [+q[0], +q[1]]);
+      else if (st.ref) { const c = Model.comp(st.ref); if (!c || !c.pcb) throw new Error(`stiffener: ${st.ref} is not on the PCB`); const b = fpBox(c, +st.margin || 1); pts = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]; }
+      if (!pts) throw new Error('each stiffener needs rect [x0, y0, x1, y1], pts [[x, y], …] or ref (+ margin)');
+      const material = STIFF[st.material] ? st.material : 'PI', lim = STIFF[material], thickness = +(st.thickness || (material === 'PI' ? 0.2 : material === 'FR4' ? 0.2 : 0.2));
+      if (thickness < lim[0] || thickness > lim[1]) throw new Error(`${material} stiffener thickness ${lim[0]}–${lim[1]} mm`);
+      f.stiffeners.push({ name: String(st.name || `Stiffener ${f.stiffeners.length + 1}${st.ref ? ' (' + st.ref + ')' : ''}`).slice(0, 60), pts: pts.map(q => q.map(v => +v.toFixed(3))), side: st.side === 'top' ? 'top' : 'bottom', material, thickness, ref: st.ref || undefined });
+    }
+    S.pcb.flex = f;
+    return { flex: f.on, thickness: f.thickness, stiffeners: f.stiffeners.map(s => ({ name: s.name, side: s.side, material: s.material, thickness: s.thickness, box: [Math.min(...s.pts.map(q => q[0])), Math.min(...s.pts.map(q => q[1])), Math.max(...s.pts.map(q => q[0])), Math.max(...s.pts.map(q => q[1]))] })),
+      note: f.on ? 'Gerber export adds board-Stiffener.gm2 (stiffener outlines) and flex-notes.txt; order as Flex PCB at JLCPCB and give the stiffener specs there' : undefined };
+  }
+  const boardThickness = () => { const f = Model.S.pcb && Model.S.pcb.flex; return f && f.on ? +f.thickness || 0.12 : 1.6; };
   // what a straight track a→b of `net` on `layer` breaks (pads, vias and drill holes keep the router's larger gaps)
   function trackSpotProblem(a, b, w, layer, net, obs, R = rules(), skip) {
     const seg = { k: 'seg', a, b, r: w / 2 }; let worst = null;
@@ -2570,6 +2610,12 @@ const Pcb = (() => {
       'board-B_Silkscreen.gbo': file('Legend,Bot', silk('B')),
       'board-Edge_Cuts.gm1': file('Profile,NP', (A, b) => { b.push(A('C,0.100000') + '*'); b.push(X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*'); }),
     };
+    // flex board: stiffener outlines as a mechanical layer, and the specs to give with the order
+    const flex = S.pcb.flex && S.pcb.flex.on ? S.pcb.flex : null;
+    if (flex && (flex.stiffeners || []).length) files['board-Stiffener.gm2'] = file('Other,Stiffener', (A, b) => { b.push(A('C,0.100000') + '*'); for (const st of flex.stiffeners) { b.push(X(...st.pts[0]) + 'D02*'); for (const q of st.pts.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...st.pts[0]) + 'D01*'); } });
+    if (flex) files['flex-notes.txt'] = `Flex PCB — ${S.name || 'board'}\nBoard thickness: ${flex.thickness} mm (polyimide), ${rules().layers === 1 ? '1 layer' : '2 layers'}\n` +
+      ((flex.stiffeners || []).length ? 'Stiffeners (outlines in board-Stiffener.gm2):\n' + flex.stiffeners.map(st => `  ${st.name}: ${st.material} ${st.thickness} mm on the ${st.side} side, box ${[Math.min(...st.pts.map(q => q[0])), Math.min(...st.pts.map(q => q[1])), Math.max(...st.pts.map(q => q[0])), Math.max(...st.pts.map(q => q[1]))].map(v => v.toFixed(2)).join(', ')} mm`).join('\n') + '\n' : 'No stiffeners.\n') +
+      'Order as "Flex PCB" at JLCPCB; choose the stiffener type and thickness there and attach board-Stiffener.gm2 (or note it in the remark).\n';
     // a 1-layer board has no bottom copper: its bottom files would only be empty (and confusing on the order)
     if (rules().layers === 1) {
       for (const f of ['board-B_Cu.gbl', 'board-B_Mask.gbs', 'board-B_Paste.gbp']) delete files[f];
@@ -2889,7 +2935,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

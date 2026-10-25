@@ -136,7 +136,19 @@ const DocView = (() => {
     try {
       App.toast('Building the PDF datasheet…', 20000);
       await loadLibs();
-      const d = doc(), I = await ensureImages(false), D = collect();
+      const d = doc(), I0 = await ensureImages(false), D = collect();
+      // smaller pictures for the PDF: 3D renders and enclosure views as JPEG (≤ 1600 px), drawings as PNG (≤ 2400 px)
+      // — full-size PNG renders made a datasheet tens of MB
+      const shrink = async (im, maxPx, jpeg) => {
+        if (!im || !im.url) return im;
+        const img = await new Promise(res => { const e = new Image(); e.onload = () => res(e); e.onerror = () => res(null); e.src = im.url; }); if (!img) return im;
+        const k = Math.min(1, maxPx / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        const g = c.getContext('2d'); if (jpeg) { g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height); } g.drawImage(img, 0, 0, c.width, c.height);
+        return Object.assign({}, im, { url: c.toDataURL(jpeg ? 'image/jpeg' : 'image/png', 0.82), w: c.width, h: c.height, fmt: jpeg ? 'JPEG' : 'PNG' });
+      };
+      const I = Object.assign({}, I0), photo = new Set(['pcb3d_iso', 'pcb3d_top', 'pcb3d_bottom', 'enc', 'encx']);
+      for (const k of Object.keys(I0)) if (k !== 'schs' && I0[k] && I0[k].url) I[k] = await shrink(I0[k], photo.has(k) ? 1600 : 2400, photo.has(k));
+      if (I0.schs) I.schs = await Promise.all(I0.schs.map(x => shrink(x, 2400, false)));
       const P = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
       const M = 15, PW = 210, PH = 297, CW = PW - 2 * M, date = new Date().toISOString().slice(0, 10);
       let y = 0;
@@ -147,7 +159,7 @@ const DocView = (() => {
       const h3 = t => { need(9); P.setFont('helvetica', 'bold'); P.setFontSize(10); P.setTextColor(31, 41, 55); P.text(t, M, y); y += 5; P.setFont('helvetica', 'normal'); };
       const para = (t, size = 9.5) => { P.setFontSize(size); P.setTextColor(55, 65, 81); for (const ln of P.splitTextToSize(String(t), CW)) { need(5); P.text(ln, M, y); y += size * 0.45; } y += 2.5; };
       const bullets = items => { P.setFontSize(9.5); P.setTextColor(55, 65, 81); for (const it of items) { const ls = P.splitTextToSize(it, CW - 6); need(ls.length * 4.5); P.setFillColor(...ACCENT); P.circle(M + 1.3, y - 1.2, 0.7, 'F'); ls.forEach((ln, i) => { P.text(ln, M + 5, y); y += 4.4; }); y += 0.6; } y += 2; };
-      const image = (im, maxW = CW, maxH = 110, x0 = null) => { if (!im) return 0; const r = Math.min(maxW / im.w, maxH / im.h), w = im.w * r, h = im.h * r; if (x0 == null) { need(h + 3); P.addImage(im.url, 'PNG', M + (CW - w) / 2, y, w, h, undefined, 'FAST'); y += h + 3; } else P.addImage(im.url, 'PNG', x0 + (maxW - w) / 2, y, w, h, undefined, 'FAST'); return h; };
+      const image = (im, maxW = CW, maxH = 110, x0 = null) => { if (!im) return 0; const r = Math.min(maxW / im.w, maxH / im.h), w = im.w * r, h = im.h * r; if (x0 == null) { need(h + 3); P.addImage(im.url, im.fmt || 'PNG', M + (CW - w) / 2, y, w, h, undefined, 'FAST'); y += h + 3; } else P.addImage(im.url, im.fmt || 'PNG', x0 + (maxW - w) / 2, y, w, h, undefined, 'FAST'); return h; };
       const caption = t => { P.setFontSize(8); P.setTextColor(107, 114, 128); P.text(t, PW / 2, y, { align: 'center' }); y += 6; };
       const table = (head, body, opts = {}) => { need(16); P.autoTable(Object.assign({ startY: y, head: [head], body, margin: { left: M, right: M, top: 18 }, theme: 'grid', styles: { fontSize: 8.3, cellPadding: 1.5, lineColor: [229, 231, 235], textColor: [31, 41, 55] }, headStyles: { fillColor: ACCENT, textColor: 255, fontStyle: 'bold' }, alternateRowStyles: { fillColor: [248, 250, 252] }, didDrawPage: () => drawHeader() }, opts)); y = P.lastAutoTable.finalY + 6; };
 

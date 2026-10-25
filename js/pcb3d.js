@@ -270,7 +270,7 @@ const Pcb3D = (() => {
     const [top, bot] = await Promise.all([texture('F'), texture('B')]);
     busy = false;
     root = new T.Group(); scene.add(root);
-    const th = Pcb.rules().layers ? 1.6 : 1.6, poly = Pcb.boardPoly();
+    const th = Pcb.boardThickness ? Pcb.boardThickness() : 1.6, poly = Pcb.boardPoly();   // flex boards are thin
     const shape = new T.Shape(poly.map(q => new T.Vector2(q[0], -q[1])));
     for (const hh of S.pcb.holes || []) { const p = new T.Path(); p.absarc(hh.x, -hh.y, hh.d / 2, 0, Math.PI * 2, true); shape.holes.push(p); }
     const fit2 = t => { if (!t) return; t.repeat.set(1 / S.board.w, 1 / S.board.h); t.offset.set(0, 1); };

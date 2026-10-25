@@ -344,7 +344,8 @@ const Pcb = (() => {
       if (near(x, y, Math.max(d + R.minHoleToHole, d + 0.3))) return false;
       return !viaPadProblem({ net, x, y, d, drill }, R);
     };
-    const add = (x, y) => { const v = { net, x: +x.toFixed(3), y: +y.toFixed(3), d, drill, manual: true, stitch: true }; placedV.push(v); };
+    // stitching vias are automatic: rip-up and reroute replace them
+    const add = (x, y) => { const v = { net, x: +x.toFixed(3), y: +y.toFixed(3), d, drill, stitch: true }; placedV.push(v); };
     for (let y = step / 2; y < S.board.h; y += step) for (let x = step / 2; x < S.board.w; x += step) if (fits(x, y)) add(x, y);
     // every piece without a via gets one (its biggest free spot)
     let joined = 0;
@@ -1451,11 +1452,17 @@ const Pcb = (() => {
       // kept tracks/vias of this net extend the terminal they touch
       for (const t of st.tcells) if (t.id === id && t.fixed) { const tc = t.cells.map(c => t.l * N + c), hit = terms.find(T => tc.some(c => T.cells.includes(c))); if (hit) for (const c of tc) hit.cells.push(c); }
       if (job.pourCells) { const tc = terms[0].cells; for (const c of job.pourCells) tc.push(c); }   // (no spread: pours can be 100k+ cells)
-      const tree = new Set(terms[0].cells), done = [terms[0]], rest = terms.slice(1), segs = [], vs = [];
+      // grow from the biggest island (most pads, then the one nearest the middle): when the first terminal is the pad that
+      // cannot be reached, everything else would fail with it
+      const mx = terms.reduce((a, T) => a + T.x, 0) / terms.length, my = terms.reduce((a, T) => a + T.y, 0) / terms.length;
+      const si = terms.reduce((b, T, i) => (T.pads.length > terms[b].pads.length || (T.pads.length === terms[b].pads.length && Math.hypot(T.x - mx, T.y - my) < Math.hypot(terms[b].x - mx, terms[b].y - my))) ? i : b, 0);
+      const s0 = job.pourCells ? 0 : si;   // a pour belongs to terms[0]: then that is the start
+      let tree = new Set(terms[s0].cells), done = [terms[s0]], rest = terms.filter((T, i) => i !== s0), missed = [];
+      const segs = [], vs = [];
       let ok = true, mapW = null, necked = false;
       const widths = [job.w];
       if (R.neckDown) for (const w2 of [R.traceWidth, R.minTraceWidth]) if (w2 < widths[widths.length - 1] - 1e-9) widths.push(w2);
-      while (rest.length) {
+      const grow = () => { while (rest.length) {
         let bi = 0, bd = Infinity;
         rest.forEach((T, i) => { for (const D of done) for (const p of T.pads) for (const q of D.pads) { const d = Math.hypot(p.x - q.x, p.y - q.y); if (d < bd) { bd = d; bi = i; } } });
         const target = rest.splice(bi, 1)[0];
@@ -1473,7 +1480,7 @@ const Pcb = (() => {
           if (!path && (small[0] > 0 || small[1] > 0 || small[2] < W - 1 || small[3] < H - 1) && w2 === widths[widths.length - 1]) path = astar(src, target, w2, full);
           if (path) { w = w2; break; }
         }
-        if (!path) { ok = false; continue; }
+        if (!path) { ok = false; missed.push(target); continue; }
         if (w < job.w - 1e-9) necked = true;
         if (dry) dryPaths.push(path);
         // commit
@@ -1553,11 +1560,19 @@ const Pcb = (() => {
         flush(lastPad);
         for (const c of target.cells) tree.add(c);
         done.push(target);
-      }
+      } };
+      grow();
+      const main = new Set(done);
+      // pads that could not join: they still connect among themselves (a second tree), so the copper that can be laid
+      // is kept and only the real gap stays open
+      let groups = 1;
+      while (!dry && missed.length >= 2) { const m0 = missed; tree = new Set(m0[0].cells); done = [m0[0]]; rest = m0.slice(1); missed = []; groups++; grow(); if (missed.length >= m0.length - 1) break; }
+      // the pads not joined to the main tree (this net's copper stays, only these connections are missing)
+      const unreached = ok ? [] : [...new Set(terms.filter(T => !main.has(T)).flatMap(T => T.pads.map(q => q.key)).filter(Boolean))];
       if (!dry) { st.tcells.push(...myT); st.gvias.push(...myV); track(myT, myV, 1); }
       const blockers = dry ? blockersOf(dryPaths, job.w, id) : new Set();
       const len = segs.reduce((a, s) => { for (let i = 1; i < s.pts.length; i++) a += Math.hypot(s.pts[i][0] - s.pts[i - 1][0], s.pts[i][1] - s.pts[i - 1][1]); return a; }, 0);
-      return { segs, vs, ok, necked, blockers, len, paths: dry ? dryPaths : null };
+      return { segs, vs, ok, necked, blockers, len, paths: dry ? dryPaths : null, unreached };
     }
 
     // ---------- negotiated rip-up and reroute, within a time budget ----------
@@ -1668,10 +1683,45 @@ const Pcb = (() => {
     }
     restore(best);
     const fin = materialize();
+    // why a net failed, in words: the pads it could not join and what sits around them (other parts' pads, hand-drawn or
+    // locked copper, keep-outs, the board edge) and whether a via fits beside the pad at all
+    const reasonFor = n => {
+      const r = result[n], miss = (r && r.unreached) || [];
+      const pads = allPads.filter(p => miss.includes(p.key)).slice(0, 3);
+      const near = pads.map(p => {
+        const out = [], reach = Math.max(p.w, p.h) / 2 + R.traceWidth + R.clearance + 0.25;
+        const other = allPads.filter(q => q.net !== p.net && Math.hypot(q.x - p.x, q.y - p.y) < reach + Math.max(q.w, q.h) / 2 && padCu(q, ['F', 'B']).some(l => padCu(p, ['F', 'B']).includes(l)));
+        const parts = [...new Set(other.map(q => q.ref))].filter(rf => rf !== p.ref);
+        if (other.some(q => q.ref === p.ref)) out.push('its neighbouring pins on ' + p.ref);
+        if (parts.length) out.push('pads of ' + parts.slice(0, 3).join(', '));
+        const fixedT = oldTraces.filter(t => t.net !== p.net && t.pts.some((q, i) => i && ptSeg([p.x, p.y], t.pts[i - 1], q) < reach + t.w / 2));
+        if (fixedT.length) out.push(`${fixedT.length} kept track${fixedT.length > 1 ? 's' : ''} (${[...new Set(fixedT.map(t => t.net || 'no net'))].slice(0, 3).join(', ')}${fixedT.some(t => t.locked) ? ', locked' : fixedT.some(t => t.manual) ? ', hand-drawn' : ''})`);
+        const fixedV = oldVias.filter(v => v.net !== p.net && Math.hypot(v.x - p.x, v.y - p.y) < reach + v.d / 2);
+        if (fixedV.length) out.push(`${fixedV.length} kept via${fixedV.length > 1 ? 's' : ''}`);
+        if (keepouts().some(k => (k.tracks || k.vias) && inPoly(p.x, p.y, k.pts))) out.push('a keep-out');
+        const bp = boardPoly(); let de = Infinity; for (let i = 0; i < bp.length; i++) de = Math.min(de, ptSeg([p.x, p.y], bp[i], bp[(i + 1) % bp.length]));
+        if (de < reach + R.edgeClearance) out.push('the board edge');
+        // room for a via within 1.5 mm, clear of other copper
+        let via = false;
+        for (let rr = Math.max(p.w, p.h) / 2 + R.viaDiameter / 2 + 0.05; rr <= 1.5 && !via; rr += 0.1) for (let a = 0; a < 16 && !via; a++) {
+          const x = p.x + rr * Math.cos(a * Math.PI / 8), y = p.y + rr * Math.sin(a * Math.PI / 8), vd = R.viaDiameter / 2;
+          if (x < vd || y < vd || !inPoly(x, y, bp)) continue;
+          if (allPads.some(q => q.net !== p.net && padDist(q, x, y) < vd + Math.max(padCl(R), viaCl(R)))) continue;
+          if (oldTraces.some(t => t.net !== p.net && t.pts.some((q, i) => i && ptSeg([x, y], t.pts[i - 1], q) < vd + t.w / 2 + viaGap(R)))) continue;
+          if (oldVias.some(v => v.net !== p.net && Math.hypot(v.x - x, v.y - y) < vd + v.d / 2 + viaCl(R))) continue;
+          if (keepouts().some(k => k.vias && inPoly(x, y, k.pts))) continue;
+          via = true;
+        }
+        if (!via && L > 1) out.push('no room for a via beside it');
+        return `${p.key}: ${out.length ? out.join(', ') : 'tracks of other nets'}`;
+      });
+      const head = hard.has(n) ? 'no path even with the other routed nets ignored' : 'no room left between the tracks of the other nets';
+      const tip = hard.has(n) ? (near.some(t => /no room for a via/.test(t)) ? 'move the parts next to that pin apart so a via fits' : near.some(t => /kept track|kept via/.test(t)) ? 'remove or move the kept copper (remove_tracks)' : 'move parts apart or make room')
+        : 'optimize_pcb, more board area, or ' + (R.preset === 'jlcpcb_free_min' ? 'narrower tracks (traceWidth down to 0.1 mm)' : 'narrower rules (preset jlcpcb_free_min)');
+      return `${head}${miss.length ? ` — not joined: ${miss.slice(0, 6).join(', ')}${miss.length > 6 ? ` (+${miss.length - 6})` : ''}` : ''}${near.length ? ` · blocked at ${near.join(' · ')}` : ''} — ${tip}${r && r.segs && r.segs.length ? ' (the rest of the net is routed)' : ''}`;
+    };
     S.pcb = Object.assign({}, S.pcb, { traces: oldTraces.concat(fin.traces), vias: oldVias.concat(fin.vias), pours: S.pcb.pours || [], holes: S.pcb.holes || [], routed: fin.routed });
-    return { routed: Object.keys(fin.routed).length, total: jobs.length, kept_tracks: oldTraces.length, failed: fin.failed, necked_down: fin.necked, vias: fin.vias.length, board: boardBrief(), grid_mm: +g.toFixed(3), seconds: +((Date.now() - t0) / 1000).toFixed(1), passes: attemptNo, ripup_iterations: iter, via_in_pad: todo.filter(j => vip.has(j.id) && fin.routed[j.net]).map(j => j.net), blocked_by_layout: [...hard].filter(n => fin.failed.includes(n)), failed_reason: fin.failed.length ? Object.fromEntries(fin.failed.map(n => [n, hard.has(n)
-      ? 'no path even with the other nets ignored: blocked by parts, pads, keep-outs or the board edge' + (R.noViaInPad && !R.viaInPad ? ' (vias may not go on SMD pads — it may need room for a via beside a pin)' : '') + ' — move parts apart or make room'
-      : 'no room left between the tracks of the other nets — optimize_pcb, more board area, or ' + (R.preset === 'jlcpcb_free_min' ? 'narrower tracks (traceWidth down to 0.1 mm)' : 'narrower rules (preset jlcpcb_free_min)')])) : undefined, search: stats, rules: { preset: R.preset, trace: R.traceWidth, power: R.powerTraceWidth, clearance: R.clearance, via: `${R.viaDiameter}/${R.viaDrill}`, layers: L } };
+    return { routed: Object.keys(fin.routed).length, total: jobs.length, kept_tracks: oldTraces.length, failed: fin.failed, necked_down: fin.necked, vias: fin.vias.length, board: boardBrief(), grid_mm: +g.toFixed(3), seconds: +((Date.now() - t0) / 1000).toFixed(1), passes: attemptNo, ripup_iterations: iter, via_in_pad: todo.filter(j => vip.has(j.id) && fin.routed[j.net]).map(j => j.net), blocked_by_layout: [...hard].filter(n => fin.failed.includes(n)), failed_reason: fin.failed.length ? Object.fromEntries(fin.failed.map(n => [n, reasonFor(n)])) : undefined, search: stats, rules: { preset: R.preset, trace: R.traceWidth, power: R.powerTraceWidth, clearance: R.clearance, via: `${R.viaDiameter}/${R.viaDrill}`, layers: L } };
   }
 
   // ---------- DRC (exact geometry) ----------
@@ -2025,11 +2075,13 @@ const Pcb = (() => {
         if (padDist(p, v.x, v.y) < v.d / 2 + (p.net === v.net ? 0 : Math.max(padCl(R), viaCl(R))) || holeGap < R.minHoleToHole) on.push(p.key + ' (through-hole)');
         continue;
       }
-      if (padDist(p, v.x, v.y) >= v.d / 2 + (p.net === v.net ? 0 : Math.max(padCl(R), viaCl(R)))) continue;
+      const need = p.net === v.net ? 0 : Math.max(padCl(R), viaCl(R)), gap = padDist(p, v.x, v.y) - v.d / 2;
+      if (gap >= need - 1e-6) continue;
       if (!R.noViaInPad && p.ep && p.net === v.net && Math.min(p.w / 2 - Math.abs(v.x - p.x), p.h / 2 - Math.abs(v.y - p.y)) >= v.d / 2 + 0.15) continue;   // thermal via in an exposed pad (only when the strict rule is off)
-      on.push(p.key);
+      // the same copper gap the DRC checks (edge to edge), said the same way
+      on.push(p.net === v.net ? `${p.key} (its own net: vias may not sit on an SMD pad — put it beside the pad)` : `${p.key} (${p.net || 'no net'}): ${Math.max(0, gap).toFixed(3)} mm copper gap, needs ${need} mm`);
     }
-    return on.length ? `Via at (${v.x}, ${v.y}) touches SMD pad ${on.join(', ')} — move it at least ${(v.d / 2 + R.clearance).toFixed(2)} mm from the pad edge (rule: no via in pad)` : null;
+    return on.length ? `Via at (${v.x}, ${v.y}) is too close to SMD pad ${on.join('; ')}` : null;
   }
   // copper, holes and the edge a new via / track must keep clear of (the 2D editor's live checks: pcbview obstacles)
   function viaObstacles(net, box) {
@@ -2445,6 +2497,11 @@ const Pcb = (() => {
       'board-B_Silkscreen.gbo': file('Legend,Bot', silk('B')),
       'board-Edge_Cuts.gm1': file('Profile,NP', (A, b) => { b.push(A('C,0.100000') + '*'); b.push(X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*'); }),
     };
+    // a 1-layer board has no bottom copper: its bottom files would only be empty (and confusing on the order)
+    if (rules().layers === 1) {
+      for (const f of ['board-B_Cu.gbl', 'board-B_Mask.gbs', 'board-B_Paste.gbp']) delete files[f];
+      if (!placed().some(c => isBottom(c)) && !(S.pcb.texts || []).some(t => t.side === 'B')) delete files['board-B_Silkscreen.gbo'];
+    }
     const holes = [...pads.filter(p => p.drill).map(p => ({ x: p.x, y: p.y, d: p.drill })), ...S.pcb.vias.map(v => ({ x: v.x, y: v.y, d: v.drill }))];
     const tools = [...new Set(holes.map(h => h.d.toFixed(3)))];
     let drl = 'M48\n; CircuitPilot drill file\nMETRIC,TZ\n' + tools.map((d, i) => `T${i + 1}C${d}`).join('\n') + '\n%\nG90\nG05\n';

@@ -207,7 +207,9 @@ async function withProject(fn, write = true, name = '') {
 }
 
 // ---------- background jobs: long tools run in a worker thread on a copy of the project ----------
-const LONG = new Set(['generate_pcb', 'route_pcb', 'optimize_pcb', 'auto_layout', 'place_footprints', 'update_pcb_from_schematic', 'export_project', 'reroute']);
+// (also the tools that can take more than a few seconds on a big board: on the main thread they stall every other call)
+const LONG = new Set(['generate_pcb', 'route_pcb', 'optimize_pcb', 'auto_layout', 'place_footprints', 'update_pcb_from_schematic', 'export_project', 'reroute',
+  'place_in_free_area', 'stitch_pour', 'connect_pads_to_pour', 'apply_pour_template', 'arrange_silk_labels']);
 const isLong = (name, input) => LONG.has(name) || (name === 'batch' && Array.isArray(input.calls) && input.calls.some(c => c && LONG.has(c.tool || c.name)));
 const JOB_WAIT = +(process.env.CP_JOB_WAIT || 40000);   // answer directly when done within this time, else hand out a job id
 const jobs = new Map(); let jobSeq = 0;
@@ -289,8 +291,13 @@ async function exportJob(job, project, input) {
     if (!tab) skipped.push('PDFs and images: no CircuitPilot window could show this project (open ' + BASE + ' and run export_project again)');
     else for (const [args, rel] of shots) {
       if (job.status !== 'running') break;
-      try { const r = await renderSerial(job.project, args); if (!r || !r.data) throw new Error('nothing drawn'); put(rel, new Uint8Array(Buffer.from(r.data, 'base64'))); }
-      catch (e) { skipped.push(rel + ': ' + e.message); }
+      // a busy browser (routing, another export) answers late: wait and try again instead of skipping the file
+      let last = null;
+      for (let k = 0; k < 5 && job.status === 'running'; k++) {
+        try { const r = await renderSerial(job.project, args); if (!r || !r.data) throw new Error('nothing drawn'); put(rel, new Uint8Array(Buffer.from(r.data, 'base64'))); last = null; break; }
+        catch (e) { last = e; if (!/did not answer|in time|504|timed? ?out|busy/i.test(e.message)) break; log(`export ${X.base}: ${rel} — browser busy, retry ${k + 1}`); await new Promise(r => setTimeout(r, 10000 * (k + 1))); }
+      }
+      if (last) skipped.push(rel + ': ' + last.message);
     }
   }
   fs.writeFileSync(path.join(dir, 'README.txt'), `${X.name} — exported by CircuitPilot ${new Date().toISOString().slice(0, 16).replace('T', ' ')}\n\n` +
@@ -313,7 +320,7 @@ const EXTRA = [
   { name: 'import_folder', description: 'Add every project found in a folder and all its subfolders: CircuitPilot project files (.json / .circuit.json) and EasyEDA PCB files (.json, imported with tracks). Each becomes a new project; files that match a project already in CircuitPilot (same name and part count) are skipped unless skip_existing: false. dry_run: true only lists what would be imported. The first imported project becomes current.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: 'folder on this PC' }, recursive: { type: 'boolean', description: 'default true' }, dry_run: { type: 'boolean' }, skip_existing: { type: 'boolean', description: 'default true' } } } },
   { name: 'export_parts', description: 'Write parts of My Library (default: all) to a JSON file, to use them in another CircuitPilot database or on another PC (import_parts).', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, path: { type: 'string', description: 'file path (default Documents/CircuitPilot exports/my-library.json)' } } } },
   { name: 'import_parts', description: 'Add the parts of a JSON file from export_parts (or one part object) to My Library. Existing parts with the same key are kept unless overwrite: true.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, overwrite: { type: 'boolean' } } } },
-  { name: 'job_status', description: 'Result of a background job (long tools — generate_pcb, route_pcb, optimize_pcb, place_footprints, update_pcb_from_schematic, auto_layout, export_project — hand out a job_id when they take longer than ~40 s). Waits up to wait_s (default 50, max 55) for it to finish. Without job_id: lists the jobs.', input_schema: { type: 'object', properties: { job_id: { type: 'string' }, wait_s: { type: 'number' } } } },
+  { name: 'job_status', description: 'Result of a background job (long tools — generate_pcb, route_pcb, reroute, optimize_pcb, place_footprints, place_in_free_area, update_pcb_from_schematic, auto_layout, stitch_pour, connect_pads_to_pour, arrange_silk_labels, export_project — hand out a job_id when they take longer than ~40 s). Waits up to wait_s (default 50, max 55) for it to finish. Without job_id: lists the jobs.', input_schema: { type: 'object', properties: { job_id: { type: 'string' }, wait_s: { type: 'number' } } } },
   { name: 'cancel_job', description: 'Stop a running background job; nothing of it is saved.', input_schema: { type: 'object', required: ['job_id'], properties: { job_id: { type: 'string' } } } },
   { name: 'copy_project', description: 'Copy a project (default: the current one) to a new project, e.g. before trying a big change or to start a variant. The copy becomes current unless open: false.', input_schema: { type: 'object', properties: { name: { type: 'string', description: 'name of the copy (default "<name> (copy)")' }, open: { type: 'boolean' } } } },
   { name: 'list_project_versions', description: 'Earlier saved states of a project (default: the current one). Kept automatically: about every 10 minutes while it is edited, whenever many parts disappear in one save, before a restore and when it is deleted. Without a project: also lists deleted projects that can be restored.', input_schema: { type: 'object', properties: {} } },

@@ -504,8 +504,22 @@ const Engine = (() => {
           Model.mutate(() => { const P = Model.S.pcb, only = new Set(input.nets); P.traces = P.traces.filter(t => t.manual || !only.has(t.net)); P.vias = P.vias.filter(v => v.manual || !only.has(v.net)); });
           Object.assign(ropt, { onlyNets: input.nets.slice(), keep: true, keepAll: true });
         }
-        if (env.route) r = await env.route({ place, opt: Object.assign({ noRoute }, ropt) });
-        else r = Model.mutate(() => ({ placement: place ? Pcb.autoPlace(place) : undefined, routing: noRoute ? null : Pcb.route(ropt) }));
+        // a full route runs with the copper pours off and puts them back afterwards (pours fill around the new tracks);
+        // then the pads the pours no longer reach are joined by a short pass. Routing chosen nets keeps the pours:
+        // that pass uses them to join cut-off pads
+        const full = !noRoute && !ropt.onlyNets, pours0 = full ? (Model.S.pcb.pours || []).map(q => JSON.parse(JSON.stringify(q))) : [];
+        if (pours0.length) Model.mutate(() => { Model.S.pcb.pours = []; });
+        try {
+          if (env.route) r = await env.route({ place, opt: Object.assign({ noRoute }, ropt) });
+          else r = Model.mutate(() => ({ placement: place ? Pcb.autoPlace(place) : undefined, routing: noRoute ? null : Pcb.route(ropt) }));
+        } finally { if (pours0.length) Model.mutate(() => { Model.S.pcb.pours = pours0.filter(q => Model.S.nets[q.net]); }); }
+        if (pours0.length) {
+          // stitching vias are automatic (the route replaced them): put them back where a net has pours on both layers
+          if (input.stitch !== false) for (const net of [...new Set(pours0.map(q => q.net))]) if (pours0.some(q => q.net === net && q.layer === 'F') && pours0.some(q => q.net === net && q.layer === 'B')) { try { Model.mutate(() => Pcb.stitchPour({ net })); } catch (e) { } }
+          const conn = Pcb.connectivity(), broken = Object.keys(conn).filter(n => !conn[n].complete);
+          if (broken.length) { const o2 = { onlyNets: broken, keep: true, keepAll: true, time_limit_s: 20 }; if (env.route) await env.route({ place: null, opt: o2 }); else Model.mutate(() => Pcb.route(o2)); }
+          if (r && r.routing) Object.assign(r.routing, { pours: 'removed while routing and put back', still_unrouted: Pcb.status().unrouted });
+        }
         env.ui('show-pcb');
         const d = Pcb.drc();
         return Object.assign({}, r, { drc: { summary: d.summary, top: d.violations.filter(v => v.severity === 'error').slice(0, 8).map(v => v.msg) } });

@@ -28,6 +28,8 @@ const Model = (() => {
     S = Object.assign(blank(), typeof obj === 'string' ? JSON.parse(obj) : JSON.parse(JSON.stringify(obj)));
     // custom parts placed by older versions lost their library key (drawn as an empty box): it is still in the footprint name
     for (const c of S.components || []) if (c.type === 'part' && !(S.lib || {})[c.lcsc]) { const m = /^(?:LCSC|LIB):(.+)$/.exec(c.footprint || ''); if (m && S.lib[m[1]]) c.lcsc = m[1]; }
+    // stitching vias are automatic (older versions saved them as hand-placed, so rip-up and reroute kept stale ones)
+    for (const v of (S.pcb && S.pcb.vias) || []) if (v.stitch && v.manual && !v.locked) delete v.manual;
     emit('load');
   }
   function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); S = JSON.parse(undoStack.pop()); emit('load'); }

@@ -2224,6 +2224,20 @@ const Pcb = (() => {
     return { flex: f.on, thickness: f.thickness, stiffeners: f.stiffeners.map(s => ({ name: s.name, side: s.side, material: s.material, thickness: s.thickness, box: [Math.min(...s.pts.map(q => q[0])), Math.min(...s.pts.map(q => q[1])), Math.max(...s.pts.map(q => q[0])), Math.max(...s.pts.map(q => q[1]))] })),
       note: f.on ? 'Gerber export adds board-Stiffener.gm2 (stiffener outlines) and flex-notes.txt; order as Flex PCB at JLCPCB and give the stiffener specs there' : undefined };
   }
+  // JLCPCB Open API pcbParam for this board (codes from JLCPCB's Online Quotation doc): o = {qty, color, finish,
+  // thickness, remark}; colour 0 green 1 red 2 yellow 3 blue 4 white 5 black 6 purple; finish 0 HASL 1 lead-free HASL
+  // 2 ENIG 3 OSP; plateType 7 = flex
+  function jlcPcbParam(o = {}) {
+    const S = Model.S, R = rules(), flex = S.pcb.flex && S.pcb.flex.on, finish = o.finish != null ? +o.finish : 1;
+    return {
+      layer: R.layers === 1 ? 1 : 2, width: +(+S.board.w).toFixed(2), length: +(+S.board.h).toFixed(2), qty: +(o.qty || 5),
+      thickness: flex ? +(S.pcb.flex.thickness || 0.12) : +(o.thickness || 1.6), pcbColor: o.color != null ? +o.color : 0, surfaceFinish: finish, copperWeight: 1,
+      goldFinger: 0, materialDetails: 0, panelFlag: 0, panelByJLCPCB_X: 0, panelByJLCPCB_Y: 0, differentDesign: 1, flyingProbeTest: 1,
+      castellatedHoles: 0, orderDetailsRemark: String(o.remark || '').slice(0, 200), cascadeStructure: 0, impedanceFlag: 'no', isAddCustomerCode: 'yes',
+      plateType: flex ? 7 : 1, autoConfirmProductionFile: true, markOnPcb: 1, viaCovering: 1, needTechnics: 0, edgeRounding: false, serviceConfigVos: [],
+      ...(finish === 2 ? { goldThickness: 1 } : {}),
+    };
+  }
   const boardThickness = () => { const f = Model.S.pcb && Model.S.pcb.flex; return f && f.on ? +f.thickness || 0.12 : 1.6; };
   // what a straight track a→b of `net` on `layer` breaks (pads, vias and drill holes keep the router's larger gaps)
   function trackSpotProblem(a, b, w, layer, net, obs, R = rules(), skip) {
@@ -2935,7 +2949,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

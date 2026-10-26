@@ -20,3 +20,4 @@ dist/
 # built and published by .github/workflows/pages.yml
 data/parts-archive.tsv.gz
 data/parts-archive.json
+jlc-address.json

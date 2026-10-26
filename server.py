@@ -213,6 +213,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 r = jlcapi.part_details(["C25804"])
                 _jlc_status.update(t=now, ok=r.get("code") == 200, message=r.get("message") or "", code=r.get("code"))
             return self._send(200, json.dumps({"configured": True, "ok": _jlc_status["ok"], "code": _jlc_status.get("code"), "message": _jlc_status["message"]}).encode(), "application/json")
+        # the shipping address for JLCPCB orders: kept on this machine (data folder), never in a project
+        addr_file = os.path.join(os.path.dirname(store.DB_PATH), "jlc-address.json")
+        if sub == "address" and self.command == "GET":
+            try:
+                with open(addr_file, encoding="utf-8") as f:
+                    return self._send(200, f.read().encode("utf-8"), "application/json")
+            except OSError:
+                return self._send(200, b"{}", "application/json")
         if self.command != "POST":
             return self._send(405, b'{"error":"POST"}', "application/json")
         n = int(self.headers.get("Content-Length") or 0)
@@ -227,6 +235,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 body = json.loads(raw or b"{}")
             except ValueError:
                 return self._send(400, b'{"error":"body must be JSON"}', "application/json")
+            if sub == "address":
+                keep = ["firstName", "lastName", "companyName", "streetAddress", "addressLine2", "city", "province", "postalCode", "country", "cellOrMobileNumber", "taxNumber"]
+                addr = {k: str(body.get(k) or "")[:120] for k in keep}
+                with open(addr_file, "w", encoding="utf-8") as f:
+                    json.dump(addr, f, ensure_ascii=False)
+                return self._send(200, json.dumps(addr).encode(), "application/json")
             if sub == "parts":
                 out = jlcapi.part_details(body.get("codes") or [])
             elif sub == "pcb/quote":

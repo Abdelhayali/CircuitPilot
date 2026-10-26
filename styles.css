@@ -517,3 +517,16 @@ body:not(.static-web) #modal .webonly { display: none; }
 .lp-tag.lp-archive, .lp-tag.lp-archive-basic { color: var(--warn); }
 
 .static-web .desktoponly { opacity: .7; }
+
+/* JLCPCB order dialog */
+#jlcBody .jlc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 14px; margin: 10px 0; }
+#jlcBody .jlc-grid label, #jlcBody > label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+#jlcBody .jlc-price { display: flex; gap: 22px; align-items: baseline; flex-wrap: wrap; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent, #4f6ef7) 10%, transparent); margin: 8px 0; }
+#jlcBody .jlc-total b { font-size: 18px; }
+#jlcBody .jlc-prev { display: flex; gap: 10px; margin: 8px 0; }
+#jlcBody .jlc-prev img { max-width: 48%; max-height: 180px; border-radius: 6px; background: #111; }
+#jlcBody details { margin: 8px 0; }
+#jlcBody pre { white-space: pre-wrap; max-height: 200px; overflow: auto; }
+#jlcBody .good { color: var(--good); }
+#jlcBody .bad { color: var(--bad); }
+#jlcBody a.btn { display: inline-block; padding: 6px 12px; border-radius: 6px; text-decoration: none; }

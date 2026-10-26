@@ -464,7 +464,18 @@ const App = (() => {
   let orderAfter = false, orderTab = null;
   const JLC_QUOTE = 'https://cart.jlcpcb.com/quote';
   function closeOrderTab() { orderAfter = false; try { if (orderTab && !orderTab.closed) orderTab.close(); } catch (e) { } orderTab = null; }
+  // Order: with JLCPCB API keys the board is uploaded and priced in CircuitPilot and ordered from there (JlcOrder);
+  // otherwise (or "Website + assembly files") the files are saved and the JLCPCB quote page opens
   async function orderPcb() {
+    if (!Model.S.board.w || !Pcb.placed().length) { toast('No PCB yet — Generate PCB first'); return; }
+    if (typeof JlcOrder !== 'undefined' && await JlcOrder.available()) {
+      const d = showDrc();
+      if (d.errors && !confirm(`DRC: ${d.summary}. JLCPCB may reject a board with errors. Order anyway?`)) return;
+      return JlcOrder.open();
+    }
+    return orderWebsite();
+  }
+  async function orderWebsite() {
     if (!Model.S.board.w || !Pcb.placed().length) { toast('No PCB yet — Generate PCB first'); return; }
     closeOrderTab();
     orderTab = window.open('', '_blank');
@@ -1372,6 +1383,6 @@ const App = (() => {
     // text fields. On Windows the event fires on mouse-up, often over our own menu that just opened.
     document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea, [contenteditable="true"], .allow-ctx')) e.preventDefault(); });
   }
-  return { init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download, openProjectData, exportProject: () => exportAs('json') };
+  return { orderWebsite, init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download, openProjectData, exportProject: () => exportAs('json') };
 })();
 window.addEventListener('DOMContentLoaded', App.init);

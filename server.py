@@ -32,6 +32,8 @@ import store
 import knowledge
 import webtools
 
+_jlc_status = {}   # JLCPCB API key check, cached 5 min
+
 PROXY_RE = re.compile(r"^/llm-proxy/(\d{1,5})(/.*)?$")
 STATIC_RE = re.compile(r"^/(|index\.html|styles\.css|favicon\.ico|js/[\w.-]+\.js|data/kicad-footprints\.txt|data/open-parts\.txt)$")
 HOP_HEADERS = {"host", "origin", "referer", "connection", "content-length", "accept-encoding",
@@ -196,8 +198,55 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache, must-revalidate")
         super().end_headers()
 
+    # ---------- JLCPCB Open API gateway: the keys stay here (jlcapi-keys.json); the app and the MCP server call these ----------
+    def _jlc(self, path):
+        import jlcapi
+        if not self._authed():
+            return self._send(401, b'{"error":"login required"}', "application/json")
+        sub = path[len("/api/jlc/"):]
+        q = urllib.parse.parse_qs(self.path.partition("?")[2])
+        if sub == "status":
+            if not jlcapi.configured():
+                return self._send(200, b'{"configured":false,"ok":false,"message":"No JLCPCB API keys"}', "application/json")
+            now = time.time()
+            if not _jlc_status.get("t") or now - _jlc_status["t"] > 300:
+                r = jlcapi.part_details(["C25804"])
+                _jlc_status.update(t=now, ok=r.get("code") == 200, message=r.get("message") or "", code=r.get("code"))
+            return self._send(200, json.dumps({"configured": True, "ok": _jlc_status["ok"], "code": _jlc_status.get("code"), "message": _jlc_status["message"]}).encode(), "application/json")
+        if self.command != "POST":
+            return self._send(405, b'{"error":"POST"}', "application/json")
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 60_000_000:
+            return self._send(413, b'{"error":"too large"}', "application/json")
+        raw = self.rfile.read(n) if n else b""
+        if sub == "pcb/upload":   # body: the Gerber .zip itself
+            name = (q.get("name") or ["gerbers.zip"])[0]
+            out = jlcapi.upload_gerber(re.sub(r"[^\w.\-]+", "_", name)[:80] or "gerbers.zip", raw)
+        else:
+            try:
+                body = json.loads(raw or b"{}")
+            except ValueError:
+                return self._send(400, b'{"error":"body must be JSON"}', "application/json")
+            if sub == "parts":
+                out = jlcapi.part_details(body.get("codes") or [])
+            elif sub == "pcb/quote":
+                out = jlcapi.pcb_quote(body)
+            elif sub == "pcb/audit":
+                out = jlcapi.pcb_audit(body.get("key") or "", int(body.get("language") or 1))
+            elif sub == "pcb/create":   # places the order (to be paid at JLCPCB): only on an explicit user action
+                out = jlcapi.pcb_create(body)
+            elif sub == "pcb/order":
+                out = jlcapi.pcb_order(body.get("batchNum") or "")
+            elif sub == "pcb/progress":
+                out = jlcapi.pcb_progress(body.get("orderUUID") or "")
+            else:
+                return self._send(404, b'{"error":"unknown JLCPCB call"}', "application/json")
+        return self._send(200, json.dumps(out).encode(), "application/json")
+
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path.startswith("/api/jlc/"):
+            return self._jlc(path)
         if path == "/llm-proxy/_ping":
             return self._send(200, b'{"ok":true}', "application/json")
         if PROXY_RE.match(path):
@@ -257,6 +306,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        if path.startswith("/api/jlc/"):
+            return self._jlc(path)
         if path == "/api/parts/claude-desktop/connect":   # add CircuitPilot to Claude Desktop's MCP servers
             if not self._authed():
                 return self._send(401, b'{"error":"login required"}', "application/json")

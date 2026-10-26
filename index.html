@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610261300">
+<link rel="stylesheet" href="styles.css?v=202610261400">
 </head>
 <body>
 <header id="top">
@@ -200,7 +200,7 @@
       <label>Context window (tokens, empty = auto-detect)<input id="sCtxWin" type="number" min="0" step="1024" placeholder="auto"></label>
       <label class="chk"><input id="sCtx" type="checkbox"> Send current design to the model with every request</label>
       <label class="chk"><input id="sWeb" type="checkbox"> Let the AI search the internet and read web pages / PDF datasheets</label>
-      <label>Brave Search API key (optional — DuckDuckGo is used without one)<input id="sBrave" type="password" autocomplete="off" placeholder="BSA…"></label>
+      <label>Brave Search API key (optional — DuckDuckGo is used without one; on pcbgo.site searches and this key go through the CircuitPilot relay)<input id="sBrave" type="password" autocomplete="off" placeholder="BSA…"></label>
       <label class="webonly">Relay address (web version: part search, web search, Ollama Cloud)<input id="sRelay" autocomplete="off" placeholder="https://circuitpilot-relay.your-name.workers.dev"></label>
     </fieldset>
     <fieldset class="desktoponly"><legend>Claude Desktop</legend>
@@ -217,10 +217,10 @@
 <div id="aiSetup" class="hidden modal">
   <div class="dlg setup">
     <div class="row-h"><h2>Connect an AI model</h2><button id="asClose" title="Close">✕</button></div>
-    <p class="as-safe"><b>🔒 Your key stays on your device.</b> CircuitPilot runs in your browser. Your API key is saved only in this browser and sent straight to the AI provider you choose. We never see it or store it. You can remove it any time in ⚙ Settings.</p>
+    <p class="as-safe"><b>🔒 Where your key goes.</b> It is saved only in this browser. Gemini, Claude, OpenAI, OpenRouter and other providers that accept browser requests are called <b>directly</b> — the key goes only to them. On pcbgo.site, Ollama Cloud and providers that block browser requests (e.g. NVIDIA) work only <b>through the CircuitPilot relay</b>, an open-source Cloudflare Worker that forwards the request and key and stores nothing — the app asks before using it. The desktop version never uses the relay. ⚙ Settings shows the route of each provider; remove a key there any time.</p>
     <div class="as-tabs" role="tablist">
       <button data-p="gemini" role="tab">Google Gemini <span class="tag free">free</span></button>
-      <button data-p="ollama" role="tab">Ollama Cloud <span class="tag free">free plan</span></button>
+      <button data-p="ollama" role="tab">Ollama Cloud <span class="tag free">free plan</span><span class="tag webonly" title="On pcbgo.site Ollama Cloud is reached through the CircuitPilot relay (asks first)">relay on web</span></button>
       <button data-p="claude" role="tab">Claude <span class="tag">paid</span></button>
       <button data-p="custom" role="tab">Custom URL</button>
     </div>
@@ -358,34 +358,34 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610261300"></script>
-<script src="js/static-backend.js?v=202610261300"></script>
-<script src="js/lib.js?v=202610261300"></script>
-<script src="js/view.js?v=202610261300"></script>
-<script src="js/model.js?v=202610261300"></script>
-<script src="js/schematic.js?v=202610261300"></script>
-<script src="js/pcb.js?v=202610261300"></script>
-<script src="js/pcbview.js?v=202610261300"></script>
-<script src="js/enclosure.js?v=202610261300"></script>
-<script src="js/shape3d.js?v=202610261300"></script>
-<script src="js/easyeda.js?v=202610261300"></script>
-<script src="js/libpanel.js?v=202610261300"></script>
-<script src="js/openlib.js?v=202610261300"></script>
-<script src="js/kicad.js?v=202610261300"></script>
-<script src="js/easyedapro.js?v=202610261300"></script>
-<script src="js/encview.js?v=202610261300"></script>
-<script src="js/docview.js?v=202610261300"></script>
-<script src="js/pcb3d.js?v=202610261300"></script>
-<script src="js/blocks.js?v=202610261300"></script>
-<script src="js/engine.js?v=202610261300"></script>
-<script src="js/ai.js?v=202610261300"></script>
-<script src="js/exports.js?v=202610261300"></script>
-<script src="js/pcbpdf.js?v=202610261300"></script>
-<script src="js/folder.js?v=202610261300"></script>
-<script src="js/projects.js?v=202610261300"></script>
-<script src="js/editor.js?v=202610261300"></script>
-<script src="js/jlcorder.js?v=202610261300"></script>
-<script src="js/app.js?v=202610261300"></script>
+<script src="js/config.js?v=202610261400"></script>
+<script src="js/static-backend.js?v=202610261400"></script>
+<script src="js/lib.js?v=202610261400"></script>
+<script src="js/view.js?v=202610261400"></script>
+<script src="js/model.js?v=202610261400"></script>
+<script src="js/schematic.js?v=202610261400"></script>
+<script src="js/pcb.js?v=202610261400"></script>
+<script src="js/pcbview.js?v=202610261400"></script>
+<script src="js/enclosure.js?v=202610261400"></script>
+<script src="js/shape3d.js?v=202610261400"></script>
+<script src="js/easyeda.js?v=202610261400"></script>
+<script src="js/libpanel.js?v=202610261400"></script>
+<script src="js/openlib.js?v=202610261400"></script>
+<script src="js/kicad.js?v=202610261400"></script>
+<script src="js/easyedapro.js?v=202610261400"></script>
+<script src="js/encview.js?v=202610261400"></script>
+<script src="js/docview.js?v=202610261400"></script>
+<script src="js/pcb3d.js?v=202610261400"></script>
+<script src="js/blocks.js?v=202610261400"></script>
+<script src="js/engine.js?v=202610261400"></script>
+<script src="js/ai.js?v=202610261400"></script>
+<script src="js/exports.js?v=202610261400"></script>
+<script src="js/pcbpdf.js?v=202610261400"></script>
+<script src="js/folder.js?v=202610261400"></script>
+<script src="js/projects.js?v=202610261400"></script>
+<script src="js/editor.js?v=202610261400"></script>
+<script src="js/jlcorder.js?v=202610261400"></script>
+<script src="js/app.js?v=202610261400"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

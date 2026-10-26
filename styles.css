@@ -530,3 +530,9 @@ body:not(.static-web) #modal .webonly { display: none; }
 #jlcBody .good { color: var(--good); }
 #jlcBody .bad { color: var(--bad); }
 #jlcBody a.btn { display: inline-block; padding: 6px 12px; border-radius: 6px; text-decoration: none; }
+
+/* provider route labels (⚙ Settings, setup dialog) */
+.prov .tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; border: 1px solid currentColor; margin-left: 4px; vertical-align: 1px; }
+.prov .tag.good { color: var(--good); } .prov .tag.warn { color: var(--warn); }
+.as-tabs .tag.webonly { display: none; color: var(--warn); }
+body.web .as-tabs .tag.webonly { display: inline; }

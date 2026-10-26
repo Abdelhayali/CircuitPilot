@@ -969,7 +969,8 @@ const App = (() => {
   function provRender() {
     const ps = AI.settings.providers;
     $('#provList').innerHTML = ps.length ? ps.map(p => { const n = String(p.models || '').split(',').filter(x => x.trim()).length;
-      return `<div class="prov${p.id === provEditing ? ' editing' : ''}"><div class="pinfo"><b>${esc(p.name)}</b><span class="muted small">${esc(p.base)} · ${n} model${n === 1 ? '' : 's'}${p.key ? ' · key saved' : ''}</span></div><button data-pedit="${esc(p.id)}">Edit</button><button data-pdel="${esc(p.id)}" class="danger" title="Remove this provider">✕</button></div>`; }).join('')
+      const rt = AI.routeOf(p.base), rl = { direct: '<span class="tag good" title="Your browser talks to the provider; the key goes nowhere else">direct</span>', relay: '<span class="tag warn" title="On pcbgo.site this provider is reached through the CircuitPilot relay (open source, stores nothing): your requests and key pass through it">via relay</span>', pc: '<span class="tag" title="Through server.py on this PC — nothing passes through CircuitPilot servers">via this PC</span>', local: '<span class="tag" title="A model server on this PC">local</span>' }[rt];
+      return `<div class="prov${p.id === provEditing ? ' editing' : ''}"><div class="pinfo"><b>${esc(p.name)} ${rl}</b><span class="muted small">${esc(p.base)} · ${n} model${n === 1 ? '' : 's'}${p.key ? ' · key saved' : ''}${rt === 'relay' ? ` · <a href="#" data-relayoff="${esc((() => { try { return new URL(p.base).host; } catch (e) { return ''; } })())}">stop using the relay</a>` : ''}</span></div><button data-pedit="${esc(p.id)}">Edit</button><button data-pdel="${esc(p.id)}" class="danger" title="Remove this provider">✕</button></div>`; }).join('')
       : '<div class="muted small">No providers saved yet. Pick a preset below or enter any OpenAI-compatible URL.</div>';
     $('#provFormTitle').textContent = provEditing ? 'Edit provider' : 'Add a provider';
   }
@@ -1157,6 +1158,8 @@ const App = (() => {
     Engine.env.route = runRouter;
     Engine.env.shape = code => EncView.runScript(code);
     Engine.env.searchKey = () => AI.settings.braveKey;
+    // web version (no server.py): mark the page, and redraw the provider routes once that is known
+    AI.onWeb().then(w => { document.body.classList.toggle('web', w); try { provRender(); } catch (e) { } });
     Engine.env.render = renderForAI;
     Engine.env.exportAll = exportAll;
     Engine.env.ui = what => { if (what === 'fit-sch') Sch.fit(); if (what === 'show-pcb') { showView('pcb'); Pcb.fit(); } if (what === 'show-enc') { showView('enc'); EncView.rebuild(); } if (what === 'show-doc') showView('doc'); };
@@ -1343,6 +1346,7 @@ const App = (() => {
     $('#provNew').onclick = () => provFill(null);
     $('#provList').onclick = e => {
       const ed = e.target.closest('[data-pedit]'), del = e.target.closest('[data-pdel]');
+      const ro = e.target.closest('[data-relayoff]'); if (ro) { e.preventDefault(); AI.forgetRelay(ro.dataset.relayoff); toast('The relay is no longer used for ' + ro.dataset.relayoff + ' — it is called directly (or asks first)'); provRender(); return; }
       if (ed) provFill(AI.settings.providers.find(p => p.id === ed.dataset.pedit));
       if (del) { const p = AI.settings.providers.find(x => x.id === del.dataset.pdel); if (p && confirm(`Remove ${p.name}? Its key is deleted from this browser.`)) { AI.removeProvider(p.id); if (provEditing === p.id) provFill(null); provRender(); renderModels(); } }
     };

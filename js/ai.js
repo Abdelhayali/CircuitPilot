@@ -60,15 +60,44 @@ const AI = (() => {
   const viaProxy = new Set((() => { try { return JSON.parse(localStorage.getItem('cp.corsHosts') || '[]'); } catch (e) { return []; } })());
   const b64url = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const extBase = base => `${location.origin}/llm-ext/${b64url(String(base).trim().replace(/\/+$/, ''))}`;
+  // On the web version (pcbgo.site, no server.py) the "proxy" is the CircuitPilot relay — a server we run — so a key
+  // only goes through it after the user said yes, per provider (remembered; ⚙ Settings shows the route of each one).
+  // With server.py (desktop app / start.bat) the proxy is the user's own PC and nothing passes through us.
+  let webMode = null;
+  async function onWeb() { if (webMode === null) { try { webMode = !!(window.CPStatic && await CPStatic.detect() === 'static'); } catch (e) { webMode = false; } } return webMode; }
+  const relayOk = new Set((() => { try { return JSON.parse(localStorage.getItem('cp.relayOk') || '[]'); } catch (e) { return []; } })());
+  const saveRelayOk = () => { try { localStorage.setItem('cp.relayOk', JSON.stringify([...relayOk])); } catch (e) { } };
+  async function relayConsent(host, afterFail) {
+    if (relayOk.has(host)) return true;
+    const ok = confirm(afterFail
+      ? `The request to ${host} failed.\n\nThis can be a network problem (then just try again), or ${host} blocks requests from web pages. Such providers work on pcbgo.site only through the CircuitPilot relay: your request and API key are forwarded by our relay server (a Cloudflare Worker, open source, it stores nothing).\n\nUse the relay for ${host}? (The desktop version never needs it.)`
+      : `${host} does not accept requests from web pages, so on pcbgo.site it works only through the CircuitPilot relay: your request and API key are forwarded by our relay server (a Cloudflare Worker, open source, it stores nothing).\n\nAllow the relay for ${host}? (The desktop version never needs it.)`);
+    if (!ok) throw new Error(`Not sent: the relay was not allowed for ${host}. Use a provider that works directly from the browser, or the desktop version.`);
+    relayOk.add(host); saveRelayOk(); return true;
+  }
+  function forgetRelay(host) { relayOk.delete(host); viaProxy.delete(host); saveRelayOk(); try { localStorage.setItem('cp.corsHosts', JSON.stringify([...viaProxy])); } catch (x) { } }
+  // how a provider is reached: 'direct' (browser → provider), 'relay' (via the CircuitPilot relay, web version),
+  // 'pc' (via server.py on this PC), 'local' (a model server on this PC)
+  function routeOf(base) {
+    let u; try { u = new URL(String(base || '').trim()); } catch (e) { return 'direct'; }
+    const local = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]', location.hostname].includes(u.hostname) && u.protocol === 'http:';
+    if (local) return 'local';
+    const needs = /(^|\.)ollama\.com$/.test(u.hostname) || viaProxy.has(u.host);
+    return needs ? (webMode ? 'relay' : 'pc') : 'direct';
+  }
   async function llmFetch(base, path, opts = {}) {
     base = String(base || '').trim().replace(/\/+$/, '');
+    const web = await onWeb();
     const resolved = await resolveBase(base);
     let host = ''; try { host = new URL(base).host; } catch (e) { }
     const direct = resolved === base && /^https:/.test(base);   // local servers and Ollama Cloud already have their own route
-    if (direct && viaProxy.has(host)) return fetch(extBase(base) + path, opts);
+    if (web && !direct && /\/llm-cloud\//.test(resolved)) await relayConsent(host);   // Ollama Cloud on the web version
+    if (direct && viaProxy.has(host)) { if (web) await relayConsent(host); return fetch(extBase(base) + path, opts); }
     try { return await fetch(resolved + path, opts); }
     catch (e) {
       if (!direct || e.name === 'AbortError' || e.name === 'TimeoutError' || (opts.signal && opts.signal.aborted)) throw e;
+      // never a silent switch: on the web version the user decides (it may only have been a network glitch)
+      if (web) await relayConsent(host, true);
       viaProxy.add(host); try { localStorage.setItem('cp.corsHosts', JSON.stringify([...viaProxy])); } catch (x) { }
       return fetch(extBase(base) + path, opts);
     }
@@ -457,5 +486,5 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   const modelReady = () => { const m = currentModel(); if (m.provider === 'none') return false; return m.provider === 'anthropic' ? !!settings.anthropicKey : !!m.base; };
 
   const partsApi = Engine.partsApi, loadPart = Engine.loadPart;
-  return { MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, stop, busy, reset, get history() { return history; }, execTool, TOOLS, contextInfo, probeContext, compress };
+  return { routeOf, forgetRelay, onWeb, relayHosts: () => [...relayOk], MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, stop, busy, reset, get history() { return history; }, execTool, TOOLS, contextInfo, probeContext, compress };
 })();

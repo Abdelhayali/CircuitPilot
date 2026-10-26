@@ -536,3 +536,4 @@ body:not(.static-web) #modal .webonly { display: none; }
 .prov .tag.good { color: var(--good); } .prov .tag.warn { color: var(--warn); }
 .as-tabs .tag.webonly { display: none; color: var(--warn); }
 body.web .as-tabs .tag.webonly { display: inline; }
+.as-open { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line, rgba(127,127,127,.25)); }

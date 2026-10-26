@@ -904,7 +904,7 @@ const App = (() => {
       steps: ['Create a free account at <a href="https://ollama.com/signup" target="_blank" rel="noopener">ollama.com/signup</a>.',
         'Open <a href="https://ollama.com/settings/keys" target="_blank" rel="noopener">ollama.com/settings/keys</a> and click <b>Add API key</b>.',
         'Give it a name, copy the key and paste it below.'],
-      note: 'The free plan includes a usage allowance. <b>gpt-oss:120b</b> is selected for you: it handles the copilot\'s tool calls well (it designed the wearable in the demo video). On this web version, Ollama Cloud requests go through the CircuitPilot relay, because Ollama does not accept requests straight from web pages. The relay passes them on and stores nothing; its code is public in the repo.',
+      note: 'The free plan includes a usage allowance. <b>gpt-oss:120b</b> is selected for you: it handles the copilot\'s tool calls well (it designed the wearable in the demo video). Ollama does not accept requests from web pages, so Ollama Cloud works only in the <b>desktop version</b> — on the web, CircuitPilot never sends your key through a server.',
       pick: ids => ({ list: ids, model: preferredModel(SETUP.ollama.base, ids) }),
     },
     claude: {
@@ -916,7 +916,7 @@ const App = (() => {
     custom: {
       steps: ['Any service with an <b>OpenAI-compatible</b> API works: OpenAI, OpenRouter, Groq, Together, DeepSeek, Mistral, xAI, or your own server (vLLM, LM Studio, llama.cpp, Ollama).',
         'Enter its base URL (usually ending in <code>/v1</code>) and your key, then Connect. The models are loaded automatically.'],
-      note: 'You can save several providers and switch between their models in the menu above the chat; manage them in ⚙ Settings. Some providers (NVIDIA, for example) do not accept requests straight from web pages; CircuitPilot then sends them through its relay (or your own server.py on the desktop version), which passes them on and stores nothing.',
+      note: 'You can save several providers and switch between their models in the menu above the chat; manage them in ⚙ Settings. Some providers (NVIDIA, for example) do not accept requests straight from web pages: on the web your key only ever goes straight to the provider, so those work only in the desktop version.',
     },
   };
   let setupTab = 'gemini';
@@ -948,7 +948,7 @@ const App = (() => {
       } else {
         const ids = await AI.fetchModels(g.base, key), p = g.pick(ids);
         if (setupTab === 'ollama') {   // Ollama lists models without a key, so check the key with a one-token request
-          const base = location.origin + '/llm-cloud/ollama/v1';   // server.py's proxy, or the relay on the web version
+          const base = location.origin + '/llm-cloud/ollama/v1';   // server.py's proxy (desktop version only)
           const r = await fetch(base + '/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify({ model: p.model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 }), signal: AbortSignal.timeout(30000) });
           if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(AI.friendlyError(r.status, j.error && (j.error.message || j.error))); }
         }
@@ -969,8 +969,8 @@ const App = (() => {
   function provRender() {
     const ps = AI.settings.providers;
     $('#provList').innerHTML = ps.length ? ps.map(p => { const n = String(p.models || '').split(',').filter(x => x.trim()).length;
-      const rt = AI.routeOf(p.base), rl = { direct: '<span class="tag good" title="Your browser talks to the provider; the key goes nowhere else">direct</span>', relay: '<span class="tag warn" title="On pcbgo.site this provider is reached through the CircuitPilot relay (open source, stores nothing): your requests and key pass through it">via relay</span>', pc: '<span class="tag" title="Through server.py on this PC — nothing passes through CircuitPilot servers">via this PC</span>', local: '<span class="tag" title="A model server on this PC">local</span>' }[rt];
-      return `<div class="prov${p.id === provEditing ? ' editing' : ''}"><div class="pinfo"><b>${esc(p.name)} ${rl}</b><span class="muted small">${esc(p.base)} · ${n} model${n === 1 ? '' : 's'}${p.key ? ' · key saved' : ''}${rt === 'relay' ? ` · <a href="#" data-relayoff="${esc((() => { try { return new URL(p.base).host; } catch (e) { return ''; } })())}">stop using the relay</a>` : ''}</span></div><button data-pedit="${esc(p.id)}">Edit</button><button data-pdel="${esc(p.id)}" class="danger" title="Remove this provider">✕</button></div>`; }).join('')
+      const rt = AI.routeOf(p.base), rl = { direct: '<span class="tag good" title="Your browser talks to the provider; the key goes nowhere else">direct</span>', desktop: '<span class="tag warn" title="This provider does not accept requests from web pages: on the web version CircuitPilot never sends your key through a server, so it works only in the desktop version">desktop only</span>', pc: '<span class="tag" title="Through server.py on this PC — nothing passes through CircuitPilot servers">via this PC</span>', local: '<span class="tag" title="A model server on this PC">local</span>' }[rt];
+      return `<div class="prov${p.id === provEditing ? ' editing' : ''}"><div class="pinfo"><b>${esc(p.name)} ${rl}</b><span class="muted small">${esc(p.base)} · ${n} model${n === 1 ? '' : 's'}${p.key ? ' · key saved' : ''}</span></div><button data-pedit="${esc(p.id)}">Edit</button><button data-pdel="${esc(p.id)}" class="danger" title="Remove this provider">✕</button></div>`; }).join('')
       : '<div class="muted small">No providers saved yet. Pick a preset below or enter any OpenAI-compatible URL.</div>';
     $('#provFormTitle').textContent = provEditing ? 'Edit provider' : 'Add a provider';
   }
@@ -1346,7 +1346,6 @@ const App = (() => {
     $('#provNew').onclick = () => provFill(null);
     $('#provList').onclick = e => {
       const ed = e.target.closest('[data-pedit]'), del = e.target.closest('[data-pdel]');
-      const ro = e.target.closest('[data-relayoff]'); if (ro) { e.preventDefault(); AI.forgetRelay(ro.dataset.relayoff); toast('The relay is no longer used for ' + ro.dataset.relayoff + ' — it is called directly (or asks first)'); provRender(); return; }
       if (ed) provFill(AI.settings.providers.find(p => p.id === ed.dataset.pedit));
       if (del) { const p = AI.settings.providers.find(x => x.id === del.dataset.pdel); if (p && confirm(`Remove ${p.name}? Its key is deleted from this browser.`)) { AI.removeProvider(p.id); if (provEditing === p.id) provFill(null); provRender(); renderModels(); } }
     };

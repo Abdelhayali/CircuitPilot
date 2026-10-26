@@ -1,13 +1,14 @@
 # CircuitPilot relay (Cloudflare Worker)
 
 The web version of CircuitPilot runs entirely in the browser from GitHub Pages. A few services it uses do not accept
-requests from other websites (no CORS): the JLCPCB parts catalogue, the EasyEDA part library, DuckDuckGo / Brave
-search, ordinary web pages and datasheets (for the AI's `web_fetch`), and Ollama Cloud. This relay forwards just those
-requests. It runs on Cloudflare's free plan (100,000 requests a day) and stores nothing.
+requests from other websites (no CORS): the JLCPCB parts catalogue, the EasyEDA part library, DuckDuckGo search, and
+ordinary web pages and datasheets (for the AI's `web_fetch`). This relay forwards just those requests. It runs on
+Cloudflare's free plan (100,000 requests a day) and stores nothing.
 
 It only answers the websites listed in `ALLOWED_ORIGINS` (`wrangler.toml`) and only forwards to the fixed services
-above (`web_fetch` is limited to public http(s) addresses). API keys for Ollama Cloud or Brave are passed through per
-request and never kept.
+above (`web_fetch` is limited to public http(s) addresses). **It handles no API keys:** AI providers are called straight
+from the browser, and providers that refuse browser requests (Ollama Cloud, NVIDIA …) and Brave search work only in the
+desktop version, where requests leave from the user's own PC.
 
 ## Deploy (about 2 minutes)
 

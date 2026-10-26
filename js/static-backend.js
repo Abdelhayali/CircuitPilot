@@ -448,13 +448,14 @@
     q = String(q || '').trim(); if (!q) throw httpError(400, 'Empty query');
     n = Math.max(1, Math.min(+n || 8, 20));
     const base = needRelay();
-    if (braveKey) {
+    // a Brave key would have to go through the relay (Brave refuses browser requests): desktop version only
+    if (braveKey && false) {
       const r = await realFetch(base + '/brave?' + new URLSearchParams({ q, count: n }), { headers: { 'x-brave-key': braveKey } });
       const j = await r.json(); if (!r.ok) throw httpError(502, (j && j.error) || 'Brave search failed');
       return { engine: 'brave', query: q, results: (((j.web || {}).results) || []).slice(0, n).map(x => ({ title: x.title || '', url: x.url || '', snippet: String(x.description || '').replace(/<[^>]+>/g, '') })) };
     }
     const r = await realFetch(base + '/ddg?' + new URLSearchParams({ q }));
-    if (!r.ok) throw httpError(502, 'DuckDuckGo search failed (' + r.status + ') — add a Brave Search key in ⚙ Settings for reliable web search');
+    if (!r.ok) throw httpError(502, 'DuckDuckGo search failed (' + r.status + ') — try again (a Brave Search key works in the desktop version)');
     const doc = new DOMParser().parseFromString(await r.text(), 'text/html'), results = [];
     const add = (a, sn) => {
       const url = cleanDdg(a.getAttribute('href') || '');
@@ -557,13 +558,9 @@
     const bodyBuf = async () => req ? req.arrayBuffer() : new Response(init && init.body).arrayBuffer();
     const header = k => { const h = new Headers((req && req.headers) || (init && init.headers) || {}); return h.get(k); };
     if (p === '/api/version' || p === '/llm-proxy/_ping') return json({ error: 'not running with server.py' }, 404);
-    if (p.startsWith('/llm-cloud/ollama')) {   // Ollama Cloud through the relay (keeps streaming responses)
-      const target = needRelay() + '/ollama' + p.slice('/llm-cloud/ollama'.length) + url.search;
-      return realFetch(target, { method, headers: (req && req.headers) || (init && init.headers), body: method === 'GET' || method === 'HEAD' ? undefined : await bodyBuf(), signal: (init && init.signal) || (req && req.signal) });
-    }
-    if (p.startsWith('/llm-ext/')) {   // OpenAI-compatible providers that refuse browser requests, through the relay
-      return realFetch(needRelay() + '/llm/' + p.slice('/llm-ext/'.length) + url.search, { method, headers: (req && req.headers) || (init && init.headers), body: method === 'GET' || method === 'HEAD' ? undefined : await bodyBuf(), signal: (init && init.signal) || (req && req.signal) });
-    }
+    // API keys never go through a CircuitPilot server: providers that refuse browser requests (Ollama Cloud, NVIDIA …)
+    // work only in the desktop version, where requests leave from the user's own PC
+    if (p.startsWith('/llm-cloud/') || p.startsWith('/llm-ext/')) return json({ error: 'This provider does not accept requests from web pages. In CircuitPilot on the web, API keys only go straight to the provider, never through our servers — use this provider in the desktop version.' }, 403);
     if (p.startsWith('/llm-proxy/')) return json({ error: 'Local model servers are reached directly in the web version' }, 404);
     const seg = p.split('/').filter(Boolean).slice(1).map(decodeURIComponent);   // ['projects', id, 'meta'] …
     if (seg[0] === 'projects') return json(await projects(method, seg.slice(1), method === 'PUT' || method === 'POST' ? await bodyJson() : null));

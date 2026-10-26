@@ -370,6 +370,7 @@ const Model = (() => {
     for (const [n, keys] of Object.entries(S.nets)) if (keys.length < 2 && !isPower(n)) issues.push({ level: 'error', msg: `Net ${n} has only one pin (${keys[0]})` });
     if (S.components.length && !Object.keys(S.nets).some(isGround)) issues.push({ level: 'warn', msg: 'No ground net (GND) in the design' });
     for (let i = 0; i < S.components.length; i++) for (let j = i + 1; j < S.components.length; j++) {
+      if ((S.components[i].sheet || 0) !== (S.components[j].sheet || 0)) continue; // symbols on different sheets never overlap
       const a = bbox(S.components[i], -2), b = bbox(S.components[j], -2);
       if (!(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3])) issues.push({ level: 'info', msg: `${S.components[i].ref} overlaps ${S.components[j].ref} on the schematic` });
     }

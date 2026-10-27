@@ -635,10 +635,11 @@ const PcbView = (() => {
         for (const v of S.pcb.vias) if (v.net !== pr.net) m.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2 + cl}" fill="black"/>`);
         m.push(`<path d="${bpath}" fill="none" stroke="black" stroke-width="${2 * R0.edgeClearance}"/>`);
         for (const k of Pcb.keepouts()) if (k.pours && (k.layer === 'both' || k.layer === L)) m.push(`<path d="M${k.pts.map(q => q.join(' ')).join('L')}Z" fill="black"/>`);
-        for (const [x0, y0, x1, y1] of Pcb.pourDeadRects(pr)) m.push(`<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="black"/>`);
         out.push(`<defs><mask id="pm${i}" maskUnits="userSpaceOnUse" x="-50" y="-50" width="${S.board.w + 100}" height="${S.board.h + 100}">${m.join('')}</mask></defs>`);
         const sel = ui.item && ui.item.k === 'pour' && ui.item.i === i;
-        out.push(`<path data-k="pour" data-i="${i}" class="pour${hl && pr.net === hl ? ' hl' : ''}" pointer-events="none" d="M${poly.map(q => q.join(' ')).join('L')}Z" fill="${c}" fill-opacity="${sel ? 0.55 : 0.38}" mask="url(#pm${i})" clip-path="url(#bclip)" opacity="${op}"><title>Copper area · ${esc(pr.net)} · ${LNAME[L]}</title></path>`);
+        // only the live pieces (as in the Gerber), with the clearance around other nets' copper masked out
+        let fd; try { fd = Pcb.pourFill(pr, 'view').rings.map(rg => 'M' + rg.pts.map(q => q.join(' ')).join('L') + 'Z').join(''); } catch (e) { fd = 'M' + poly.map(q => q.join(' ')).join('L') + 'Z'; }
+        out.push(`<path data-k="pour" data-i="${i}" class="pour${hl && pr.net === hl ? ' hl' : ''}" pointer-events="none" d="${fd || 'M0 0'}" fill-rule="evenodd" fill="${c}" fill-opacity="${sel ? 0.55 : 0.38}" mask="url(#pm${i})" clip-path="url(#bclip)" opacity="${op}"><title>Copper area · ${esc(pr.net)} · ${LNAME[L]}</title></path>`);
         if (sel) out.push(`<path d="M${poly.map(q => q.join(' ')).join('L')}Z" class="selbox" />`);
       });
       out.push(`<g class="cu" opacity="${op}">`);

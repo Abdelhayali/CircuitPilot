@@ -264,7 +264,7 @@ const Pcb = (() => {
 
   // Raster of one pour: cells inside the pour and the board, away from other nets' copper. Labels = connected islands.
   // Islands that touch no copper of the pour's net (dead copper) or are smaller than the rule pourMinArea are dropped:
-  // label 0 like blocked cells; `dead` keeps their cells so the drawing and the Gerber can clear them.
+  // label 0 like blocked cells. (The Gerber and the views draw the finer outlines of pourFill.)
   const pourMemo = new Map(); let pourCells = 0;
   function pourRaster(pr, gStep = 0.2) {
     const S0 = Model.S, key = JSON.stringify([pr, gStep, S0.board, S0.rules, S0.nets[pr.net], S0.pcb.traces, S0.pcb.vias, S0.pcb.holes, S0.pcb.keepouts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side])]);
@@ -318,13 +318,13 @@ const Pcb = (() => {
     for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net === pr.net && padCu(q, L2).includes(pr.layer)) touch(padShape(q));
     for (const t of S.pcb.traces) if (t.net === pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) touch({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 });
     for (const v of S.pcb.vias) if (v.net === pr.net) touch({ k: 'circ', c: [v.x, v.y], r: v.d / 2 });
-    const minCells = (R.pourMinArea || 0) / (gStep * gStep), drop = new Uint8Array(n + 1), dead = [];
+    const minCells = (R.pourMinArea || 0) / (gStep * gStep), drop = new Uint8Array(n + 1);
     let kept = 0, deadArea = 0;
     for (let k = 1; k <= n; k++) { if (!live[k] || size[k] < minCells) drop[k] = 1; else kept++; }
-    if (kept < n) for (let i = 0; i < N; i++) if (label[i] && drop[label[i]]) { dead.push(i); label[i] = 0; deadArea++; }
+    if (kept < n) for (let i = 0; i < N; i++) if (label[i] && drop[label[i]]) { label[i] = 0; deadArea++; }
     // relabel the kept islands 1…kept
     if (kept < n) { const nl = new Int32Array(n + 1); let m = 0; for (let k = 1; k <= n; k++) if (!drop[k]) nl[k] = ++m; for (let i = 0; i < N; i++) if (label[i]) label[i] = nl[label[i]]; }
-    return { W, H, g: gStep, label, islands: kept, dead, removed: n - kept, removedArea: +(deadArea * gStep * gStep).toFixed(2), at: at0 };
+    return { W, H, g: gStep, label, islands: kept, removed: n - kept, removedArea: +(deadArea * gStep * gStep).toFixed(2), at: at0 };
   }
   // each piece of a pour with its area and the pads it touches (connectivity says which pieces are joined)
   function pourIslands(pr) {
@@ -417,16 +417,138 @@ const Pcb = (() => {
     return { applied: S.pcb.pours.length, pours: S.pcb.pours.map(describePour) };
   }
   const describePour = p => `${p.net} ${p.layer === 'B' ? 'bottom' : 'top'} ${p.pts ? p.pts.length + '-corner area' : 'whole board'}${p.clip ? ' clipped ' + Object.entries(p.clip).map(([k, v]) => `${k.replace('_', ' ')} ${v}`).join(', ') : ''}`;
-  function pourDeadRects(pr) {
-    const r = pourRaster(pr); if (!r.dead.length) return [];
-    const h = r.g * 0.95, out = [], set = new Set(r.dead);
-    for (const i of r.dead) {
-      if (set.has(i - 1) && (i - 1) % r.W !== r.W - 1) continue;   // not the start of a run
-      let j = i; while (set.has(j + 1) && (j + 1) % r.W !== 0) j++;
-      const y = Math.floor(i / r.W) * r.g, xa = (i % r.W) * r.g, xb = (j % r.W) * r.g;
-      out.push([+(xa - h).toFixed(4), +(y - h).toFixed(4), +(xb + h).toFixed(4), +(y + h).toFixed(4)]);
+  // The live copper of a pour as outlines, for the Gerber and the board / 3D views. A distance field — other nets' copper
+  // minus the clearance, the board edge minus the edge clearance, the pour outline, keep-outs — is sampled on a fine
+  // grid; pieces with no copper of the pour's own net (or under pourMinArea) are dropped, and every live piece is
+  // traced (marching squares) δ outside its true edge, i.e. inside the clearance band. The caller then clears that band
+  // with the exact copper shapes, so all edges are exact, and nothing outside a live piece is ever drawn: no slivers of
+  // dead copper ("scrap copper") between tracks or along them. Rings come sorted by nesting depth: even = copper, odd = hole.
+  const fillMemo = new Map();
+  function pourFill(pr, gStep) {
+    const S = Model.S, R = rules(), cl = pourCl(R, pr), A = S.board.w * S.board.h;
+    // Gerber: ≥ 0.05 mm (finer on small boards); 'view' (board / 3D view, redrawn while parts move): 0.1 – 0.2 mm by board size
+    const g = gStep === 'view' ? (A <= 1000 ? 0.1 : A <= 3000 ? 0.15 : 0.2) : gStep || Math.max(0.05, Math.ceil(Math.sqrt(A / 2.5e6) * 100) / 100);
+    const key = JSON.stringify([pr, g, S.board, S.rules, S.nets[pr.net], S.pcb.traces, S.pcb.vias, S.pcb.holes, S.pcb.keepouts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side])]);
+    if (fillMemo.has(key)) return fillMemo.get(key);
+    const r = pourFillI(pr, g, cl, R);
+    fillMemo.set(key, r); while (fillMemo.size > 8) fillMemo.delete(fillMemo.keys().next().value);
+    return r;
+  }
+  function pourFillI(pr, g, cl, R) {
+    const S = Model.S, idx = Model.pinIndex(), L2 = R.layers === 1 ? ['F'] : ['F', 'B'];
+    const { sqrt, abs, min, max, floor, ceil } = Math;   // local: global lookups are slow in the tool server's sandbox
+    const dl = min(1.2 * g, 0.6 * cl), M = dl + 2 * g;   // δ, and how far the field is resolved
+    // the grid covers the pour's own area (a panel has many small pours); sample (x, y) sits at ((x + X0) g, (y + Y0) g)
+    const pp = pourPoly(pr); let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity; for (const [x, y] of pp) { bx0 = min(bx0, x); by0 = min(by0, y); bx1 = max(bx1, x); by1 = max(by1, y); }
+    const X0 = max(0, floor((bx0 - M) / g)), Y0 = max(0, floor((by0 - M) / g)), X1 = min(ceil(S.board.w / g), ceil((bx1 + M) / g)), Y1 = min(ceil(S.board.h / g), ceil((by1 + M) / g));
+    const W = max(1, X1 - X0 + 1), H = max(1, Y1 - Y0 + 1), N = W * H, f = new Float32Array(N).fill(M);
+    // signed distance to a shape (negative inside)
+    const sd = (s, x, y) => {
+      if (s.k === 'circ') { const dx = x - s.c[0], dy = y - s.c[1]; return sqrt(dx * dx + dy * dy) - s.r; }
+      if (s.k === 'rect') { const dx = abs(x - s.cx) - s.hw, dy = abs(y - s.cy) - s.hh; if (dx <= 0 && dy <= 0) return dx > dy ? dx : dy; const ex = dx > 0 ? dx : 0, ey = dy > 0 ? dy : 0; return sqrt(ex * ex + ey * ey); }
+      const vx = s.b[0] - s.a[0], vy = s.b[1] - s.a[1], l2 = vx * vx + vy * vy; let t = l2 ? ((x - s.a[0]) * vx + (y - s.a[1]) * vy) / l2 : 0; t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const ex = x - s.a[0] - t * vx, ey = y - s.a[1] - t * vy; return sqrt(ex * ex + ey * ey) - s.r;
+    };
+    const span = (b, m) => [max(0, floor((b[0] - m) / g) - X0), max(0, floor((b[1] - m) / g) - Y0), min(W - 1, ceil((b[2] + m) / g) - X0), min(H - 1, ceil((b[3] + m) / g) - Y0)];
+    // a rectangular pad is cleared as the Gerber does it: the pad aperture grown by 2 cl (square corners)
+    const obstacle = (s, c) => { if (s.k === 'rect') { s = { k: 'rect', cx: s.cx, cy: s.cy, hw: s.hw + c, hh: s.hh + c }; c = 0; } const [x0, y0, x1, y1] = span(bboxOf(s), c + M); for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const i = y * W + x, v = sd(s, (x + X0) * g, (y + Y0) * g) - c; if (v < f[i]) f[i] = v; } };
+    // polygon term: sign · (signed distance, positive inside) − off; resolved within M of the outline, ±M elsewhere
+    const polyTerm = (pl, off, sign) => {
+      const ins = new Uint8Array(N), dm = new Float32Array(N).fill(M + abs(off));
+      for (let y = 0; y < H; y++) { const py = (y + Y0) * g, xs = []; for (let i = 0, j = pl.length - 1; i < pl.length; j = i++) { const [xi, yi] = pl[i], [xj, yj] = pl[j]; if ((yi > py) !== (yj > py)) xs.push((xj - xi) * (py - yi) / (yj - yi) + xi); } xs.sort((a, b) => a - b); for (let k = 0; k + 1 < xs.length; k += 2) { const xe = min(W - 1, floor(xs[k + 1] / g) - X0); for (let x = max(0, ceil(xs[k] / g) - X0); x <= xe; x++) ins[y * W + x] = 1; } }
+      for (let e = 0; e < pl.length; e++) { const s = { k: 'seg', a: pl[e], b: pl[(e + 1) % pl.length], r: 0 }, [x0, y0, x1, y1] = span(bboxOf(s), M + abs(off)); for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const i = y * W + x, d = sd(s, (x + X0) * g, (y + Y0) * g); if (d < dm[i]) dm[i] = d; } }
+      for (let i = 0; i < N; i++) { const v = sign * ((ins[i] ? dm[i] : -dm[i]) - off); if (v < f[i]) f[i] = v; }
+    };
+    polyTerm(boardPoly(), R.edgeClearance, 1);
+    polyTerm(pp, -dl, 1);   // the trace lands on the pour outline itself
+    for (const k of keepouts()) if (k.pours && koOn(k, pr.layer)) polyTerm(k.pts, 0, -1);
+    for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net !== pr.net && padCu(q, L2).includes(pr.layer)) obstacle(padShape(q), cl);
+    for (const t of S.pcb.traces) if (t.net !== pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) obstacle({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, cl);
+    for (const v of S.pcb.vias) if (v.net !== pr.net) obstacle({ k: 'circ', c: [v.x, v.y], r: v.d / 2 }, cl);
+    for (const h of S.pcb.holes || []) obstacle({ k: 'circ', c: [h.x, h.y], r: h.d / 2 }, cl);
+    // pieces: samples with f > τ (τ > g/2: the free disks of two neighbours overlap, so the copper between them is
+    // really there), 4-connected; the thinner rim (0 < f ≤ τ) joins the one piece next to it, or -1 when it touches
+    // none or two (a hairline the grid cannot resolve: never drawn). Then: which pieces touch copper of the pour's net
+    const tau = 0.55 * g, label = new Int32Array(N), size = [0]; let n = 0;
+    for (let i = 0; i < N; i++) if (f[i] > tau && !label[i]) {
+      n++; const st = [i]; label[i] = n; size[n] = 0;
+      const go = j => { if (f[j] > tau && !label[j]) { label[j] = n; st.push(j); } };
+      while (st.length) { const k = st.pop(), x = k % W; size[n]++; if (x + 1 < W) go(k + 1); if (x > 0) go(k - 1); if (k + W < N) go(k + W); if (k >= W) go(k - W); }
     }
-    return out;
+    const nb8 = (i, fn) => { const x = i % W, y = (i / W) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const nx = x + dx, ny = y + dy; if (nx >= 0 && ny >= 0 && nx < W && ny < H) fn(ny * W + nx); } };
+    for (let i = 0; i < N; i++) if (f[i] > 0 && f[i] <= tau) {
+      let one = 0; nb8(i, j => { const m = label[j]; if (m > 0 && f[j] > tau) one = one === 0 || one === m ? m : -1; });
+      label[i] = one || -1; if (one > 0) size[one]++;
+    }
+    const live = new Uint8Array(n + 1);
+    const touch = s => { const [x0, y0, x1, y1] = span(bboxOf(s), g); for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const i = y * W + x; if (label[i] > 0 && f[i] > tau && sd(s, (x + X0) * g, (y + Y0) * g) < f[i]) live[label[i]] = 1; } };   // a solid sample whose free disk reaches the copper (a hairline is no connection)
+    const own = [];
+    for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net === pr.net && padCu(q, L2).includes(pr.layer)) own.push(padShape(q));
+    for (const t of S.pcb.traces) if (t.net === pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) own.push({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 });
+    for (const v of S.pcb.vias) if (v.net === pr.net) own.push({ k: 'circ', c: [v.x, v.y], r: v.d / 2 });
+    for (const s of own) touch(s);
+    const minCells = (R.pourMinArea || 0) / (g * g);
+    for (let k = 1; k <= n; k++) if (size[k] < minCells) live[k] = 0;
+    // traced field (padded by one sample of -1): live samples f + δ; samples next to a live one and to nothing dead or
+    // unresolved f + δ (the band δ wide outside the piece); everything else -1, so a dead piece is never drawn
+    const Wp = W + 2, Hp = H + 2, v = new Float32Array(Wp * Hp).fill(-1);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x, l = label[i]; let val = -1;
+      if (l > 0) { if (live[l]) val = f[i] + dl; }
+      else if (l === 0) {
+        let nl = false, nd = false;
+        nb8(i, j => { const m = label[j]; if (m > 0 && live[m]) nl = true; else if (m) nd = true; });
+        if (nl && !nd) val = f[i] + dl;   // the true value, so the crossing lands where the field says
+      }
+      v[(y + 1) * Wp + x + 1] = val;
+    }
+    // the outline always runs into the net's own pads / tracks / vias (drawn on top anyway): no micro-gap where a piece meets them
+    for (const s of own) { const [x0, y0, x1, y1] = span(bboxOf(s), 0); for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const j = (y + 1) * Wp + x + 1; if (v[j] < 0.5 * g && sd(s, (x + X0) * g, (y + Y0) * g) <= 0) v[j] = 0.5 * g; } }
+    // marching squares: one crossing point per grid edge, two segments meet at each point; saddles follow the cell centre
+    const pt = new Map(), adj = new Map(), PX = i => (i - 1 + X0) * g, PY = i => (i - 1 + Y0) * g;
+    const edgePt = (id) => { if (pt.has(id)) return pt.get(id); const h = id % 2 === 0, c = id >> 1, x = c % Wp, y = (c / Wp) | 0, a = v[c], b = h ? v[c + 1] : v[c + Wp], t = a / (a - b), p = h ? [PX(x) + t * g, PY(y)] : [PX(x), PY(y) + t * g]; pt.set(id, p); return p; };
+    const link = (a, b) => { for (const [p, q] of [[a, b], [b, a]]) { const l = adj.get(p); if (l) l.push(q); else adj.set(p, [q]); } };
+    for (let y = 0; y + 1 < Hp; y++) for (let x = 0; x + 1 < Wp; x++) {
+      const c = y * Wp + x, a = v[c] > 0, b = v[c + 1] > 0, cc = v[c + Wp + 1] > 0, d = v[c + Wp] > 0;
+      if (a === b && b === cc && cc === d) continue;
+      const T = 2 * c, Rr = 2 * (c + 1) + 1, B = 2 * (c + Wp), Lf = 2 * c + 1;   // top, right, bottom, left edge ids
+      const cut = [[Lf, T], [T, Rr], [Rr, B], [B, Lf]], s = [a, b, cc, d];
+      if (a === cc && b === d) {   // saddle: cut off the corners whose sign differs from the centre
+        const ctr = (v[c] + v[c + 1] + v[c + Wp + 1] + v[c + Wp]) / 4 > 0;
+        for (let k = 0; k < 4; k++) if (s[k] !== ctr) link(...cut[k]);
+      } else {
+        const e = []; if (a !== b) e.push(T); if (b !== cc) e.push(Rr); if (cc !== d) e.push(B); if (d !== a) e.push(Lf);
+        link(e[0], e[1]);
+      }
+    }
+    // rings, simplified (Douglas–Peucker, well under δ)
+    const eps = Math.min(0.01, dl / 4), rings = [];
+    const simplify = P => {
+      const keep = new Uint8Array(P.length); keep[0] = keep[P.length - 1] = 1; const st = [[0, P.length - 1]];
+      while (st.length) { const [i0, i1] = st.pop(); let dm = 0, im = -1; const [ax, ay] = P[i0], [bx, by] = P[i1], vx = bx - ax, vy = by - ay, l = Math.hypot(vx, vy) || 1e-9;
+        for (let i = i0 + 1; i < i1; i++) { const dd = abs((P[i][0] - ax) * vy - (P[i][1] - ay) * vx) / l; if (dd > dm) { dm = dd; im = i; } }
+        if (dm > eps) { keep[im] = 1; st.push([i0, im], [im, i1]); } }
+      return P.filter((q, i) => keep[i]);
+    };
+    const seen = new Set();
+    for (const s0 of adj.keys()) {
+      if (seen.has(s0)) continue;
+      const ids = [s0]; seen.add(s0); let prev = -1, cur = s0;
+      for (;;) { const nx = adj.get(cur).find(q => q !== prev && !seen.has(q)); if (nx == null) break; seen.add(nx); ids.push(nx); prev = cur; cur = nx; }
+      if (ids.length < 3) continue;
+      const P = ids.map(edgePt); P.push(P[0]);
+      // split the closed ring at its farthest point so both halves simplify cleanly
+      let far = 0, fd = 0; for (let i = 1; i < P.length - 1; i++) { const dd = (P[i][0] - P[0][0]) ** 2 + (P[i][1] - P[0][1]) ** 2; if (dd > fd) { fd = dd; far = i; } }
+      const pts = simplify(P.slice(0, far + 1)).concat(simplify(P.slice(far)).slice(1, -1)).map(q => [+q[0].toFixed(4), +q[1].toFixed(4)]);
+      if (pts.length < 3) continue;
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity; for (const [x, y] of pts) { bx0 = min(bx0, x); by0 = min(by0, y); bx1 = max(bx1, x); by1 = max(by1, y); }
+      rings.push({ pts, box: [bx0, by0, bx1, by1] });
+    }
+    // nesting depth: how many other rings hold a point of this one (contours never cross)
+    for (const rg of rings) { const [x, y] = rg.pts[0]; rg.depth = 0; for (const o of rings) if (o !== rg && x >= o.box[0] && x <= o.box[2] && y >= o.box[1] && y <= o.box[3] && inPoly(x, y, o.pts)) rg.depth++; }
+    rings.sort((a, b) => a.depth - b.depth);
+    let pieces = 0, dropped = 0; for (let k = 1; k <= n; k++) live[k] ? pieces++ : dropped++;
+    return { g, rings: rings.map(rg => ({ pts: rg.pts, hole: rg.depth % 2 === 1 })), pieces, dropped };
   }
   function addPour(o = {}) {
     const S = Model.S; if (!S.board.w) throw new Error('Generate the PCB first');
@@ -2591,15 +2713,15 @@ const Pcb = (() => {
       const pours = (S.pcb.pours || []).filter(pr => pr.layer === layer && S.nets[pr.net]);
       if (pours.length) {
         b.push('G01*');
+        const region = pts => { b.push('G36*', X(...pts[0]) + 'D02*'); for (const q of pts.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...pts[0]) + 'D01*', 'G37*'); };
         for (const pr of pours) {
-          const poly = pourPoly(pr), cl = pourCl(R, pr);
-          b.push('%LPD*%', 'G36*', X(...poly[0]) + 'D02*'); for (const q of poly.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...poly[0]) + 'D01*', 'G37*');
+          const cl = pourCl(R, pr);
+          // the live pieces, traced just into the clearance band (holes cleared), then the band cleared with the exact
+          // shapes of other nets' copper, the board edge and the keep-outs — dead copper is simply never drawn
+          for (const rg of pourFill(pr).rings) { b.push(rg.hole ? '%LPC*%' : '%LPD*%'); region(rg.pts); }
           b.push('%LPC*%'); drawCopper(A, b, layer, 2 * cl, pr.net);
           b.push(A(`C,${f6(2 * R.edgeClearance)}`) + '*', X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*');
-          // keep-outs and the dropped pieces (dead copper, islands under pourMinArea) are cleared too
-          const region = pts => { b.push('G36*', X(...pts[0]) + 'D02*'); for (const q of pts.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...pts[0]) + 'D01*', 'G37*'); };
           for (const k of keepouts()) if (k.pours && koOn(k, layer)) region(k.pts);
-          for (const [x0, y0, x1, y1] of pourDeadRects(pr)) region([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
         }
         b.push('%LPD*%');
       }
@@ -2949,7 +3071,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourDeadRects, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

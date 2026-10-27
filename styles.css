@@ -189,7 +189,7 @@ details.tool pre.res { color: var(--tool-res); } details.tool.err pre.res { colo
 .dlg label { display: block; font-size: 12px; color: var(--muted); margin: 6px 0; }
 .dlg label input:not([type=checkbox]) { display: block; width: 100%; margin-top: 3px; color: var(--text); }
 .dlg label.chk { display: flex; color: var(--text); }
-.dlg .good { color: var(--good); } .dlg .bad { color: var(--bad); }
+.dlg .good { color: var(--good); } .dlg .bad { color: var(--bad); } .dlg .warn { color: var(--warn); }
 .presets { display: flex; flex-wrap: wrap; gap: 4px; } .presets button { font-size: 11px; padding: 2px 8px; }
 #toast { position: fixed; bottom: 40px; left: 50%; transform: translate(-50%, 20px); background: var(--toast-bg); border: 1px solid var(--hover-line); box-shadow: 0 6px 20px var(--shadow); padding: 8px 14px; border-radius: 8px; opacity: 0; transition: .2s; pointer-events: none; z-index: 60; max-width: 70vw; }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }

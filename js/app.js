@@ -475,6 +475,14 @@ const App = (() => {
     }
     return orderWebsite();
   }
+  // Upload to JLCPCB without ordering: JLCPCB reviews the Gerbers and prices the board (needs JLCPCB API keys, desktop)
+  async function uploadPcb() {
+    if (!Model.S.board.w || !Pcb.placed().length) { toast('No PCB yet — Generate PCB first'); return; }
+    if (typeof JlcOrder === 'undefined' || !await JlcOrder.available()) { toast('Uploading to JLCPCB needs JLCPCB API keys (desktop version, jlcapi-keys.json). Use Order at JLCPCB → the website instead.', 10000); return; }
+    const d = showDrc();
+    if (d.errors && !confirm(`DRC: ${d.summary}. Upload anyway? (The JLCPCB review will also see the problems)`)) return;
+    return JlcOrder.check();
+  }
   async function orderWebsite() {
     if (!Model.S.board.w || !Pcb.placed().length) { toast('No PCB yet — Generate PCB first'); return; }
     closeOrderTab();
@@ -1247,6 +1255,7 @@ const App = (() => {
     $$('[data-layer]').forEach(cb => cb.onchange = () => { Pcb.ui.show[cb.dataset.layer] = cb.checked; Pcb.render(); });
     $('#btnGerber').onclick = () => exportAs('gerber');
     $('#btnOrderPcb').onclick = orderPcb;
+    $('#btnUploadJlc').onclick = uploadPcb;
 
     $('#btnUndo').onclick = () => Model.undo(); $('#btnRedo').onclick = () => Model.redo();
     $('#btnProjects').onclick = () => Projects.show();

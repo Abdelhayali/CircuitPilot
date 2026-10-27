@@ -1393,6 +1393,8 @@ const App = (() => {
     $('#aiSetup .as-tabs').onclick = e => { const b = e.target.closest('button[data-p]'); if (b) { setupTab = b.dataset.p; setupRender(); } };
     $('#asConnect').onclick = setupConnect;
     $('#asKey').onkeydown = e => { if (e.key === 'Enter') setupConnect(); };
+    // the key-privacy note is about the web version (no server of ours between you and the provider): not shown in the desktop app
+    AI.onWeb().then(w => $$('.as-safe').forEach(el => el.hidden = !w));
     $('#chat').addEventListener('click', e => { if (e.target.closest('[data-connect]')) openSetup(); });
     $('#chat').addEventListener('click', e => { const i = e.target.closest('img.shot'); if (i) i.classList.toggle('big'); });
     if (!AI.modelReady()) setTimeout(() => { if (!AI.modelReady()) openSetup(); }, 600);

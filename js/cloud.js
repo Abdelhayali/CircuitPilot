@@ -13,7 +13,9 @@ const Cloud = (() => {
   let st = { email: '', name: '', picture: '', map: {}, lib: null, last: 0 };
   try { st = Object.assign(st, JSON.parse(localStorage.getItem('cp.cloud') || '{}')); } catch (e) { }
   const keep = () => { try { localStorage.setItem('cp.cloud', JSON.stringify(st)); } catch (e) { } };
-  let token = null, tokenExp = 0, tc = null, pending = null, busy = null, status = 'off', statusMsg = '', pushT = null;
+  let token = null, tokenExp = 0, tc = null, pending = null, busy = null, status = 'off', statusMsg = '', pushT = null, askConsent = false;
+  const DRIVE = 'https://www.googleapis.com/auth/drive.appdata';
+  const NEED = 'CircuitPilot did not get the Google Drive permission. Click Sync now and, on the Google page, tick “See, create and delete its own configuration data in your Google Drive”.';
 
   // ---------- Google sign-in (Google Identity Services: a token for Drive app data, from Google's own window) ----------
   let gisP = null;
@@ -30,8 +32,13 @@ const Cloud = (() => {
     await loadGis();
     return new Promise((res, rej) => {
       tc = google.accounts.oauth2.initTokenClient({
-        client_id: clientId(), scope: SCOPE, prompt: interactive === 'pick' ? 'select_account' : '', login_hint: st.email || undefined,
-        callback: r => { if (r.error) return rej(new Error(r.error_description || r.error)); token = r.access_token; tokenExp = Date.now() + (+r.expires_in || 3600) * 1000; res(token); },
+        client_id: clientId(), scope: SCOPE, prompt: askConsent ? 'consent' : interactive === 'pick' ? 'select_account' : '', login_hint: st.email || undefined,
+        callback: r => {
+          if (r.error) return rej(new Error(r.error_description || r.error));
+          // Google lets the user untick single permissions: without Drive the token is useless here
+          if (!google.accounts.oauth2.hasGrantedAllScopes(r, DRIVE)) { token = null; askConsent = true; setStatus('reconnect', NEED); return rej(new Error(NEED)); }
+          askConsent = false; token = r.access_token; tokenExp = Date.now() + (+r.expires_in || 3600) * 1000; res(token);
+        },
         error_callback: e => rej(new Error(e && e.type === 'popup_closed' ? 'Sign-in window closed' : e && e.type === 'popup_failed_to_open' ? 'The browser blocked the Google window — allow pop-ups for this site' : (e && e.message) || 'Sign-in failed')),
       });
       tc.requestAccessToken();
@@ -42,14 +49,18 @@ const Cloud = (() => {
     if (!t) { setStatus('reconnect', 'Click ☁ to reconnect to Google Drive'); throw new Error('not connected'); }
     const r = await fetch(url, { method, headers: Object.assign({ authorization: 'Bearer ' + t }, headers), body });
     if (r.status === 401) { token = null; setStatus('reconnect', 'Google sign-in expired — click ☁ to reconnect'); throw new Error('Google sign-in expired'); }
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error((j.error && j.error.message) || r.statusText); }
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({})), msg = (j.error && j.error.message) || r.statusText;
+      if (r.status === 403 && /insufficient.*scope|scope/i.test(msg)) { token = null; askConsent = true; setStatus('reconnect', NEED); throw new Error('not connected: ' + NEED); }
+      throw new Error(msg);
+    }
     return r.status === 204 ? null : r.headers.get('content-type') && r.headers.get('content-type').includes('json') ? r.json() : r.text();
   }
   async function signIn() {
     try {
       setStatus('busy', 'Signing in…');
       await getToken('pick');
-      const u = await g('GET', 'https://www.googleapis.com/oauth2/v3/userinfo');
+      const u = await g('GET', 'https://www.googleapis.com/oauth2/v3/userinfo').catch(() => ({ email: st.email || 'Google account', name: st.name || '' }));
       if (st.email && st.email !== u.email) st.map = {}, st.lib = null;   // another account: its Drive has other files
       Object.assign(st, { email: u.email, name: u.name || u.email, picture: u.picture || '' }); keep();
       App.toast(`Signed in as ${u.email} — syncing your projects with your Google Drive…`, 5000);

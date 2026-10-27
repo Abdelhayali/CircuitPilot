@@ -558,3 +558,12 @@ body.web .as-tabs .tag.webonly { display: inline; }
 /* enclosure dimensions + ruler read-out */
 .encdims { position: absolute; left: 10px; top: 8px; background: var(--float-bg); border: 1px solid var(--float-line); padding: 4px 9px; border-radius: 6px; font-size: 12px; pointer-events: none; display: none; max-width: calc(100% - 20px); }
 .encdims .encruler { margin-top: 2px; color: var(--text); }
+/* Google sign-in / Drive sync */
+.cloudwrap { position: relative; display: inline-block; }
+.cloudbtn { white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.cloudbtn.ok { color: var(--good, #3fb950); } .cloudbtn.error, .cloudbtn.reconnect { color: var(--warn, #d29922); } .cloudbtn.busy { opacity: .8; }
+.cloudpanel { position: absolute; right: 0; top: calc(100% + 6px); width: min(340px, calc(100vw - 24px)); z-index: 60; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .3); font-size: 13px; }
+.cloudpanel.hidden { display: none; }
+.cloudpanel p { margin: 6px 0 10px; }
+.cloudme { display: flex; gap: 10px; align-items: center; }
+.cloudme img { width: 34px; height: 34px; border-radius: 50%; }

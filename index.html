@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610280600">
+<link rel="stylesheet" href="styles.css?v=202610280900">
 </head>
 <body>
 <header id="top">
@@ -45,6 +45,7 @@
   <div class="spacer"></div>
   <input id="projName" spellcheck="false" title="Project name — click to rename">
   <span id="saveState"></span><span id="folderState" class="hidden folderstate"></span>
+  <span class="cloudwrap"><button id="cloudBtn" class="cloudbtn">☁ Sign in</button><div id="cloudPanel" class="cloudpanel hidden"></div></span>
   <button id="btnTheme" title="Theme"></button>
   <button id="btnSettings">⚙ Settings</button>
   <input type="file" id="fileIn" accept=".json,.epro,.epro2,.zip" hidden>
@@ -209,6 +210,7 @@
       <label class="chk"><input id="sWeb" type="checkbox"> Let the AI search the internet and read web pages / PDF datasheets</label>
       <label>Brave Search API key (optional, desktop version — DuckDuckGo is used without one)<input id="sBrave" type="password" autocomplete="off" placeholder="BSA…"></label>
       <label class="webonly">Relay address (web version: part search and web search — never API keys)<input id="sRelay" autocomplete="off" placeholder="https://circuitpilot-relay.your-name.workers.dev"></label>
+      <label title="Only for your own copy of CircuitPilot: the OAuth Web client ID of your Google Cloud project (origins: your site and http://localhost:5173). Empty = the built-in one.">Google sign-in client ID (advanced)<input id="sGoogleId" autocomplete="off" placeholder="…apps.googleusercontent.com"></label>
     </fieldset>
     <fieldset class="desktoponly"><legend>Claude Desktop</legend>
       <div class="muted small">Let the Claude Desktop app design boards in CircuitPilot (it starts CircuitPilot by itself when needed). After connecting, quit Claude Desktop completely (also from the system tray) and open it again.</div>
@@ -367,35 +369,36 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610280600"></script>
-<script src="js/static-backend.js?v=202610280600"></script>
-<script src="js/lib.js?v=202610280600"></script>
-<script src="js/view.js?v=202610280600"></script>
-<script src="js/model.js?v=202610280600"></script>
-<script src="js/schematic.js?v=202610280600"></script>
-<script src="js/strokefont.js?v=202610280600"></script>
-<script src="js/pcb.js?v=202610280600"></script>
-<script src="js/pcbview.js?v=202610280600"></script>
-<script src="js/enclosure.js?v=202610280600"></script>
-<script src="js/shape3d.js?v=202610280600"></script>
-<script src="js/easyeda.js?v=202610280600"></script>
-<script src="js/libpanel.js?v=202610280600"></script>
-<script src="js/openlib.js?v=202610280600"></script>
-<script src="js/kicad.js?v=202610280600"></script>
-<script src="js/easyedapro.js?v=202610280600"></script>
-<script src="js/encview.js?v=202610280600"></script>
-<script src="js/docview.js?v=202610280600"></script>
-<script src="js/pcb3d.js?v=202610280600"></script>
-<script src="js/blocks.js?v=202610280600"></script>
-<script src="js/engine.js?v=202610280600"></script>
-<script src="js/ai.js?v=202610280600"></script>
-<script src="js/exports.js?v=202610280600"></script>
-<script src="js/pcbpdf.js?v=202610280600"></script>
-<script src="js/folder.js?v=202610280600"></script>
-<script src="js/projects.js?v=202610280600"></script>
-<script src="js/editor.js?v=202610280600"></script>
-<script src="js/jlcorder.js?v=202610280600"></script>
-<script src="js/app.js?v=202610280600"></script>
+<script src="js/config.js?v=202610280900"></script>
+<script src="js/static-backend.js?v=202610280900"></script>
+<script src="js/lib.js?v=202610280900"></script>
+<script src="js/view.js?v=202610280900"></script>
+<script src="js/model.js?v=202610280900"></script>
+<script src="js/schematic.js?v=202610280900"></script>
+<script src="js/strokefont.js?v=202610280900"></script>
+<script src="js/pcb.js?v=202610280900"></script>
+<script src="js/pcbview.js?v=202610280900"></script>
+<script src="js/enclosure.js?v=202610280900"></script>
+<script src="js/shape3d.js?v=202610280900"></script>
+<script src="js/easyeda.js?v=202610280900"></script>
+<script src="js/libpanel.js?v=202610280900"></script>
+<script src="js/openlib.js?v=202610280900"></script>
+<script src="js/kicad.js?v=202610280900"></script>
+<script src="js/easyedapro.js?v=202610280900"></script>
+<script src="js/encview.js?v=202610280900"></script>
+<script src="js/docview.js?v=202610280900"></script>
+<script src="js/pcb3d.js?v=202610280900"></script>
+<script src="js/blocks.js?v=202610280900"></script>
+<script src="js/engine.js?v=202610280900"></script>
+<script src="js/ai.js?v=202610280900"></script>
+<script src="js/exports.js?v=202610280900"></script>
+<script src="js/pcbpdf.js?v=202610280900"></script>
+<script src="js/folder.js?v=202610280900"></script>
+<script src="js/projects.js?v=202610280900"></script>
+<script src="js/cloud.js?v=202610280900"></script>
+<script src="js/editor.js?v=202610280900"></script>
+<script src="js/jlcorder.js?v=202610280900"></script>
+<script src="js/app.js?v=202610280900"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

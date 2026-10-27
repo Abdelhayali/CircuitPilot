@@ -153,6 +153,7 @@ API keys are stored in your browser's localStorage and sent directly from the pa
 | `js/enclosure.js`, `js/shape3d.js`, `js/shape-worker.js` | Parametric box enclosure, battery catalogue, CSG kernel, custom 3D script modeller (+ sandboxed worker) |
 | `js/vendor/manifold.js`, `.wasm` | Manifold 3D kernel (Apache-2.0), fast booleans for the enclosure |
 | `js/strokefont.js` | Stroke font for silkscreen text and engraved enclosure labels |
+| `js/cloud.js` | Google sign-in and project / My Library sync with the user's Google Drive (app-data folder) |
 | `js/ai.js` | Providers, tool definitions, agent loop |
 | `js/app.js` | Panels, chat, settings, exports |
 | `js/engine.js` | Design tools shared by the copilot, MCP server and REST API |
@@ -197,6 +198,17 @@ Projects are stored on the server (`projects.db`, SQLite) and saved automaticall
 **Import a whole folder**: **▤ Projects → Import folder…** (or the folder menu → *Import all projects in a folder…*) searches the folder and all its subfolders for CircuitPilot projects (`.json` / `.circuit.json`) and EasyEDA PCB files, lists what it found (projects already in CircuitPilot start unticked) and adds the ticked ones as new projects; the first one opens. Claude: `import_folder {path, dry_run?}`.
 
 **Earlier versions**: the desktop server keeps earlier states of every project — about every 10 minutes while you edit, whenever many parts disappear in one save, before a restore and when a project is deleted (60 per project). **▤ Projects → ⟲** lists them with **Restore**; **Deleted projects…** brings back a deleted one. Claude: `list_project_versions`, `restore_project_version`, `copy_project`.
+
+### Sign in with Google (projects on every PC)
+
+**☁ Sign in** (top bar) keeps every project and **My Library** in your own **Google Drive**, in the hidden app-data folder: only CircuitPilot can see it, it does not show among your files, and it uses your free Drive space. Sign in on another PC (desktop app or pcbgo.site) and all your designs are there.
+
+- The first sign-in on a PC merges both ways; after that every autosave uploads the project a few seconds later, and other PCs pick up changes when CircuitPilot opens, every 2 minutes, or with **↻ Sync now**.
+- When the same project was changed on two PCs, the newer one wins; the desktop app keeps the other as a project version (⟲), and Drive keeps file revisions. A project deleted on one PC is deleted on the others (unless it was edited there since).
+- No CircuitPilot server: the browser talks to Google directly. CircuitPilot only asks for its own Drive folder (`drive.appdata`) and your name / address — not your other files.
+- Google's sign-in opens in a small window; after a restart the first click on the page reconnects (the window opens and closes by itself).
+
+Setting it up for your own copy: create an OAuth client of type *Web application* in Google Cloud Console (APIs & Services → enable the Google Drive API; OAuth consent screen with the scope `…/auth/drive.appdata`; authorized JavaScript origins = your site and `http://localhost:5173`) and put its client ID in `js/config.js` → `googleClientId` (or ⚙ Settings → Google sign-in client ID). Without a client ID the button is hidden.
 
 ## Part editor (custom symbols & footprints)
 

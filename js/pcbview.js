@@ -333,6 +333,12 @@ const PcbView = (() => {
   }
   function down(e) {
     const pt = vp.toWorld(e.clientX, e.clientY);
+    // a DRC marker (drawn under labels, so found by position): that problem in the DRC list
+    if (e.button === 0 && ui.tool === 'select' && ui.onDrc && ui.drc && vis('DRC')) {
+      const r = Math.max(0.9, 6 / vp.s); let bi = -1, bd = Infinity;
+      ui.drc.violations.forEach((v, i) => { if (v.x == null) return; const d = Math.hypot(v.x - pt.x, v.y - pt.y); if (d <= r && d < bd) { bd = d; bi = i; } });
+      if (bi >= 0) { ui.onDrc(bi); return; }
+    }
     if (e.button === 2) { const el = e.target.closest('[data-ref],[data-pref]'); rdown = { x: e.clientX, y: e.clientY, ref: el ? el.dataset.ref || el.dataset.pref : null }; pan = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
     if (e.button === 1) { pan = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
     if (ui.tool === 'track') {
@@ -734,7 +740,10 @@ const PcbView = (() => {
     });
     out.push(`<g id="pnames"></g>`);
     out.push(`<g id="prats">${ratsHtml()}</g>`);
-    if (vis('DRC') && ui.drc) for (const v of ui.drc.violations) if (v.x != null) out.push(`<g class="drcmark" transform="translate(${v.x} ${v.y})" stroke="${v.severity === 'error' ? col('DRC') : '#f0b429'}"><circle r="0.9" fill="none" stroke-width="0.12"/><path d="M-0.45 -0.45L0.45 0.45M0.45 -0.45L-0.45 0.45" stroke-width="0.14"/><title>${esc(v.msg)}</title></g>`);
+    if (vis('DRC') && ui.drc) ui.drc.violations.forEach((v, i) => { if (v.x == null) return;
+      // the problem picked in the DRC list: a pulsing ring around it
+      if (ui.drcFocus === i) out.push(`<circle class="drcfocus" cx="${v.x}" cy="${v.y}" r="1.4" fill="none" stroke="${v.severity === 'error' ? col('DRC') : '#f0b429'}" stroke-width="0.18" pointer-events="none"/>`);
+      out.push(`<g class="drcmark" data-v="${i}" transform="translate(${v.x} ${v.y})" stroke="${v.severity === 'error' ? col('DRC') : '#f0b429'}"><circle r="0.9" fill="none" stroke-width="0.12"/><path d="M-0.45 -0.45L0.45 0.45M0.45 -0.45L-0.45 0.45" stroke-width="0.14"/><title>${esc(v.msg)} · click: show in the DRC list</title></g>`); });
     // selection outlines
     for (const r of new Set([...ui.multi, ...(ui.sel ? [ui.sel] : [])])) { const c = Model.comp(r); if (c && c.pcb) { const b = Pcb.fpBox(c, 0.2); out.push(`<rect data-o="${esc(c.ref)}" class="selbox" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); } }
     if (ui.item && ui.item.k === 'h') { const h = (S.pcb.holes || [])[ui.item.i]; if (h) out.push(`<circle class="selbox" cx="${h.x}" cy="${h.y}" r="${h.d / 2 + 0.4}"/>`); }

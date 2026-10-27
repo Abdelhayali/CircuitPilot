@@ -45,8 +45,9 @@ const App = (() => {
     let s = `${S.components.length} parts · ${Object.keys(S.nets).length} nets · <span class="${e ? 'bad' : w ? 'warn' : 'good'}" id="ercLink" title="Click for ERC details">ERC: ${e} errors, ${w} warnings</span>`;
     const st = Pcb.status();
     if (st.placed && S.board.w) s += ` · PCB ${S.board.w}×${S.board.h} mm · <span class="${st.unrouted.length ? 'warn' : 'good'}">${st.routed}/${st.nets} routed</span> · ${st.vias} vias · ${st.trace_length_mm} mm copper`;
-    if (Pcb.ui.drc) s += ` · <span class="${Pcb.ui.drc.errors ? 'bad' : Pcb.ui.drc.warnings ? 'warn' : 'good'}">DRC: ${esc(Pcb.ui.drc.summary)}</span>`;
+    if (Pcb.ui.drc) s += ` · <span class="${Pcb.ui.drc.errors ? 'bad' : Pcb.ui.drc.warnings ? 'warn' : 'good'}" id="drcLink" title="Click: DRC list, zoom to the first problem">DRC: ${esc(Pcb.ui.drc.summary)}</span>`;
     $('#status').innerHTML = s;
+    if ($('#drcLink')) $('#drcLink').onclick = () => { const d = showDrc(true); if (d.violations.length) gotoDrc(0); };
     $('#ercLink').onclick = () => {
       $('#props').innerHTML = '<div class="ph">ERC report</div>' + (erc.length ? '<ul class="erc">' + erc.map(i => `<li class="${i.level}">${esc(i.msg)}</li>`).join('') + '</ul>' : '<div class="muted">No issues 🎉</div>');
     };
@@ -678,15 +679,31 @@ const App = (() => {
     $('#rulesSave').onclick = () => saveRules(false); $('#rulesRoute').onclick = () => saveRules(true);
   }
   function showDrc(goto) {
-    const d = Pcb.drc(); Pcb.ui.drc = d;
+    const d = Pcb.drc(); Pcb.ui.drc = d; Pcb.ui.drcFocus = null;
     if (goto && view !== 'pcb') showView('pcb'); else Pcb.render();
     renderStatus();
     const items = d.violations;
     $('#props').innerHTML = `<div class="ph">Design rule check · <span class="${d.errors ? 'bad' : d.warnings ? 'warn' : 'good'}">${esc(d.summary || '')}</span></div>
       <div class="muted small">Rules: ${esc(Pcb.RULE_PRESETS[Pcb.rules().preset] ? Pcb.RULE_PRESETS[Pcb.rules().preset].label : 'custom')}</div>` +
       (items.length ? '<ul class="erc drc">' + items.map((v, i) => `<li class="${v.severity === 'error' ? 'error' : 'warn'}" data-v="${i}">${esc(v.msg)}</li>`).join('') + '</ul>' : '<div class="good">✓ No violations</div>');
-    $('#props').querySelectorAll('[data-v]').forEach(li => li.onclick = () => { const v = items[+li.dataset.v]; if (v.x != null) Pcb.vp.fit([v.x - 3, v.y - 3, v.x + 3, v.y + 3], 1); });
+    $('#props').querySelectorAll('[data-v]').forEach(li => li.onclick = () => gotoDrc(+li.dataset.v));
     return d;
+  }
+  // zoom to a DRC problem and mark it (ring on the board, row in the list); a net that is not routed: its pads
+  function gotoDrc(i) {
+    const d = Pcb.ui.drc, v = d && d.violations[i]; if (!v) return;
+    if (view !== 'pcb') showView('pcb');
+    $$('#props [data-v]').forEach(li => li.classList.toggle('on', +li.dataset.v === i));
+    const li = $(`#props [data-v="${i}"]`); if (li) li.scrollIntoView({ block: 'nearest' });
+    Pcb.ui.drcFocus = i; Pcb.ui.hlNet = null;
+    if (v.x != null) { Pcb.vp.fit([v.x - 2, v.y - 2, v.x + 2, v.y + 2], 1); Pcb.render(); return; }
+    const net = v.type === 'unrouted' && (v.msg.match(/^Net (\S+) is not routed/) || [])[1];
+    const ps = net ? Pcb.placed().flatMap(c => Pcb.padsOf(c, Model.pinIndex())).filter(p => p.net === net) : [];
+    if (ps.length) {
+      Pcb.ui.hlNet = net; Pcb.render();
+      Pcb.vp.fit([Math.min(...ps.map(p => p.x)) - 1, Math.min(...ps.map(p => p.y)) - 1, Math.max(...ps.map(p => p.x)) + 1, Math.max(...ps.map(p => p.y)) + 1], 1);
+      toast(`${net} highlighted: its pads and the missing connections (ratsnest lines)`, 5000);
+    } else { Pcb.render(); toast('This problem has no place on the board', 4000); }
   }
 
   // ---------- project knowledge folder ----------
@@ -1219,6 +1236,8 @@ const App = (() => {
     $('#btnRoute').onclick = () => runPcb(null, false);
     $('#btnSync').onclick = updateFromSchematic;
     $('#btnRules').onclick = openRules; $('#btnDrc').onclick = () => showDrc(true);
+    // a DRC marker clicked on the board: that problem in the DRC list
+    Pcb.ui.onDrc = i => { const m = (Pcb.ui.drc.violations[i] || {}).msg; if (!$('#props [data-v]')) { const d = showDrc(); i = d.violations.findIndex(v => v.msg === m); } gotoDrc(i); };
     $('#btnOptimize').onclick = () => {};
     $$('[data-opt]').forEach(b => b.onclick = () => { document.activeElement && document.activeElement.blur(); runOptimize({ shrink: b.dataset.opt !== 'route', allow_bottom: b.dataset.opt === 'bottom' }); });
     $('#btnPourGnd').onclick = () => {

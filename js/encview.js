@@ -2,7 +2,7 @@
 // Enclosure tab: parameters, 3D preview (three.js from cdnjs), STL / OpenSCAD export.
 const EncView = (() => {
   const $ = s => document.querySelector(s);
-  const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null };
+  const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
   const WORKER = 'js/shape-worker.js?v=202610280100';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
@@ -47,6 +47,9 @@ const EncView = (() => {
     $('#encXray').onclick = () => { ui.xray = !ui.xray; $('#encXray').classList.toggle('on', ui.xray); place(); };
     $('#encSection').onclick = () => { ui.section = ui.section ? null : 'x'; $('#encSection').classList.toggle('on', !!ui.section); place(); };
     $('#encRender').onclick = renderDialog;
+    $('#encDims').onclick = () => { ui.showDims = !ui.showDims; $('#encDims').classList.toggle('on', ui.showDims); drawOverlay(); draw(); };
+    $('#encMeasure').onclick = () => setMeasure(!ui.measure);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && active && ui.measure) { if (ui.pendingA || ui.rulers.length) { ui.pendingA = null; ui.rulers = []; drawOverlay(); draw(); dimText(); } else setMeasure(false); } });
     $('#encStl').onclick = () => exportAll('stl'); $('#encScad').onclick = () => exportAll('scad'); $('#encZip').onclick = () => exportAll('zip');
     $('#encOrder').onclick = () => {
       // open the quote page inside the click (popup blockers), then build + download the STLs
@@ -86,8 +89,8 @@ const EncView = (() => {
     // orbit / pan / zoom
     const el = renderer.domElement; let drag = null;
     el.addEventListener('contextmenu', e => e.preventDefault());
-    el.addEventListener('mousedown', e => { drag = { x: e.clientX, y: e.clientY, pan: e.button !== 0 || e.shiftKey }; });
-    window.addEventListener('mouseup', () => drag = null);
+    el.addEventListener('mousedown', e => { drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, pan: e.button !== 0 || e.shiftKey }; });
+    window.addEventListener('mouseup', e => { if (drag && ui.measure && e.button === 0 && e.target === el && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 4) pick(e); drag = null; });
     window.addEventListener('mousemove', e => {
       if (!drag || !active) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
@@ -191,13 +194,13 @@ const EncView = (() => {
       }
       if (meshes.pcb) meshes.pcb.visible = ui.pcb;
       for (const m of meshes.extras || []) m.visible = ui.pcb;
-      applySection(); draw(); return;
+      applySection(); drawOverlay(); draw(); return;
     }
     const L = ui.built.L, ex = ui.explode ? (L.P.explode || 12) + L.P.lipHeight : 0;
     if (meshes.base) { meshes.base.material.opacity = ui.xray ? 0.35 : 1; meshes.base.material.depthWrite = !ui.xray; }
     if (meshes.lid) { meshes.lid.visible = ui.lid; meshes.lid.position.z = ex; meshes.lid.material.opacity = ui.xray ? 0.35 : 1; meshes.lid.material.depthWrite = !ui.xray; }
     if (meshes.pcb) meshes.pcb.visible = ui.pcb;
-    applySection(); draw();
+    applySection(); drawOverlay(); draw();
   }
   // ---------- custom mode: free-form 3D script (shape3d.js) built in a Web Worker ----------
   let worker = null, seq = 0, lastRun = null, codeDirty = false;
@@ -289,6 +292,8 @@ const EncView = (() => {
     meshes.extras = (r.extras || []).filter(x => x.kind === 'battery').map(b => { const m = batteryMesh(b, [0, 0, 0]); root.add(m); return m; });
     meshes.pcb = null;
     if (c.ctx.pcb) { try { const L = Enclosure.layout(), g = pcbGroup(L); g.position.set(-c.ctx.origin[0], -c.ctx.origin[1], -c.ctx.origin[2]); meshes.pcb = g; root.add(g); } catch (e) { } }
+    if (ui.dimsFor !== r) { ui.rulers = []; ui.pendingA = null; ui.dimsFor = r; }   // a new model: old ruler points no longer apply
+    ui.dims = measureModel(c.ctx.pcb ? c.ctx.pcb.thickness + 1 : null);
     if (fit || !ui.fitted) {
       const b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
       for (const p of r.parts) for (let k = 0; k < 3; k++) { b[k] = Math.min(b[k], p.bbox[k]); b[k + 3] = Math.max(b[k + 3], p.bbox[k + 3]); }
@@ -323,6 +328,7 @@ const EncView = (() => {
     meshes.parts = null; ui.built.custom = false;
     meshes.base = meshFrom(r.base, 0x4f8fd9); meshes.lid = meshFrom(r.lid, 0x9fd27a); meshes.pcb = pcbGroup(r.L);
     root.add(meshes.base, meshes.lid, meshes.pcb);
+    ui.rulers = []; ui.pendingA = null; ui.dims = measureModel(r.L.pcbTop + 1);
     if (first || fit) { const b = r.L.bbox; cam.tx = (b[0] + b[2]) / 2; cam.ty = (b[1] + b[3]) / 2; cam.tz = r.L.H / 2; cam.r = Math.max(b[2] - b[0], b[3] - b[1], r.L.H) * 2.4; }
     resize(); place();
     if (active) App.renderAll();
@@ -467,12 +473,152 @@ const EncView = (() => {
     App.toast(`Exported ${r.parts.length} part${r.parts.length > 1 ? 's' : ''}${r !== prev ? ` · high resolution (${r.parts.reduce((a, p) => a + p.triangles, 0).toLocaleString()} triangles)` : ''}`, 6000);
     return true;
   }
+  // ---------- dimensions (overall size, wall / floor / lid thickness) and the ruler ----------
+  // Measured on the meshes themselves (rays through the printed parts), so they hold for any shape: box, pod, patch.
+  // The overlay lives in the scene, not under root: it is never clipped by the section or moved by explode.
+  const DIM = 0xff7a1a, RUL = 0x16a3ff;
+  const printed = () => ui.built && ui.built.custom ? (meshes.parts || []) : [meshes.base, meshes.lid].filter(Boolean);
+  function measureModel(zRef) {
+    const T = window.THREE, P = printed(); if (!P.length) return null;
+    root.updateMatrixWorld(true);
+    const box = new T.Box3(); for (const m of P) box.expandByObject(m);
+    const size = box.getSize(new T.Vector3());
+    // base = the biggest part that stays put; lid = the biggest part that lifts off in the exploded view
+    const vol = m => { const b = new T.Box3().setFromObject(m), q = b.getSize(new T.Vector3()); return q.x * q.y * q.z; };
+    const custom = ui.built.custom, stay = custom ? P.filter(m => !m.userData.explode) : [meshes.base], lift = custom ? P.filter(m => m.userData.explode) : [meshes.lid];
+    const base = stay.sort((a, b) => vol(b) - vol(a))[0], lid = lift.sort((a, b) => vol(b) - vol(a))[0];
+    const ray = new T.Raycaster();
+    const hits = (mesh, o, d) => { ray.set(o, d); const keep = mesh.material.side; mesh.material.side = T.DoubleSide; const h = ray.intersectObject(mesh, false); mesh.material.side = keep; return h; };
+    // where the ray enters the solid, and its thickness there measured straight through (along the surface normal:
+    // a ray that meets a slanted wall would read it too thick)
+    const across = (mesh, o, d) => {
+      const h = hits(mesh, o, d); if (!h.length || !h[0].face) return null;
+      const n = h[0].face.normal.clone().transformDirection(mesh.matrixWorld); if (n.dot(d) < 0) n.negate();
+      const a = h[0].point, x = hits(mesh, a.clone().addScaledVector(n, -0.01), n).find(q => q.distance > 0.06);
+      return x ? [a, x.point] : null;
+    };
+    const median = L => { const v = L.slice().sort((a, b) => a.t - b.t); return v.length ? v[Math.floor((v.length - 1) / 2)] : null; };
+    const out = { size: [size.x, size.y, size.z], box: [box.min.toArray(), box.max.toArray()] };
+    if (!base) return out;
+    const bb = new T.Box3().setFromObject(base), c = bb.getCenter(new T.Vector3()), bs = bb.getSize(new T.Vector3());
+    const z = zRef != null && zRef > bb.min.z && zRef < bb.max.z ? zRef : c.z;
+    // walls: from the middle of the cavity outwards, in the four directions (front and right first: they face the camera)
+    const walls = [];
+    for (const d of [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0]]) for (const f of [0, 0.18, -0.18]) {
+      const o = new T.Vector3(c.x + (d[1] ? f * bs.x : 0), c.y + (d[0] ? f * bs.y : 0), z), r = across(base, o, new T.Vector3(...d));
+      if (r) walls.push({ t: r[0].distanceTo(r[1]), a: r[0], b: r[1], d });
+    }
+    const wm = median(walls);
+    if (wm) out.wall = walls.find(w => Math.abs(w.t - wm.t) < 0.05) || wm;
+    // floor: straight down from the cavity; lid: straight up, off-centre (engraved text and vents sit in the middle)
+    const fl = []; for (const [fx, fy] of [[0, 0], [0.2, 0.15], [-0.2, -0.15]]) { const r = across(base, new T.Vector3(c.x + fx * bs.x, c.y + fy * bs.y, z), new T.Vector3(0, 0, -1)); if (r) fl.push({ t: r[0].distanceTo(r[1]), a: r[0], b: r[1] }); }
+    out.floor = fl.sort((p, q) => p.t - q.t)[0] || null;   // the thinnest point (a curved floor thickens toward the ends)
+    if (lid) { const lb = new T.Box3().setFromObject(lid), lc = lb.getCenter(new T.Vector3()), ls = lb.getSize(new T.Vector3()), L = [];
+      for (const [fx, fy] of [[0.28, 0.28], [-0.28, 0.28], [0.28, -0.28], [-0.28, -0.28], [0, 0.32]]) { const r = across(lid, new T.Vector3(lc.x + fx * ls.x, lc.y + fy * ls.y, Math.min(z, lb.min.z - 1)), new T.Vector3(0, 0, 1)); if (r) L.push({ t: r[0].distanceTo(r[1]), a: r[0], b: r[1] }); }
+      out.lid = median(L); if (out.lid) out.lidMesh = lid; }
+    return out;
+  }
+  // a label that keeps its size on screen (and in renders): rounded box, coloured border
+  function tag(text, at, color = DIM, k = 0.03) {
+    const T = window.THREE, c = document.createElement('canvas'), g = c.getContext('2d'), f = 46, font = `600 ${f}px system-ui, -apple-system, Segoe UI, sans-serif`;
+    g.font = font; const w = Math.ceil(g.measureText(text).width) + 30, h = f + 24; c.width = w; c.height = h;
+    const r = 14; g.beginPath(); g.moveTo(r, 2); g.lineTo(w - r, 2); g.quadraticCurveTo(w - 2, 2, w - 2, r); g.lineTo(w - 2, h - r); g.quadraticCurveTo(w - 2, h - 2, w - r, h - 2); g.lineTo(r, h - 2); g.quadraticCurveTo(2, h - 2, 2, h - r); g.lineTo(2, r); g.quadraticCurveTo(2, 2, r, 2); g.closePath();
+    g.fillStyle = 'rgba(255,255,255,0.94)'; g.fill(); g.lineWidth = 4; g.strokeStyle = '#' + color.toString(16).padStart(6, '0'); g.stroke();
+    g.font = font; g.fillStyle = '#1d232b'; g.textBaseline = 'middle'; g.fillText(text, 15, h / 2 + 2);
+    const tex = new T.CanvasTexture(c); tex.minFilter = T.LinearFilter;
+    const sp = new T.Sprite(new T.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true, sizeAttenuation: false }));
+    sp.scale.set(k * w / h, k, 1); sp.position.copy(at); sp.renderOrder = 1001; return sp;
+  }
+  function lines(pts, color = DIM) {
+    const T = window.THREE, m = new T.LineSegments(new T.BufferGeometry().setFromPoints(pts), new T.LineBasicMaterial({ color, depthTest: false, transparent: true }));
+    m.renderOrder = 1000; return m;
+  }
+  // dimension a → b drawn at offset (a vector): extension lines from the model, the dimension line, end ticks, the label
+  function dimension(a, b, off, text) {
+    const T = window.THREE, g = new T.Group(), A = a.clone().add(off), B = b.clone().add(off), t = off.clone().setLength(Math.max(0.6, off.length() * 0.18));
+    const ext = off.clone().setLength(off.length() + t.length());
+    g.add(lines([a, a.clone().add(ext), b, b.clone().add(ext), A, B, A.clone().sub(t), A.clone().add(t), B.clone().sub(t), B.clone().add(t)]));
+    g.add(tag(text, A.clone().add(B).multiplyScalar(0.5)));
+    return g;
+  }
+  // a thickness (wall, floor, lid): a short bar across the material and a leader to a label outside it
+  function thickness(a, b, dir, text) {
+    const T = window.THREE, g = new T.Group(), far = b.clone().add(dir.clone().setLength(Math.max(5, (ui.dims ? Math.max(...ui.dims.size) : 40) * 0.2)));
+    g.add(lines([a, b, b, far], DIM));
+    g.add(tag(text, far, DIM, 0.026));
+    return g;
+  }
+  const mm = v => (Math.round(v * 10) / 10).toFixed(1);
+  function drawOverlay() {
+    if (!scene) return;
+    const T = window.THREE;
+    if (dimsG.g) { scene.remove(dimsG.g); dimsG.g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); }
+    const G = dimsG.g = new T.Group(); scene.add(G);
+    const D = ui.dims;
+    if (ui.showDims && D && ui.built) {
+      const [lo, hi] = D.box.map(v => new T.Vector3(...v)), off = Math.max(D.size[0], D.size[1], D.size[2]) * 0.14;
+      if (!ui.section) {   // cut in half, the overall size lines would hang past the half that is left: thicknesses only
+        G.add(dimension(new T.Vector3(lo.x, lo.y, lo.z), new T.Vector3(hi.x, lo.y, lo.z), new T.Vector3(0, -off, 0), `L ${mm(D.size[0])} mm`));
+        G.add(dimension(new T.Vector3(hi.x, lo.y, lo.z), new T.Vector3(hi.x, hi.y, lo.z), new T.Vector3(off, 0, 0), `W ${mm(D.size[1])} mm`));
+        G.add(dimension(new T.Vector3(lo.x, lo.y, lo.z), new T.Vector3(lo.x, lo.y, hi.z), new T.Vector3(-off * 0.7, -off * 0.7, 0), `H ${mm(D.size[2])} mm`));
+      }
+      if (D.wall) G.add(thickness(D.wall.a, D.wall.b, new T.Vector3(...D.wall.d).add(new T.Vector3(0, 0, 0.6)), `wall ${mm(D.wall.t)}`));
+      if (D.floor) G.add(thickness(D.floor.a, D.floor.b, new T.Vector3(0.5, -0.5, -1), `floor ${mm(D.floor.t)}`));
+      if (D.lid && !(ui.explode && D.lidMesh && D.lidMesh.position.lengthSq() > 0) && ui.lid) G.add(thickness(D.lid.a, D.lid.b, new T.Vector3(-0.4, -0.6, 1), `lid ${mm(D.lid.t)}`));
+    }
+    // ruler measurements: points, line, distance (and the run along each axis)
+    const dot = p => { const s = tag('', p, RUL, 0.012); s.material.map.dispose(); s.material.map = null; s.material.color = new T.Color(RUL); return s; };
+    for (const r of ui.rulers) {
+      G.add(lines([r.a, r.b], RUL), dot(r.a), dot(r.b));
+      const d = r.b.clone().sub(r.a), parts = [['x', d.x], ['y', d.y], ['z', d.z]].filter(q => Math.abs(q[1]) > 0.05);
+      G.add(tag(`${mm(d.length())} mm${parts.length > 1 ? '  (' + parts.map(q => 'Δ' + q[0] + ' ' + mm(Math.abs(q[1]))).join(' ') + ')' : ''}`, r.a.clone().add(r.b).multiplyScalar(0.5), RUL, 0.028));
+    }
+    if (ui.pendingA) G.add(dot(ui.pendingA));
+    dimText();
+  }
+  // the numbers as text too, top-left of the view
+  function dimText() {
+    let el = $('#encDimTxt');
+    if (!el) { el = document.createElement('div'); el.id = 'encDimTxt'; el.className = 'encdims'; wrap.appendChild(el); }
+    const D = ui.dims, last = ui.rulers[ui.rulers.length - 1];
+    const a = D && ui.built ? `<b>${D.size.map(mm).join(' × ')} mm</b>${D.wall ? ` · wall ${mm(D.wall.t)}` : ''}${D.floor ? ` · floor ${mm(D.floor.t)}` : ''}${D.lid ? ` · lid ${mm(D.lid.t)}` : ''} mm` : '';
+    const b = ui.measure ? `<div class="encruler">📏 ${ui.pendingA ? 'click the second point' : 'click a point on the model'}${last ? ` · last: <b>${mm(last.b.distanceTo(last.a))} mm</b>` : ''} · corners snap · Esc clears</div>` : '';
+    el.innerHTML = a + b; el.style.display = a || b ? 'block' : 'none';
+  }
+  function setMeasure(on) {
+    ui.measure = on; ui.pendingA = null; if (!on) ui.rulers = [];
+    $('#encMeasure').classList.toggle('on', on); if (renderer) renderer.domElement.style.cursor = on ? 'crosshair' : '';
+    drawOverlay(); draw();
+  }
+  // a point on what is shown (parts, board, battery), snapped to the nearest corner of the triangle within 10 px
+  function pick(e) {
+    const T = window.THREE, el = renderer.domElement, rc = el.getBoundingClientRect(), ndc = new T.Vector2((e.clientX - rc.left) / rc.width * 2 - 1, -(e.clientY - rc.top) / rc.height * 2 + 1);
+    const ray = new T.Raycaster(); ray.setFromCamera(ndc, camera);
+    const L = []; root.traverse(m => { if (m.isMesh && !m.userData.cap) { let v = true; for (let q = m; q; q = q.parent) if (!q.visible) v = false; if (v) L.push(m); } });
+    const sides = L.map(m => m.material.side); L.forEach(m => { m.material.side = T.DoubleSide; });
+    let hs = ray.intersectObjects(L, false);
+    L.forEach((m, i) => { m.material.side = sides[i]; });
+    if (ui.section) hs = hs.filter(h => clipPlane().distanceToPoint(h.point) >= -1e-6);
+    const h = hs[0]; if (!h) return;
+    let p = h.point.clone();
+    if (h.face) {
+      const pos = h.object.geometry.attributes.position, best = { d: 10, v: null };
+      for (const i of [h.face.a, h.face.b, h.face.c]) {
+        const v = new T.Vector3().fromBufferAttribute(pos, i).applyMatrix4(h.object.matrixWorld), s = v.clone().project(camera);
+        const d = Math.hypot((s.x - ndc.x) * rc.width / 2, (s.y - ndc.y) * rc.height / 2); if (d < best.d) { best.d = d; best.v = v; }
+      }
+      if (best.v) p = best.v;
+    }
+    if (!ui.pendingA) ui.pendingA = p; else { ui.rulers.push({ a: ui.pendingA, b: p }); ui.pendingA = null; }
+    drawOverlay(); draw();
+  }
+  const dimsG = { g: null };
   // camera directions (orbit angles th / ph) for the named views
   const ANGLES = { iso: [-1.0, 1.05], top: [-Math.PI / 2, 0.02], bottom: [-Math.PI / 2, Math.PI - 0.02], front: [-Math.PI / 2, Math.PI / 2], back: [Math.PI / 2, Math.PI / 2], left: [Math.PI, Math.PI / 2], right: [0, Math.PI / 2], under: [-0.9, 2.15] };
   // 4 views in one picture: angled, exploded, cut in half, from below (what the AI gets after a build; the Render button)
   async function overview(o = {}) {
     const w = o.w || 1600, h = o.h || 1100, cw = Math.round(w / 2), ch = Math.round(h / 2);
-    const views = [['Angled', { angle: 'iso' }], ['Exploded', { angle: 'iso', explode: true }], ['Cut in half', { angle: 'iso', section: 'x' }], ['From below', { angle: 'under' }]];
+    const views = [['Angled', { angle: 'iso', dims: o.dims !== false }], ['Exploded', { angle: 'iso', explode: true }], ['Cut in half', { angle: 'iso', section: 'x', dims: o.dims !== false }], ['From below', { angle: 'under' }]];
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const g = c.getContext('2d'); g.fillStyle = o.bg || '#ffffff'; g.fillRect(0, 0, w, h);
     let k = 0;
@@ -500,8 +646,8 @@ const EncView = (() => {
       showCustom(false);
     } else { if (dirty || !ui.built || ui.built.custom) rebuild(false); }
     if (!ui.built || !root) return null;
-    const keep = { cam: Object.assign({}, cam), explode: ui.explode, lid: ui.lid, xray: ui.xray, pcb: ui.pcb, section: ui.section }, size = renderer.getSize(new T.Vector2()), pr = renderer.getPixelRatio(), oc = renderer.getClearColor(new T.Color()).getHex(), oa = renderer.getClearAlpha();
-    ui.explode = !!o.explode; ui.lid = o.lid !== false; ui.xray = false; ui.pcb = o.pcb !== false; ui.section = o.section || null;
+    const keep = { cam: Object.assign({}, cam), explode: ui.explode, lid: ui.lid, xray: ui.xray, pcb: ui.pcb, section: ui.section, dims: ui.showDims }, size = renderer.getSize(new T.Vector2()), pr = renderer.getPixelRatio(), oc = renderer.getClearColor(new T.Color()).getHex(), oa = renderer.getClearAlpha();
+    ui.explode = !!o.explode; ui.lid = o.lid !== false; ui.xray = false; ui.pcb = o.pcb !== false; ui.section = o.section || null; ui.showDims = !!o.dims;
     const [th, ph] = ANGLES[o.angle] || [o.th ?? -1.0, o.ph ?? 1.05]; cam.th = th; cam.ph = ph;
     place();
     const box = new T.Box3(); root.updateMatrixWorld(true); root.traverse(m => { if (m.isMesh && m.visible && !m.userData.cap) box.expandByObject(m); });
@@ -509,10 +655,10 @@ const EncView = (() => {
     const c = box.getCenter(new T.Vector3()), sz = box.getSize(new T.Vector3());
     renderer.setPixelRatio(1); renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setClearColor(bg, 1);
     cam.tx = c.x; cam.ty = c.y; cam.tz = c.z;
-    const fov = camera.fov * Math.PI / 180, span = Math.max(sz.x, sz.y, sz.z) * 1.45; cam.r = span / 2 / Math.tan(fov / 2);
+    const fov = camera.fov * Math.PI / 180, span = Math.max(sz.x, sz.y, sz.z) * (o.dims ? 1.75 : 1.45); cam.r = span / 2 / Math.tan(fov / 2);   // room for the dimension lines
     draw();
     const url = renderer.domElement.toDataURL('image/png');
-    Object.assign(cam, keep.cam); ui.explode = keep.explode; ui.lid = keep.lid; ui.xray = keep.xray; ui.pcb = keep.pcb; ui.section = keep.section;
+    Object.assign(cam, keep.cam); ui.explode = keep.explode; ui.lid = keep.lid; ui.xray = keep.xray; ui.pcb = keep.pcb; ui.section = keep.section; ui.showDims = keep.dims;
     renderer.setPixelRatio(pr); renderer.setSize(size.x, size.y); renderer.setClearColor(oc, oa); place(); resize(); draw();
     return { url, w, h };
   }
@@ -523,18 +669,18 @@ const EncView = (() => {
     if (!dlg) {
       dlg = document.createElement('div'); dlg.id = 'encRenderDlg'; dlg.className = 'enc-render';
       dlg.innerHTML = `<div class="er-box"><div class="er-head"><b>Render</b><span class="seg" id="erMode"><button data-v="overview" class="on">4 views</button><button data-v="iso">Angled</button><button data-v="explode">Exploded</button><button data-v="section">Cut in half</button><button data-v="top">Top</button><button data-v="under">Below</button></span>
-        <label class="chk"><input type="checkbox" id="erDark"> Dark background</label><span style="flex:1"></span><button id="erSave" class="primary">Save PNG ⤓</button><button id="erClose" title="Close">✕</button></div><div class="er-img"><span class="spin"></span></div></div>`;
+        <label class="chk"><input type="checkbox" id="erDims" checked> Dimensions</label><label class="chk"><input type="checkbox" id="erDark"> Dark background</label><span style="flex:1"></span><button id="erSave" class="primary">Save PNG ⤓</button><button id="erClose" title="Close">✕</button></div><div class="er-img"><span class="spin"></span></div></div>`;
       wrap.parentElement.appendChild(dlg);
       dlg.addEventListener('click', e => { if (e.target === dlg) dlg.remove(); });
       $('#erClose').onclick = () => dlg.remove();
       $('#erMode').onclick = e => { const b = e.target.closest('button'); if (!b) return; dlg.querySelectorAll('#erMode button').forEach(x => x.classList.toggle('on', x === b)); draw1(); };
-      $('#erDark').onchange = draw1;
+      $('#erDark').onchange = draw1; $('#erDims').onchange = draw1;
       $('#erSave').onclick = () => { const i = dlg.querySelector('.er-img img'); if (i) App.download(`${(Model.S.name || 'design').replace(/[^\w.-]+/g, '_')}-enclosure-${dlg.dataset.v}.png`, dataBlob(i.src)); };
     }
     async function draw1() {
       const v = dlg.querySelector('#erMode button.on').dataset.v, bg = $('#erDark').checked ? '#1b1f26' : '#ffffff', box = dlg.querySelector('.er-img');
       dlg.dataset.v = v; box.innerHTML = '<span class="spin"></span>';
-      const o = { bg, w: 2400, h: 1600 };
+      const o = { bg, w: 2400, h: 1600, dims: $('#erDims').checked };
       if (v === 'overview') o.overview = true; else if (v === 'explode') Object.assign(o, { angle: 'iso', explode: true }); else if (v === 'section') Object.assign(o, { angle: 'iso', section: 'x' }); else o.angle = v;
       try { const r = await snapshot(o); box.innerHTML = r ? `<img src="${r.url}" alt="enclosure render">` : '<div class="muted">Nothing to render</div>'; }
       catch (e) { box.innerHTML = `<div class="bad">${esc(e.message)}</div>`; }

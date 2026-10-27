@@ -555,3 +555,6 @@ body.web .as-tabs .tag.webonly { display: inline; }
 .enc-render .er-img img { max-width: 100%; max-height: calc(100vh - 160px); display: block; }
 .enc-render .chk { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
 .enc-tpl .encgrid select, .enc-tpl .encgrid input { width: 100%; }
+/* enclosure dimensions + ruler read-out */
+.encdims { position: absolute; left: 10px; top: 8px; background: var(--float-bg); border: 1px solid var(--float-line); padding: 4px 9px; border-radius: 6px; font-size: 12px; pointer-events: none; display: none; max-width: calc(100% - 20px); }
+.encdims .encruler { margin-top: 2px; color: var(--text); }

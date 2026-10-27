@@ -340,7 +340,8 @@ Live feedback: the coordinate bar shows X/Y, layer, width, net, and warns when t
 
 The **Enclosure** tab builds a printable case around the current PCB and previews it in 3D (drag to orbit, right-drag to pan, wheel to zoom; *Explode*, *X-ray*, *Lid*, *PCB* and *Section* toggles — Section cuts the model in half, cut walls in red, to check wall thickness, the lid lip and how the board and battery sit).
 
-- **📷 Render**: a picture of the finished design — 4 views in one image (angled, exploded, cut in half, from below) or one large angled / exploded / cut / top / bottom view, light or dark background — saved as PNG. The AI gets the same 4-view picture after every enclosure build, so it sees what it made.
+- **Dimensions** shows the overall length, width and height and the wall, floor and lid thickness (measured on the model itself, straight through the material, so they hold for any shape); **📏 Measure** is a ruler — click two points on the model (corners snap) for the distance and its run along X / Y / Z; Esc clears.
+- **📷 Render**: a picture of the finished design — 4 views in one image (angled, exploded, cut in half, from below) or one large angled / exploded / cut / top / bottom view, with or without dimensions, light or dark background — saved as PNG. The AI gets the same 4-view picture after every enclosure build, so it sees what it made.
 
 - **Fits the board**: the cavity follows the board outline (rectangle, rounded, round or custom) plus a clearance gap; the height comes from the tallest part (estimated per package — override any part height).
 - **Board support**: click **＋ Add M3 mounting holes** (adds non-plated Ø3.2 mm holes to the PCB, kept clear of parts and copper, in the NPTH drill file) to get **screw standoffs**; without holes the board rests on corner supports. Standoffs rise automatically to clear parts on the bottom side.

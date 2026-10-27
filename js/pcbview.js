@@ -56,7 +56,7 @@ const PcbView = (() => {
     svg = el;
     svg.innerHTML = `<defs><pattern id="pgrid" width="2.54" height="2.54" patternUnits="userSpaceOnUse"><circle cx="0" cy="0" r="0.07" fill="#3a3a3a"/></pattern></defs><rect id="pgridr" fill="url(#pgrid)"/><g id="pworld"></g><rect id="pbox" class="boxsel" style="display:none"/>`;
     world = svg.querySelector('#pworld'); grid = svg.querySelector('#pgridr'); boxEl = svg.querySelector('#pbox');
-    vp = new Viewport(svg, { min: 2, max: 400, scale: 10, onChange: vb => { grid.setAttribute('x', vb[0]); grid.setAttribute('y', vb[1]); grid.setAttribute('width', vb[2]); grid.setAttribute('height', vb[3]); } });
+    vp = new Viewport(svg, { min: 2, max: 400, scale: 10, onChange: vb => { grid.setAttribute('x', vb[0]); grid.setAttribute('y', vb[1]); grid.setAttribute('width', vb[2]); grid.setAttribute('height', vb[3]); namesSoon(); } });
     svg.addEventListener('mousedown', down); svg.addEventListener('dblclick', dbl);
     window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
     svg.addEventListener('contextmenu', e => e.preventDefault());
@@ -588,6 +588,42 @@ const PcbView = (() => {
   // a part is one object in schematic and PCB: deleting it on the board removes it from the design
   function del() { const refs = selected(); ui.sel = null; ui.multi = new Set(); ui.onSelect(null); Model.mutate(() => { for (const r of refs) if (Model.comp(r)) Model.removeComponent(r); }); }
   function flip() { const refs = selected(); Model.mutate(() => { for (const r of refs) Pcb.placeFootprint(r, { side: Pcb.isBottom(Model.comp(r)) ? 'top' : 'bottom' }); }); }
+  // net names on pads and tracks once zoomed in (as in EasyEDA): only what is in view, sized to fit the copper,
+  // redrawn on zoom / pan
+  let namesRaf = 0;
+  const namesSoon = () => { if (!namesRaf) namesRaf = requestAnimationFrame(() => { namesRaf = 0; names(); }); };
+  function names() {
+    const el = world && world.querySelector('#pnames'); if (!el) return;
+    const sc = vp.s, vb = vp.vb, S = Model.S, MINPX = 6;
+    if (!vb || sc < 8 || !S.pcb) { el.innerHTML = ''; return; }
+    const inView = (x, y, m) => x > vb[0] - m && x < vb[0] + vb[2] + m && y > vb[1] - m && y < vb[1] + vb[3] + m;
+    const out = [], txt = (x, y, a, fs, n, o) => out.push(`<text class="netname-pcb" x="${+x.toFixed(3)}" y="${+y.toFixed(3)}" ${a ? `transform="rotate(${+a.toFixed(1)} ${+x.toFixed(3)} ${+y.toFixed(3)})" ` : ''}style="font-size:${+fs.toFixed(3)}px" opacity="${o}">${esc(n)}</text>`);
+    const op = L => ui.dim && L !== ui.active ? 0.55 : 0.95, W = 0.6;   // W: character width / font size
+    for (const L of ['F', 'B']) {
+      if (!vis(L)) continue;
+      for (const t of S.pcb.traces) {
+        if (t.layer !== L || !t.net) continue;
+        const fs = t.w * 0.72; if (fs * sc < MINPX) continue;
+        const need = t.net.length * fs * W + fs;
+        for (let k = 1; k < t.pts.length; k++) {
+          const a = t.pts[k - 1], b = t.pts[k], len = Math.hypot(b[0] - a[0], b[1] - a[1]); if (len < need) continue;
+          const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2; if (!inView(mx, my, len)) continue;
+          let ang = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI; if (ang > 90) ang -= 180; else if (ang <= -90) ang += 180;
+          // long runs: the name every ~40 font sizes
+          const n = Math.max(1, Math.min(6, Math.floor(len / Math.max(need * 2, fs * 40))));
+          for (let q = 0; q < n; q++) { const f = (q + 0.5) / n; txt(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, ang, fs, t.net, op(L)); }
+        }
+      }
+    }
+    for (const p of cache.pads) {
+      if (!p.net || !inView(p.x, p.y, 1)) continue;
+      const L = p.drill ? (vis('MU') ? ui.active : null) : (p.layer || 'F'); if (!L || (!p.drill && !vis(L))) continue;
+      const vert = p.h > p.w * 1.2, long = vert ? p.h : p.w, short = vert ? p.w : p.h;
+      const fs = Math.min(short * 0.5, long * 0.88 / (p.net.length * W)); if (fs * sc < MINPX) continue;
+      txt(p.x, p.y, vert ? -90 : 0, fs, p.net, p.drill ? 0.95 : op(L));
+    }
+    el.innerHTML = out.join('');
+  }
   const selectAll = () => setSelection(Pcb.placed().map(c => c.ref));
   function deleteItem() {
     const it = ui.item; if (!it) return; ui.item = null; ui.hlNet = null;
@@ -696,6 +732,7 @@ const PcbView = (() => {
       out.push(`<path d="${d}" fill="url(#hatch${ids[0]})" stroke="none" pointer-events="none" opacity="0.5"/>`);
       out.push(`<path ${k.auto ? `data-k="koa" data-ref="${esc(k.epRef)}" ` : `data-k="ko" data-i="${i}" `}class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="${col(ids[0])}" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="stroke"><title>${k.auto ? 'Automatic keep-out ' : 'Keep-out '}"${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')} · click to select, Del removes</title></path>`);
     });
+    out.push(`<g id="pnames"></g>`);
     out.push(`<g id="prats">${ratsHtml()}</g>`);
     if (vis('DRC') && ui.drc) for (const v of ui.drc.violations) if (v.x != null) out.push(`<g class="drcmark" transform="translate(${v.x} ${v.y})" stroke="${v.severity === 'error' ? col('DRC') : '#f0b429'}"><circle r="0.9" fill="none" stroke-width="0.12"/><path d="M-0.45 -0.45L0.45 0.45M0.45 -0.45L-0.45 0.45" stroke-width="0.14"/><title>${esc(v.msg)}</title></g>`);
     // selection outlines
@@ -709,6 +746,7 @@ const PcbView = (() => {
     out.push(...lblHits);   // text grab areas on top of everything (DRC marks, selection outlines)
     out.push('<g id="pcbLive"></g>');
     world.innerHTML = out.join('');
+    names();
     renderLiveLayer();
   }
   const ratsHtml = () => vis('RA') ? Pcb.ratsnest().map(r => `<line x1="${r.a.x}" y1="${r.a.y}" x2="${r.b.x}" y2="${r.b.y}" stroke="${col('RA')}" stroke-width="0.08" pointer-events="none"><title>${esc(r.net)}</title></line>`).join('') : '';

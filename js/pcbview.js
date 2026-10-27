@@ -13,7 +13,8 @@ const PcbView = (() => {
     { id: 'MU', name: 'Multi-Layer', color: '#C0C0C0' },
     { id: 'HO', name: 'HoleLayer', color: '#222222' },
     { id: 'OL', name: 'BoardOutline', color: '#FF00FF' },
-    { id: 'KO', name: 'KeepOutLayer', color: '#FF5A5A' },
+    { id: 'KOT', name: 'TopKeepOutLayer', color: '#FF5A5A' },
+    { id: 'KOB', name: 'BottomKeepOutLayer', color: '#FF9A3C' },
     { id: 'RA', name: 'RatlineLayer', color: '#6464FF' },
     { id: 'DRC', name: 'DRCErrorLayer', color: '#FAD609' },
   ];
@@ -23,7 +24,7 @@ const PcbView = (() => {
     { id: 'via', key: 'V', name: 'Via', icon: '<circle cx="12" cy="12" r="7" fill="none" stroke-width="2.6"/><circle cx="12" cy="12" r="2.4"/>' },
     { id: 'arc', key: 'A', name: 'Arc track', icon: '<path d="M4 19A15 15 0 0 1 20 5" fill="none" stroke-width="2.4"/>' },
     { id: 'pour', key: 'E', name: 'Copper area (pour)', icon: '<path d="M4 6l7-3 9 4-2 12-12 1z" stroke-width="1.6" opacity="0.85"/>' },
-    { id: 'keepout', key: 'K', name: 'Keep-out area (no tracks / vias / copper pour inside): click corners, click the first corner to close', icon: '<path d="M4 4h16v16H4z" fill="none" stroke-width="2" stroke-dasharray="3 2"/><path d="M8 8l8 8M16 8l-8 8" stroke-width="2"/>' },
+    { id: 'keepout', key: 'K', name: 'Keep-out area on the active layer — top or bottom (T / B) — no tracks / vias / copper pour inside: click corners, click the first corner to close', icon: '<path d="M4 4h16v16H4z" fill="none" stroke-width="2" stroke-dasharray="3 2"/><path d="M8 8l8 8M16 8l-8 8" stroke-width="2"/>' },
     { id: 'text', key: 'T', name: 'Text on the silkscreen (click to place on the active side)', icon: '<path d="M5 5h14M12 5v14M9 19h6" fill="none" stroke-width="2.4"/>' },
     { id: 'measure', key: 'M', name: 'Measure', icon: '<path d="M3 16l13-13 5 5-13 13z" fill="none" stroke-width="1.8"/><path d="M7 12l2 2M10 9l2 2M13 6l2 2" stroke-width="1.6"/>' },
   ];
@@ -75,7 +76,7 @@ const PcbView = (() => {
     overlay.querySelector('.lq').onclick = e => {
       const q = e.target.dataset.q; if (!q) return;
       for (const l of LAYERS) ui.layers[l.id].on = q === 'all' ? true : q === 'none' ? false :
-        (q === 'F' ? !['B', 'BM'].includes(l.id) : !['F', 'FS', 'FM'].includes(l.id));
+        (q === 'F' ? !['B', 'BM', 'KOB'].includes(l.id) : !['F', 'FS', 'FM', 'KOT'].includes(l.id));
       if (q === 'F' || q === 'B') ui.active = q;
       persist(); renderLayers(); render(); syncBar();
     };
@@ -303,9 +304,9 @@ const PcbView = (() => {
     const P = ui.poly; ui.poly = null; if (!P || P.pts.length < 3) { renderLive(); return; }
     try {
       if (P.kind === 'keepout') {
-        const r = Model.mutate(() => Pcb.addKeepout({ points: P.pts, layer: 'both' }));
+        const r = Model.mutate(() => Pcb.addKeepout({ points: P.pts, layer: ui.active }));
         ui.sel = null; ui.item = { k: 'ko', i: r.index }; ui.hlNet = null; ui.onSelect(null);
-        App.toast(r.already_inside.length ? `Keep-out added — ${r.already_inside.length} problems inside: press Route to move the copper out` : 'Keep-out added: the router and copper pours avoid it (settings in Properties)', 7000);
+        App.toast(r.already_inside.length ? `Keep-out added — ${r.already_inside.length} problems inside: press Route to move the copper out` : `${LNAME[ui.active]} keep-out added: the router and copper pours avoid it there (Properties: top + bottom, what it keeps out)`, 7000);
       } else if (P.kind === 'outline') {
         Model.mutate(() => Pcb.setBoardShape({ shape: 'polygon', points: P.pts, corner_radius: ui.outlineR || 0 }));
         App.toast('Board outline updated — press Route to re-check connections'); setTool('select'); Pcb.fit && fit();
@@ -623,7 +624,7 @@ const PcbView = (() => {
     // footprint hit areas (bottom), so copper on top stays clickable
     for (const c of cs) { if (!partVisible(c)) continue; const b = Pcb.fpBox(c); out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); }
     const R0 = Pcb.rules(), bpoly = Pcb.boardPoly(), bpath = 'M' + bpoly.map(q => q.join(' ')).join('L') + 'Z';
-    out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath><pattern id="kohatch" width="0.8" height="0.8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="0.8" stroke="${col('KO')}" stroke-width="0.12"/></pattern></defs>`);
+    out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath>${['KOT', 'KOB'].map(id => `<pattern id="hatch${id}" width="0.8" height="0.8" patternUnits="userSpaceOnUse" patternTransform="rotate(${id === 'KOT' ? 45 : -45})"><line x1="0" y1="0" x2="0" y2="0.8" stroke="${col(id)}" stroke-width="0.12"/></pattern>`).join('')}</defs>`);
     const order = ui.active === 'F' ? ['B', 'F'] : ['F', 'B'];
     for (const L of order) {
       if (!vis(L)) continue;
@@ -688,10 +689,12 @@ const PcbView = (() => {
     if (vis('OL')) out.push(`<path d="${bpath}" fill="none" stroke="${col('OL')}" stroke-width="0.15" pointer-events="none"/>`);
     // flex stiffeners: dashed purple outlines
     const fx = S.pcb.flex; if (fx && fx.on) for (const st of fx.stiffeners || []) out.push(`<path d="M${st.pts.map(q => q.join(' ')).join('L')}Z" fill="#a46bff" fill-opacity="0.08" stroke="#a46bff" stroke-width="0.12" stroke-dasharray="0.5 0.3" pointer-events="none"><title>${esc(st.name)} · ${st.material} ${st.thickness} mm · ${st.side}</title></path>`);
-    if (vis('KO')) Pcb.keepouts().forEach((k, i) => {
+    // top keep-outs on TopKeepOutLayer, bottom ones on BottomKeepOutLayer; top + bottom ones show with either
+    Pcb.keepouts().forEach((k, i) => {
+      const ids = k.layer === 'both' ? ['KOT', 'KOB'].filter(vis) : [k.layer === 'B' ? 'KOB' : 'KOT'].filter(vis); if (!ids.length) return;
       const d = `M${k.pts.map(q => q.join(' ')).join('L')}Z`, on = ui.item && (k.auto ? ui.item.k === 'koa' && ui.item.ref === k.epRef : ui.item.k === 'ko' && ui.item.i === i);
-      out.push(`<path d="${d}" fill="url(#kohatch)" stroke="none" pointer-events="none" opacity="0.5"/>`);
-      out.push(`<path ${k.auto ? `data-k="koa" data-ref="${esc(k.epRef)}" ` : `data-k="ko" data-i="${i}" `}class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="${col('KO')}" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="stroke"><title>${k.auto ? 'Automatic keep-out ' : 'Keep-out '}"${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')} · click to select, Del removes</title></path>`);
+      out.push(`<path d="${d}" fill="url(#hatch${ids[0]})" stroke="none" pointer-events="none" opacity="0.5"/>`);
+      out.push(`<path ${k.auto ? `data-k="koa" data-ref="${esc(k.epRef)}" ` : `data-k="ko" data-i="${i}" `}class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="${col(ids[0])}" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="stroke"><title>${k.auto ? 'Automatic keep-out ' : 'Keep-out '}"${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')} · click to select, Del removes</title></path>`);
     });
     out.push(`<g id="prats">${ratsHtml()}</g>`);
     if (vis('DRC') && ui.drc) for (const v of ui.drc.violations) if (v.x != null) out.push(`<g class="drcmark" transform="translate(${v.x} ${v.y})" stroke="${v.severity === 'error' ? col('DRC') : '#f0b429'}"><circle r="0.9" fill="none" stroke-width="0.12"/><path d="M-0.45 -0.45L0.45 0.45M0.45 -0.45L-0.45 0.45" stroke-width="0.14"/><title>${esc(v.msg)}</title></g>`);
@@ -767,7 +770,7 @@ const PcbView = (() => {
       out.push(`<polyline points="${pts.map(p => p.join(',')).join(' ')}" stroke="${col(A.layer)}" stroke-width="${curWidth(A.net)}" class="rprev"/>`);
     }
     if (ui.poly) {
-      const P = ui.poly.pts.concat(c ? [[c.x, c.y]] : []), colr = ui.poly.kind === 'outline' ? col('OL') : ui.poly.kind === 'keepout' ? '#ff5a5a' : col(ui.active);
+      const P = ui.poly.pts.concat(c ? [[c.x, c.y]] : []), colr = ui.poly.kind === 'outline' ? col('OL') : ui.poly.kind === 'keepout' ? col(ui.active === 'B' ? 'KOB' : 'KOT') : col(ui.active);
       out.push(`<polygon points="${P.map(p => p.join(',')).join(' ')}" fill="${colr}" fill-opacity="0.18" stroke="${colr}" stroke-width="0.1" stroke-dasharray="0.4 0.25"/>`);
       if (P.length) out.push(`<circle cx="${P[0][0]}" cy="${P[0][1]}" r="0.35" fill="none" stroke="#fff" stroke-width="0.08"/>`);
     }
@@ -858,7 +861,7 @@ const PcbView = (() => {
     if (it.k === 'koa') {
       const k = Pcb.epKeepouts().find(q => q.epRef === it.ref); if (!k) return false;
       el.innerHTML = `<div class="ph">Automatic keep-out</div><div>${esc(k.name)} · ${k.layer === 'B' ? 'bottom' : 'top'} layer</div>
-        <div class="muted small">Added by the rule "Keep-out under exposed centre pads": no tracks or vias of other nets under the ${esc(it.ref)} paddle on the other layer (pour allowed). Hide it with the KeepOutLayer eye in Layers.</div>
+        <div class="muted small">Added by the rule "Keep-out under exposed centre pads": no tracks or vias of other nets under the ${esc(it.ref)} paddle on the other layer (pour allowed). Hide it with the ${k.layer === 'B' ? 'BottomKeepOutLayer' : 'TopKeepOutLayer'} eye in Layers.</div>
         <div class="row"><button id="ppDel" class="danger">Remove this keep-out (Del)</button></div>
         <div class="row"><button id="pkAll">Turn off all automatic keep-outs</button></div>`;
       $('#ppDel').onclick = deleteItem;

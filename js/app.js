@@ -475,13 +475,17 @@ const App = (() => {
     }
     return orderWebsite();
   }
-  // Upload to JLCPCB without ordering: JLCPCB reviews the Gerbers and prices the board (needs JLCPCB API keys, desktop)
+  // Upload to JLCPCB without ordering: the Gerbers are uploaded and the JLCPCB quote page opens with the board loaded,
+  // to order on the website (needs JLCPCB API keys — desktop; otherwise the files are saved and the quote page opens)
   async function uploadPcb() {
     if (!Model.S.board.w || !Pcb.placed().length) { toast('No PCB yet — Generate PCB first'); return; }
-    if (typeof JlcOrder === 'undefined' || !await JlcOrder.available()) { toast('Uploading to JLCPCB needs JLCPCB API keys (desktop version, jlcapi-keys.json). Use Order at JLCPCB → the website instead.', 10000); return; }
     const d = showDrc();
-    if (d.errors && !confirm(`DRC: ${d.summary}. Upload anyway? (The JLCPCB review will also see the problems)`)) return;
-    return JlcOrder.check();
+    if (d.errors && !confirm(`DRC: ${d.summary}. JLCPCB may reject a board with errors. Upload anyway?`)) return;
+    const tab = window.open('', '_blank');   // inside the click, before any await (popup blockers)
+    try { tab.opener = null; tab.document.title = 'Uploading to JLCPCB…'; tab.document.body.innerHTML = '<p style="font:16px system-ui;padding:2em">Uploading your Gerbers to JLCPCB… the quote page opens here in a moment.</p>'; } catch (e) { }
+    if (typeof JlcOrder === 'undefined' || !await JlcOrder.available()) { try { tab.close(); } catch (e) { } toast('Uploading straight to JLCPCB needs JLCPCB API keys (desktop version) — saving the files and opening the quote page instead', 8000); return orderWebsite(); }
+    toast('Uploading the Gerbers to JLCPCB…', 15000);
+    return JlcOrder.uploadToSite(tab);
   }
   async function orderWebsite() {
     if (!Model.S.board.w || !Pcb.placed().length) { toast('No PCB yet — Generate PCB first'); return; }

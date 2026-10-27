@@ -47,47 +47,15 @@ const JlcOrder = (() => {
     } catch (e) { failed(e); }
   }
 
-  // Upload to JLCPCB without ordering: the Gerbers go to JLCPCB, which reviews them (board size, layer files, smallest
-  // track / gap, problems) and prices the board at the default options. Nothing is ordered; "Order…" continues with
-  // the same upload.
-  async function check() {
-    if (!Model.S.board.w || !Pcb.placed().length) { App.toast('No PCB yet — Generate PCB first'); return; }
-    title('Upload to JLCPCB');
-    show('<p class="muted">Uploading the Gerbers to JLCPCB…</p>');
-    let key;
-    try { key = await uploadGerbers(); } catch (e) { return failed(e); }
-    show('<p class="muted">Uploaded ✓ — JLCPCB is reviewing the files (this takes up to a minute)…</p>');
-    let addr = {}; try { addr = await call('address'); } catch (e) { }
-    const priceP = call('pcb/quote', { orderType: 1, pcbParam: Pcb.jlcPcbParam({}), achieveDate: 96, fileKey: key, country: (addr.country || 'EG').toUpperCase() }).catch(e => ({ code: 0, message: e.message }));
-    let a = null, err = null;
-    for (let i = 0; i < 30 && !a; i++) {   // the review is ready after a few seconds; until then JLCPCB answers 2501
-      try { const r = await call('pcb/audit', { key }); if (r.code === 200 && r.data) a = r.data; else if (r.code !== 2501) err = `${r.code}: ${r.message}`; } catch (e) { err = e.message; }
-      if (!a) { if (err && i > 3) break; await new Promise(res => setTimeout(res, 3000)); }
-      if ($('#jlcModal').classList.contains('hidden')) return;   // closed meanwhile
-    }
-    const q = await priceP, S = Model.S, d = a || {}, rec = d.technologyDiscernRecordResult || {};
-    const clean = s => String(s).replace(/\(null\)|:null/g, '').trim();
-    const list = (k, cls, head) => (rec[k] || []).length ? `<p class="${cls}"><b>${head}</b></p><ul class="small">${rec[k].map(x => `<li>${esc(clean(x))}</li>`).join('')}</ul>` : '';
-    const sizeOk = d.setLength && Math.abs(Math.max(d.setLength, d.setWidth) - Math.max(S.board.w, S.board.h)) < 0.3 && Math.abs(Math.min(d.setLength, d.setWidth) - Math.min(S.board.w, S.board.h)) < 0.3;
-    const files = [...(rec.blue || []), ...(rec.green || [])].map(clean);
-    const pcb = q.code === 200 && q.data ? +q.data.priceWithoutFreight : null;
-    const noProblems = !(rec.red || []).length && !(rec.yellow || []).length;
-    show(`
-      <p class="good">✓ Gerbers uploaded to JLCPCB — nothing has been ordered.</p>
-      ${a ? `<div class="jlc-grid small">
-        <div>Board size found <b>${d.setLength} × ${d.setWidth} mm</b> ${sizeOk ? '✓' : `<span class="bad">(design: ${S.board.w} × ${S.board.h} mm)</span>`}</div>
-        <div>Smallest track <b>${d.minLineWidth ?? '–'} mm</b> · smallest gap <b>${d.minLineDist ?? '–'} mm</b></div>
-        <div>Layer files recognised <b>${files.length}</b>${d.stencilLayer ? ` · paste layers ${d.stencilLayer}` : ''}</div>
-      </div>
-      ${list('red', 'bad', 'Problems JLCPCB found')}${list('yellow', 'warn', 'Warnings')}
-      ${noProblems ? '<p class="small">No problems reported by the JLCPCB file review.</p>' : ''}
-      ${files.length ? `<details><summary class="muted small">Files JLCPCB recognised</summary><ul class="small">${files.map(f => `<li>${esc(f)}</li>`).join('')}</ul></details>` : ''}
-      ${d.gerberTop ? `<div class="jlc-prev"><img src="${esc(d.gerberTop)}" alt="top"><img src="${esc(d.gerberBottom || '')}" alt="bottom"></div>` : ''}`
-      : `<p class="warn">The JLCPCB file review did not answer${err ? ` (${esc(err)})` : ' in time'} — the upload itself worked.</p>`}
-      ${pcb != null ? `<div class="jlc-price"><div>Price for 5 pcs (green, lead-free HASL, 1.6 mm) <b>$${pcb.toFixed(2)}</b> <span class="muted">+ shipping</span></div></div>` : q.message ? `<p class="muted small">No price: ${esc(q.message)}</p>` : ''}
-      <div class="row end">${d.url ? `<a class="btn" href="${esc(d.url)}" target="_blank" rel="noopener">Open in the JLCPCB Gerber viewer ↗</a>` : ''}<button id="jlcWeb">Website + assembly files ↗</button><button id="jlcGoOrder" class="primary">Order…</button></div>`);
-    $('#jlcWeb').onclick = () => { close(); App.orderWebsite(); };
-    $('#jlcGoOrder').onclick = () => open(key);
+  // Upload to JLCPCB without ordering (as EasyEDA does): the Gerbers go to JLCPCB through the API and the JLCPCB quote
+  // page opens with the board already loaded (?uploadNum=<file key>); the user chooses the options and orders there.
+  // tab: a window opened inside the click (popup blockers), sent to the quote page once the upload is done.
+  async function uploadToSite(tab) {
+    try {
+      const key = await uploadGerbers(), url = 'https://cart.jlcpcb.com/quote?uploadNum=' + encodeURIComponent(key);
+      if (tab && !tab.closed) tab.location.href = url; else window.open(url, '_blank', 'noopener');
+      App.toast('Gerbers uploaded to JLCPCB — the quote page opened with your board. Sign in there if asked, choose the options and order.', 12000);
+    } catch (e) { try { if (tab && !tab.closed) tab.close(); } catch (x) { } App.toast(e.message + ' — use Order at JLCPCB → the website instead', 12000); }
   }
 
   async function requote() {
@@ -173,5 +141,5 @@ const JlcOrder = (() => {
   const close = () => { const m = $('#jlcModal'); if (m) m.classList.add('hidden'); };
   const setBusy = b => { const m = $('#jlcBody'); if (m) m.style.opacity = b ? 0.55 : ''; };
 
-  return { open, check, available, close, pcbParam };
+  return { open, uploadToSite, available, close, pcbParam };
 })();

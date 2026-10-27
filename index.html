@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610271500">
+<link rel="stylesheet" href="styles.css?v=202610271700">
 </head>
 <body>
 <header id="top">
@@ -125,7 +125,7 @@
         <label title="Draw tracks and vias without the clearance check (the preview still turns red; DRC still reports what breaks a rule)"><input id="pFree" type="checkbox"> No rules</label>
         <button id="btnFitP" title="F">Fit</button>
         <button id="btnGerber">Gerbers ⤓</button>
-        <button id="btnUploadJlc" title="DRC check, then the Gerbers are uploaded to JLCPCB: JLCPCB reviews them (board size, layers, smallest track and gap, problems, preview) and prices the board — nothing is ordered">Upload to JLCPCB ⤒</button>
+        <button id="btnUploadJlc" title="DRC check, then the Gerbers are uploaded to JLCPCB and the JLCPCB quote page opens with your board loaded — choose the options and order on the website (as in EasyEDA). Needs JLCPCB API keys (desktop); otherwise the files are saved and you add them on the quote page">Upload to JLCPCB ↗</button>
         <button id="btnOrderPcb" class="primary" title="DRC check, then the board is uploaded to JLCPCB and priced live (quantity, colour, finish, build time, shipping) — place the order from here and pay at JLCPCB. Without API keys: download the files and open the JLCPCB quote page">Order at JLCPCB ↗</button>
       </div>
     </div>
@@ -360,34 +360,34 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610271500"></script>
-<script src="js/static-backend.js?v=202610271500"></script>
-<script src="js/lib.js?v=202610271500"></script>
-<script src="js/view.js?v=202610271500"></script>
-<script src="js/model.js?v=202610271500"></script>
-<script src="js/schematic.js?v=202610271500"></script>
-<script src="js/pcb.js?v=202610271500"></script>
-<script src="js/pcbview.js?v=202610271500"></script>
-<script src="js/enclosure.js?v=202610271500"></script>
-<script src="js/shape3d.js?v=202610271500"></script>
-<script src="js/easyeda.js?v=202610271500"></script>
-<script src="js/libpanel.js?v=202610271500"></script>
-<script src="js/openlib.js?v=202610271500"></script>
-<script src="js/kicad.js?v=202610271500"></script>
-<script src="js/easyedapro.js?v=202610271500"></script>
-<script src="js/encview.js?v=202610271500"></script>
-<script src="js/docview.js?v=202610271500"></script>
-<script src="js/pcb3d.js?v=202610271500"></script>
-<script src="js/blocks.js?v=202610271500"></script>
-<script src="js/engine.js?v=202610271500"></script>
-<script src="js/ai.js?v=202610271500"></script>
-<script src="js/exports.js?v=202610271500"></script>
-<script src="js/pcbpdf.js?v=202610271500"></script>
-<script src="js/folder.js?v=202610271500"></script>
-<script src="js/projects.js?v=202610271500"></script>
-<script src="js/editor.js?v=202610271500"></script>
-<script src="js/jlcorder.js?v=202610271500"></script>
-<script src="js/app.js?v=202610271500"></script>
+<script src="js/config.js?v=202610271700"></script>
+<script src="js/static-backend.js?v=202610271700"></script>
+<script src="js/lib.js?v=202610271700"></script>
+<script src="js/view.js?v=202610271700"></script>
+<script src="js/model.js?v=202610271700"></script>
+<script src="js/schematic.js?v=202610271700"></script>
+<script src="js/pcb.js?v=202610271700"></script>
+<script src="js/pcbview.js?v=202610271700"></script>
+<script src="js/enclosure.js?v=202610271700"></script>
+<script src="js/shape3d.js?v=202610271700"></script>
+<script src="js/easyeda.js?v=202610271700"></script>
+<script src="js/libpanel.js?v=202610271700"></script>
+<script src="js/openlib.js?v=202610271700"></script>
+<script src="js/kicad.js?v=202610271700"></script>
+<script src="js/easyedapro.js?v=202610271700"></script>
+<script src="js/encview.js?v=202610271700"></script>
+<script src="js/docview.js?v=202610271700"></script>
+<script src="js/pcb3d.js?v=202610271700"></script>
+<script src="js/blocks.js?v=202610271700"></script>
+<script src="js/engine.js?v=202610271700"></script>
+<script src="js/ai.js?v=202610271700"></script>
+<script src="js/exports.js?v=202610271700"></script>
+<script src="js/pcbpdf.js?v=202610271700"></script>
+<script src="js/folder.js?v=202610271700"></script>
+<script src="js/projects.js?v=202610271700"></script>
+<script src="js/editor.js?v=202610271700"></script>
+<script src="js/jlcorder.js?v=202610271700"></script>
+<script src="js/app.js?v=202610271700"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

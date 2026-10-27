@@ -5,5 +5,5 @@ window.CP_CONFIG = {
   relay: 'https://circuitpilot-relay.circuitpilot.workers.dev',
   // Google sign-in (projects in the user's own Google Drive): the OAuth "Web application" client ID from Google Cloud
   // Console, with the authorized JavaScript origins https://pcbgo.site and http://localhost:5173. Not a secret.
-  googleClientId: '',
+  googleClientId: '773131004199-8ajg71r8fuv8l0463qmajip7o8bjeqjp.apps.googleusercontent.com',
 };

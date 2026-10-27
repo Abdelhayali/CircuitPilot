@@ -13,6 +13,7 @@ const PcbView = (() => {
     { id: 'MU', name: 'Multi-Layer', color: '#C0C0C0' },
     { id: 'HO', name: 'HoleLayer', color: '#222222' },
     { id: 'OL', name: 'BoardOutline', color: '#FF00FF' },
+    { id: 'KO', name: 'KeepOutLayer', color: '#FF5A5A' },
     { id: 'RA', name: 'RatlineLayer', color: '#6464FF' },
     { id: 'DRC', name: 'DRCErrorLayer', color: '#FAD609' },
   ];
@@ -384,6 +385,7 @@ const PcbView = (() => {
       return;
     }
     if (el && el.dataset.k === 'ko') { ui.sel = null; ui.multi = new Set(); ui.item = { k: 'ko', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); render(); return; }
+    if (el && el.dataset.k === 'koa') { ui.sel = null; ui.multi = new Set(); ui.item = { k: 'koa', ref: el.dataset.ref }; ui.hlNet = null; ui.onSelect(null); render(); return; }
     if (el && el.dataset.k === 'pour') { ui.sel = null; ui.item = { k: 'pour', i: +el.dataset.i }; ui.hlNet = (Model.S.pcb.pours[+el.dataset.i] || {}).net; ui.onSelect(null); render(); pan = { x: e.clientX, y: e.clientY }; return; }
     if (el && el.dataset.k === 'h') { const h = Model.S.pcb.holes[+el.dataset.i]; ui.sel = null; ui.item = { k: 'h', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); drag = { kind: 'hole', i: +el.dataset.i, ox: pt.x - h.x, oy: pt.y - h.y, moved: false }; render(); return; }
     if (el && el.dataset.k === 'v') { const v = Model.S.pcb.vias[+el.dataset.i]; selectItem({ k: 'v', i: +el.dataset.i }); drag = { kind: 'via', i: +el.dataset.i, ox: pt.x - v.x, oy: pt.y - v.y, moved: false }; drag.ends = viaEnds(v); return; }
@@ -593,6 +595,7 @@ const PcbView = (() => {
       if (it.k === 'v') S.pcb.vias.splice(it.i, 1);
       else if (it.k === 'pour') S.pcb.pours.splice(it.i, 1);
       else if (it.k === 'ko') Pcb.removeKeepout({ index: it.i });
+      else if (it.k === 'koa') S.pcb.epKeepoutOff = [...new Set([...(S.pcb.epKeepoutOff || []), it.ref])];
       else if (it.k === 'h') S.pcb.holes.splice(it.i, 1);
       else if (it.k === 'txt') Pcb.removeText(it.i);
       else if (it.k === 'blbl') Pcb.setSilkLabel('board', { hidden: true });
@@ -620,7 +623,7 @@ const PcbView = (() => {
     // footprint hit areas (bottom), so copper on top stays clickable
     for (const c of cs) { if (!partVisible(c)) continue; const b = Pcb.fpBox(c); out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); }
     const R0 = Pcb.rules(), bpoly = Pcb.boardPoly(), bpath = 'M' + bpoly.map(q => q.join(' ')).join('L') + 'Z';
-    out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath><pattern id="kohatch" width="0.8" height="0.8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="0.8" stroke="#ff5a5a" stroke-width="0.12"/></pattern></defs>`);
+    out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath><pattern id="kohatch" width="0.8" height="0.8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="0.8" stroke="${col('KO')}" stroke-width="0.12"/></pattern></defs>`);
     const order = ui.active === 'F' ? ['B', 'F'] : ['F', 'B'];
     for (const L of order) {
       if (!vis(L)) continue;
@@ -685,10 +688,10 @@ const PcbView = (() => {
     if (vis('OL')) out.push(`<path d="${bpath}" fill="none" stroke="${col('OL')}" stroke-width="0.15" pointer-events="none"/>`);
     // flex stiffeners: dashed purple outlines
     const fx = S.pcb.flex; if (fx && fx.on) for (const st of fx.stiffeners || []) out.push(`<path d="M${st.pts.map(q => q.join(' ')).join('L')}Z" fill="#a46bff" fill-opacity="0.08" stroke="#a46bff" stroke-width="0.12" stroke-dasharray="0.5 0.3" pointer-events="none"><title>${esc(st.name)} · ${st.material} ${st.thickness} mm · ${st.side}</title></path>`);
-    Pcb.keepouts().forEach((k, i) => {
-      const d = `M${k.pts.map(q => q.join(' ')).join('L')}Z`, on = ui.item && ui.item.k === 'ko' && ui.item.i === i;
+    if (vis('KO')) Pcb.keepouts().forEach((k, i) => {
+      const d = `M${k.pts.map(q => q.join(' ')).join('L')}Z`, on = ui.item && (k.auto ? ui.item.k === 'koa' && ui.item.ref === k.epRef : ui.item.k === 'ko' && ui.item.i === i);
       out.push(`<path d="${d}" fill="url(#kohatch)" stroke="none" pointer-events="none" opacity="0.5"/>`);
-      out.push(`<path ${k.auto ? '' : `data-k="ko" data-i="${i}" `}class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="#ff5a5a" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="${k.auto ? 'none' : 'stroke'}"><title>${k.auto ? 'Automatic keep-out (rule epKeepout) ' : 'Keep-out '}"${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')}</title></path>`);
+      out.push(`<path ${k.auto ? `data-k="koa" data-ref="${esc(k.epRef)}" ` : `data-k="ko" data-i="${i}" `}class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="${col('KO')}" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="stroke"><title>${k.auto ? 'Automatic keep-out ' : 'Keep-out '}"${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')} · click to select, Del removes</title></path>`);
     });
     out.push(`<g id="prats">${ratsHtml()}</g>`);
     if (vis('DRC') && ui.drc) for (const v of ui.drc.violations) if (v.x != null) out.push(`<g class="drcmark" transform="translate(${v.x} ${v.y})" stroke="${v.severity === 'error' ? col('DRC') : '#f0b429'}"><circle r="0.9" fill="none" stroke-width="0.12"/><path d="M-0.45 -0.45L0.45 0.45M0.45 -0.45L-0.45 0.45" stroke-width="0.14"/><title>${esc(v.msg)}</title></g>`);
@@ -852,6 +855,16 @@ const PcbView = (() => {
       $('#ppDel').onclick = deleteItem;
       return true;
     }
+    if (it.k === 'koa') {
+      const k = Pcb.epKeepouts().find(q => q.epRef === it.ref); if (!k) return false;
+      el.innerHTML = `<div class="ph">Automatic keep-out</div><div>${esc(k.name)} · ${k.layer === 'B' ? 'bottom' : 'top'} layer</div>
+        <div class="muted small">Added by the rule "Keep-out under exposed centre pads": no tracks or vias of other nets under the ${esc(it.ref)} paddle on the other layer (pour allowed). Hide it with the KeepOutLayer eye in Layers.</div>
+        <div class="row"><button id="ppDel" class="danger">Remove this keep-out (Del)</button></div>
+        <div class="row"><button id="pkAll">Turn off all automatic keep-outs</button></div>`;
+      $('#ppDel').onclick = deleteItem;
+      $('#pkAll').onclick = () => { ui.item = null; Model.mutate(() => Pcb.setRules({ epKeepout: false })); App.toast('Automatic keep-outs under centre pads are off (turn them back on in Design rules)', 7000); };
+      return true;
+    }
     if (it.k === 'pour') {
       const pr = S.pcb.pours && S.pcb.pours[it.i]; if (!pr) return false;
       el.innerHTML = `<div class="ph">Copper area</div><label>Net${netSel(pr.net)}</label>
@@ -920,7 +933,7 @@ const PcbView = (() => {
   // keep the item selection valid after undo/redo or external edits
   function validate() {
     const S = Model.S;
-    const it = ui.item, gone = it && (it.k === 'v' ? !S.pcb.vias[it.i] : it.k === 'pour' ? !(S.pcb.pours || [])[it.i] : it.k === 'ko' ? !(S.pcb.keepouts || [])[it.i] : it.k === 'h' ? !(S.pcb.holes || [])[it.i]
+    const it = ui.item, gone = it && (it.k === 'v' ? !S.pcb.vias[it.i] : it.k === 'pour' ? !(S.pcb.pours || [])[it.i] : it.k === 'ko' ? !(S.pcb.keepouts || [])[it.i] : it.k === 'koa' ? !Pcb.epKeepouts().some(q => q.epRef === it.ref) : it.k === 'h' ? !(S.pcb.holes || [])[it.i]
       : it.k === 'txt' ? !(S.pcb.texts || [])[it.i] : it.k === 'blbl' ? false : !S.pcb.traces[it.i]);   // t / T: tracks
     if (gone) ui.item = null;
     if (ui.sel && !Model.comp(ui.sel)) ui.sel = null;

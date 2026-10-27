@@ -206,7 +206,8 @@ const Pcb = (() => {
   let epKoMemo = { key: null, list: [] };
   function epKeepouts() {
     const S = Model.S; if (!S.pcb || rules().epKeepout === false || rules().layers === 1) return [];
-    const cs = placed(), key = cs.map(c => c.ref + ',' + c.footprint + ',' + c.pcb.x + ',' + c.pcb.y + ',' + (c.pcb.rot || 0) + ',' + (c.pcb.side || 'F')).join(';');
+    // parts whose automatic keep-out the user removed: S.pcb.epKeepoutOff [refs]
+    const off = new Set(S.pcb.epKeepoutOff || []), cs = placed().filter(c => !off.has(c.ref)), key = cs.map(c => c.ref + ',' + c.footprint + ',' + c.pcb.x + ',' + c.pcb.y + ',' + (c.pcb.rot || 0) + ',' + (c.pcb.side || 'F')).join(';');
     if (epKoMemo.key === key) return epKoMemo.list;
     const list = [], idx = Model.pinIndex();
     for (const c of cs) { const fp = Lib.footprint(c.footprint); if (!fp) continue; const ep = exposedPads(fp); if (!ep.size) continue;
@@ -1177,6 +1178,8 @@ const Pcb = (() => {
     if (next.viaInPad && (next.noViaInPad ?? true)) { if (u.viaInPad === true && u.noViaInPad !== true) next.noViaInPad = false; else next.viaInPad = false; }   // the strict rule is on unless switched off
     if (u.warnUnderMetal != null) next.warnUnderMetal = !!u.warnUnderMetal;
     if (u.epKeepout != null) next.epKeepout = !!u.epKeepout;
+    // switching the automatic keep-outs back on brings back the ones removed one by one
+    if (next.epKeepout && base.epKeepout === false && Model.S.pcb) delete Model.S.pcb.epKeepoutOff;
     if (u.pourMinArea != null && u.pourMinArea !== '') { const v = +u.pourMinArea; if (!(v >= 0 && v <= 50)) throw new Error('pourMinArea must be 0…50 mm²'); next.pourMinArea = v; }
     if (u.trackStyle != null) { const v = String(u.trackStyle).replace(/°|deg/g, ''); if (!['45', '90'].includes(v)) throw new Error('trackStyle must be "45" or "90"'); next.trackStyle = v; }
     if (u.routeTime != null && u.routeTime !== '') { const v = +u.routeTime; if (!(v >= 5 && v <= 1800)) throw new Error('routeTime must be 5…1800 seconds'); next.routeTime = v; }

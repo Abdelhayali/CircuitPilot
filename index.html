@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610271700">
+<link rel="stylesheet" href="styles.css?v=202610271900">
 </head>
 <body>
 <header id="top">
@@ -311,6 +311,7 @@
       <label>Smallest copper-pour piece kept<input data-r="pourMinArea" type="number" step="0.1" min="0"><span>mm²</span></label>
       <label class="chk full"><input data-r="warnUnderMetal" type="checkbox"> Warn about tracks / vias under batteries, coin cells and metal parts on the same side (only solder mask insulates them)</label>
       <label class="chk full"><input data-r="noViaInPad" type="checkbox"> Never put vias on SMD pads (strict, default) — not even as the router's last resort; DRC error. Thermal vias inside a QFN / DFN exposed pad stay allowed</label>
+      <label class="chk full"><input data-r="epKeepout" type="checkbox"> Keep-out under exposed centre pads (QFN / DFN) on the other layer: no tracks or vias of other nets there, pour allowed (single ones can be removed: click the dashed outline, Del)</label>
       <label class="chk full"><input data-r="viaInPad" type="checkbox"> Allow vias on SMD pins (via-in-pad — needs filled vias, extra cost)</label>
       <div class="rh">Fab minimums (DRC)</div>
       <label>Min trace width<input data-r="minTraceWidth" type="number" step="0.001"><span>mm</span></label>
@@ -360,34 +361,34 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610271700"></script>
-<script src="js/static-backend.js?v=202610271700"></script>
-<script src="js/lib.js?v=202610271700"></script>
-<script src="js/view.js?v=202610271700"></script>
-<script src="js/model.js?v=202610271700"></script>
-<script src="js/schematic.js?v=202610271700"></script>
-<script src="js/pcb.js?v=202610271700"></script>
-<script src="js/pcbview.js?v=202610271700"></script>
-<script src="js/enclosure.js?v=202610271700"></script>
-<script src="js/shape3d.js?v=202610271700"></script>
-<script src="js/easyeda.js?v=202610271700"></script>
-<script src="js/libpanel.js?v=202610271700"></script>
-<script src="js/openlib.js?v=202610271700"></script>
-<script src="js/kicad.js?v=202610271700"></script>
-<script src="js/easyedapro.js?v=202610271700"></script>
-<script src="js/encview.js?v=202610271700"></script>
-<script src="js/docview.js?v=202610271700"></script>
-<script src="js/pcb3d.js?v=202610271700"></script>
-<script src="js/blocks.js?v=202610271700"></script>
-<script src="js/engine.js?v=202610271700"></script>
-<script src="js/ai.js?v=202610271700"></script>
-<script src="js/exports.js?v=202610271700"></script>
-<script src="js/pcbpdf.js?v=202610271700"></script>
-<script src="js/folder.js?v=202610271700"></script>
-<script src="js/projects.js?v=202610271700"></script>
-<script src="js/editor.js?v=202610271700"></script>
-<script src="js/jlcorder.js?v=202610271700"></script>
-<script src="js/app.js?v=202610271700"></script>
+<script src="js/config.js?v=202610271900"></script>
+<script src="js/static-backend.js?v=202610271900"></script>
+<script src="js/lib.js?v=202610271900"></script>
+<script src="js/view.js?v=202610271900"></script>
+<script src="js/model.js?v=202610271900"></script>
+<script src="js/schematic.js?v=202610271900"></script>
+<script src="js/pcb.js?v=202610271900"></script>
+<script src="js/pcbview.js?v=202610271900"></script>
+<script src="js/enclosure.js?v=202610271900"></script>
+<script src="js/shape3d.js?v=202610271900"></script>
+<script src="js/easyeda.js?v=202610271900"></script>
+<script src="js/libpanel.js?v=202610271900"></script>
+<script src="js/openlib.js?v=202610271900"></script>
+<script src="js/kicad.js?v=202610271900"></script>
+<script src="js/easyedapro.js?v=202610271900"></script>
+<script src="js/encview.js?v=202610271900"></script>
+<script src="js/docview.js?v=202610271900"></script>
+<script src="js/pcb3d.js?v=202610271900"></script>
+<script src="js/blocks.js?v=202610271900"></script>
+<script src="js/engine.js?v=202610271900"></script>
+<script src="js/ai.js?v=202610271900"></script>
+<script src="js/exports.js?v=202610271900"></script>
+<script src="js/pcbpdf.js?v=202610271900"></script>
+<script src="js/folder.js?v=202610271900"></script>
+<script src="js/projects.js?v=202610271900"></script>
+<script src="js/editor.js?v=202610271900"></script>
+<script src="js/jlcorder.js?v=202610271900"></script>
+<script src="js/app.js?v=202610271900"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

@@ -5,8 +5,11 @@ const App = (() => {
   let view = 'sch', mode = 'agent', running = false, lastError = null;
 
   function toast(msg, ms = 3200) {
-    const t = $('#toast'); t.textContent = msg; t.classList.add('on');
-    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), ms);
+    // ✕ (or a click on the message) closes it; the pointer over it keeps it open
+    const t = $('#toast'), hide = () => { clearTimeout(toast._t); t.classList.remove('on'); };
+    t.innerHTML = '<span></span><button class="tclose" title="Close">✕</button>'; t.firstChild.textContent = msg; t.classList.add('on');
+    t.onclick = hide; t.onmouseenter = () => clearTimeout(toast._t); t.onmouseleave = () => { clearTimeout(toast._t); toast._t = setTimeout(hide, 2500); };
+    clearTimeout(toast._t); toast._t = setTimeout(hide, ms);
   }
   function download(name, data, type = 'text/plain') {
     const blob = data instanceof Blob ? data : new Blob([data], { type });
@@ -1393,6 +1396,9 @@ const App = (() => {
         if (a) { e.preventDefault(); act(a); return; }
       }
       if (e.key === 'f' || e.key === 'F') { view === 'sch' ? Sch.fit() : Pcb.fit(); return; }
+      // arrow keys move the view (Shift: a bigger step)
+      const arrow = { ArrowLeft: [1, 0], ArrowRight: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key];
+      if (arrow && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); const st = e.shiftKey ? 300 : 80; (view === 'sch' ? Sch : Pcb).vp.panBy(arrow[0] * st, arrow[1] * st); return; }
       if ((view === 'sch' ? Sch : Pcb).key(e)) e.preventDefault();
     });
     // right-click belongs to CircuitPilot (pan, context menu, finish a track): the browser menu only appears in

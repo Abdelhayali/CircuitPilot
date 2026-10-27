@@ -192,7 +192,10 @@ details.tool pre.res { color: var(--tool-res); } details.tool.err pre.res { colo
 .dlg .good { color: var(--good); } .dlg .bad { color: var(--bad); } .dlg .warn { color: var(--warn); }
 .presets { display: flex; flex-wrap: wrap; gap: 4px; } .presets button { font-size: 11px; padding: 2px 8px; }
 #toast { position: fixed; bottom: 40px; left: 50%; transform: translate(-50%, 20px); background: var(--toast-bg); border: 1px solid var(--hover-line); box-shadow: 0 6px 20px var(--shadow); padding: 8px 14px; border-radius: 8px; opacity: 0; transition: .2s; pointer-events: none; z-index: 60; max-width: 70vw; }
-#toast.on { opacity: 1; transform: translate(-50%, 0); }
+#toast.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; cursor: pointer; }
+#toast { display: flex; gap: 10px; align-items: flex-start; }
+#toast .tclose { flex: none; background: none; border: none; padding: 0 2px; font-size: 14px; line-height: 1.2; color: inherit; opacity: .7; cursor: pointer; }
+#toast .tclose:hover { opacity: 1; }
 
 @media (max-width: 1100px) { main { grid-template-columns: 190px 1fr 330px; } }
 @media (max-width: 800px) {

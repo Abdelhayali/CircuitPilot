@@ -192,18 +192,62 @@ const Enclosure = (() => {
   }
 
   // ---------------- part heights (mm above the board) ----------------
+  const partText = c => { const lib = c.lcsc && Model.S.lib && Model.S.lib[c.lcsc]; return [c.footprint, c.value, c.type, lib && lib.name, lib && lib.package, lib && lib.footprint && lib.footprint.name].filter(Boolean).join(' ').toUpperCase(); };
+  // plug-in modules soldered onto the board: real body size (their footprints usually cover more — courtyard, the USB
+  // overhang) and the USB port on the short side next to pin 1 (true for XIAO, Pico, Pro Micro, Nano, SuperMini, Zero)
+  // fromTop: port centre below the module top; out: how far the receptacle reaches past the module's edge
+  const MODULES = [
+    { re: /XIAO/, name: 'Seeed XIAO', body: [17.8, 21], h: 3.5, port: { kind: 'USB-C', w: 9.0, h: 3.2, fromTop: 1.65, out: 1.2 } },
+    { re: /SUPER.?MINI/, name: 'ESP32-C3 SuperMini', body: [18, 22.5], h: 4.4, port: { kind: 'USB-C', w: 9.0, h: 3.2, fromTop: 1.6, out: 1.0 } },
+    { re: /RP2040.?ZERO|ESP32-?S3.?ZERO|WAVESHARE.?ZERO/, name: 'Waveshare Zero', body: [18, 23.5], h: 4.4, port: { kind: 'USB-C', w: 9.0, h: 3.2, fromTop: 1.6, out: 0.8 } },
+    { re: /RASPBERRY.?PI.?PICO|RPI.?PICO|\bPICO(.?W|.?2)?\b/, name: 'Raspberry Pi Pico', body: [21, 51], h: 3.9, port: { kind: 'micro-USB', w: 8.0, h: 2.9, fromTop: 1.45, out: 1.3 } },
+    { re: /PRO.?MICRO/, name: 'Pro Micro', body: [18, 33], h: 4.3, port: { kind: 'USB', w: 8.0, h: 3.0, fromTop: 1.5, out: 1.0 } },
+    { re: /ARDUINO.?NANO|NANO.?V3/, name: 'Arduino Nano', body: [18, 45], h: 5.5, port: { kind: 'mini-USB', w: 7.8, h: 4.0, fromTop: 2.0, out: 1.5 } },
+  ];
+  // body box and port of a known module, in board coordinates (y down); null for anything else
+  function moduleInfo(c) {
+    const M = MODULES.find(m => m.re.test(partText(c))); if (!M) return null;
+    const pads = Pcb.padsOf(c); if (pads.length < 4) return null;
+    // the pin rows: the pads of the most common size (castellations / header pins, not the pads underneath)
+    const key = q => (+q.w).toFixed(2) + 'x' + (+q.h).toFixed(2), n = {};
+    for (const q of pads) n[key(q)] = (n[key(q)] || 0) + 1;
+    const top = Object.entries(n).sort((a, b) => b[1] - a[1])[0][0], rows = pads.filter(q => key(q) === top);
+    const xs = rows.map(q => q.x), ys = rows.map(q => q.y), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    // pins run along the long side: two columns (few distinct x) → long axis along y
+    const distinct = v => new Set(v.map(a => Math.round(a * 2))).size, longY = distinct(xs) <= distinct(ys);
+    const [bw, bl] = longY ? [M.body[0], M.body[1]] : [M.body[1], M.body[0]];
+    const body = [cx - bw / 2, cy - bl / 2, cx + bw / 2, cy + bl / 2];
+    const p1 = pads.find(q => String(q.num) === '1') || rows[0];
+    const side = longY ? (p1.y < cy ? 'top' : 'bottom') : (p1.x < cx ? 'left' : 'right');
+    return { name: M.name, body, h: M.h, port: Object.assign({ side, along: longY ? cx : cy }, M.port) };
+  }
   function partHeight(c, params) {
     if (params.partHeights && params.partHeights[c.ref] != null) return +params.partHeights[c.ref];
-    const lib = c.lcsc && Model.S.lib && Model.S.lib[c.lcsc];
-    const t = [c.footprint, c.value, c.type, lib && lib.name, lib && lib.package, lib && lib.footprint && lib.footprint.name].filter(Boolean).join(' ').toUpperCase();
+    const t = partText(c), fp = Lib.footprint(c.footprint);
+    const M = MODULES.find(m => m.re.test(t)); if (M) return M.h;
+    // pads only (wire pads, test points, electrode pads, solder jumpers): nothing stands on the board
+    if (fp && fp.pads.length && fp.pads.length <= 4 && fp.pads.every(q => !q.drill) && /PAD|ELECTRODE|TEST.?POINT|\bTP\d|WIRE|SOLDER|JUMPER/.test(t) && !/HOLDER|HEADER|JST|USB|SPRING|POGO/.test(t)) return 0.1;
+    // EasyEDA package names often carry the height: …-H1.2
+    const mh = t.match(/[-_]H(\d+(?:\.\d+)?)(?=[-_ ]|$)/); if (mh && +mh[1] > 0.1 && +mh[1] < 40) return +mh[1];
     // coin-cell holders: holder + cell (LIR2032 / CR2032 in a Keystone 3034-type holder ≈ 4.4 mm)
     const tests = [[/CR-?2450|LIR-?2450/, 5.6], [/CR-?20(32|25|16)|LIR-?20(32|25)|2032|COIN|BATTERY.?HOLDER|BAT.?HLD|KEYSTONE.?30[0-9]{2}/, 4.4], [/CR-?1[0-9]20|LIR-?1[0-9]20/, 3.2], [/18650/, 21], [/AA|AA.?HOLDER/, 16], [/AAA/, 13], [/TO-?220/, 18], [/DC-?0|BARREL|JACK/, 11], [/RJ-?45/, 13.5], [/BUZZER/, 9.5], [/POT/, 10], [/PINHEADER|HEADER|CONN/, 8.5],
       [/CAPACITOR_POLARIZED|ELECTROLYTIC|CP_RADIAL/, 11], [/TYPE-?C|USB-?C/, 3.3], [/MICRO-?USB|MICRO-?B/, 2.9], [/USB/, 7], [/ESP32|WROOM|MINI-1|MODULE|WIFIM/, 3.3],
-      [/TO-?92/, 5], [/DIP-/, 4.5], [/SW_|SWITCH|TACT/, 5], [/CRYSTAL|HC49/, 4], [/SOT-?223/, 1.8], [/THT_P2\.54/, 8.6], [/THT_P/, 6],
-      [/QFN|SOIC|SOP|TSSOP|SSOP|QFP|SOT|SOD|0402|0603|0805|1206|SMA|SMB/, 1.6]];
+      [/TO-?92/, 5], [/DIP-/, 4.5], [/SW_|SWITCH|TACT/, 5], [/SOT-?223/, 1.8], [/THT_P2\.54/, 8.6], [/THT_P/, 6]];
     for (const [re, h] of tests) if (re.test(t)) return h;
-    const fp = Lib.footprint(c.footprint);
-    return fp && fp.pads.some(p => p.drill) ? 6 : 1.6;
+    // SMD crystals / oscillators by their size (5032 → 1.2, 3225 → 1.0, 2520 → 0.8, 2016 → 0.6); HC-49 through-hole 4
+    if (/OSC|XTAL|CRYSTAL|\bXO\b|TCXO|RESONATOR/.test(t)) {
+      const L = (t.match(/L(\d+(?:\.\d+)?)-W\d/) || [])[1] || ({ 7050: 7, 5032: 5, 3225: 3.2, 2520: 2.5, 2016: 2, 1612: 1.6 }[(t.match(/\b(7050|5032|3225|2520|2016|1612)\b/) || [])[1]]);
+      if (L) return L >= 6 ? 1.6 : L >= 4.5 ? 1.2 : L >= 3 ? 1.0 : L >= 2.4 ? 0.8 : L >= 1.9 ? 0.6 : 0.5;
+      if (/HC-?49/.test(t)) return 4;
+    }
+    // chip passives by size: resistor / capacitor / anything else (inductors, ferrites, LEDs)
+    for (const [z, r, cp, o] of [['0201', 0.3, 0.3, 0.35], ['0402', 0.35, 0.55, 0.6], ['0603', 0.5, 0.8, 0.9], ['0805', 0.6, 1.25, 1.1], ['1206', 0.6, 1.6, 1.2], ['1210', 0.6, 2.0, 1.5], ['2512', 0.7, 2.5, 2.0]])
+      if (new RegExp('(^|[^0-9.])' + z + '([^0-9]|$)').test(t)) return c.type === 'resistor' ? r : /capacitor/.test(c.type || '') ? cp : o;
+    for (const [re, h] of [[/MSOP|VSSOP/, 1.1], [/TSSOP|TSOP/, 1.2], [/SSOP/, 2.0], [/SOIC|\bSOP-?\d|SO-?\d/, 1.75], [/UDFN|USON|X2SON|XSON/, 0.6], [/WSON|VSON|\bSON-|DFN/, 0.8],
+      [/QFN/, 0.9], [/LGA/, 1.0], [/WLCSP|\bCSP/, 0.6], [/TQFP/, 1.2], [/LQFP/, 1.6], [/QFP/, 2.0], [/SOT-?(563|666|953)/, 0.6], [/SOT-?23|SOT-?323|SOT-?363|SC-?70|SC-?88/, 1.1],
+      [/SOT-?89/, 1.6], [/SOD-?(523|923)/, 0.7], [/SOD-?323/, 0.95], [/SOD-?123/, 1.2], [/\bSMA\b|DO-?214AC/, 2.3], [/\bSM[BC]\b|DO-?214A[AB]/, 2.4], [/CRYSTAL|HC49/, 4]])
+      if (re.test(t)) return h;
+    return fp && fp.pads.some(q => q.drill) ? 6 : 1.6;
   }
 
   // ---------------- batteries (loose cells that live in the enclosure, wired to the board) ----------------
@@ -215,17 +259,26 @@ const Enclosure = (() => {
       .map(([n, d, t, mAh]) => ({ id: n.toLowerCase(), name: n, kind: 'coin', d, t, mAh, V: 3.7, rechargeable: true, max_mA: Math.round(mAh * 0.5), note: 'rechargeable Li-ion coin cell (tabbed version to solder wires); charge ≤ 0.5 C at 4.2 V. ' + LIION })),
     ...[['CR1220', 12.5, 2.0, 40, 1], ['CR1632', 16, 3.2, 140, 2], ['CR2032', 20, 3.2, 225, 3], ['CR2450', 24.5, 5.0, 620, 5], ['CR2477', 24.5, 7.7, 1000, 5]]
       .map(([n, d, t, mAh, cont]) => ({ id: n.toLowerCase(), name: n, kind: 'coin', d, t, mAh, V: 3.0, rechargeable: false, max_mA: cont, note: `primary (not rechargeable) lithium 3 V coin; ~${cont} mA continuous, short pulses ~15 mA with a large capacitor — fine for BLE beacons / sensors, not for radios that stream` })),
-    ...[['301020', 45], ['401020', 60], ['401030', 100], ['401230', 150], ['402030', 180], ['502030', 250], ['502535', 400], ['503035', 500], ['523450', 1000], ['603450', 1200], ['803450', 1500], ['103450', 1800], ['102050', 1000]]
+    ...[['301020', 45], ['302020', 70], ['401020', 60], ['401030', 100], ['401230', 150], ['402020', 100], ['402030', 180], ['501520', 90], ['502020', 140], ['502030', 250], ['502535', 400], ['503035', 500], ['602025', 200], ['523450', 1000], ['603450', 1200], ['803450', 1500], ['103450', 1800], ['102050', 1000]]
       .map(([c, mAh]) => { const t = c.startsWith('10') ? 10 : +c.slice(0, 2) / 10, w = +c.slice(2, 4), l = +c.slice(4, 6); return { id: 'lipo-' + c, name: `LiPo ${c} (${t} × ${w} × ${l} mm)`, kind: 'lipo', t, w, l, mAh, V: 3.7, rechargeable: true, max_mA: mAh, note: 'LiPo pouch with protection board and JST-PH 2.0 / wire leads; 1 C continuous; leave ~0.5 mm around it (pouches swell). ' + LIION }; }),
     ...[['10440', 10, 44, 350], ['14500', 14, 50, 800], ['16340', 16, 34, 700], ['18350', 18, 35, 900], ['18650', 18.4, 65, 3000], ['21700', 21, 70, 4500]]
       .map(([n, d, l, mAh]) => ({ id: n, name: `${n} Li-ion cell (Ø${d} × ${l} mm)`, kind: 'cyl', d, l, mAh, V: 3.7, rechargeable: true, max_mA: Math.round(mAh * (+n > 18000 ? 2 : 1)), note: 'cylindrical Li-ion; use a protected cell or add a protection IC (DW01 + FS8205), holder or nickel strip. ' + LIION })),
   ];
   // footprint of a battery lying flat: w (x) × l (y) × t (z)
+  // id from the list, any LiPo size code (lipo-TTWWLL), or your own cell {t, w, l, mAh?, kind?: 'lipo' | 'coin' | 'cyl', name?}
+  const lipoCode = c => { const t = c.startsWith('10') ? 10 : +c.slice(0, 2) / 10, w = +c.slice(2, 4), l = +c.slice(4, 6); return { t, w, l }; };
   function battery(id) {
-    if (id && typeof id === 'object') return id;
+    if (id && typeof id === 'object' && id.w != null && id.l != null && id.t != null && id.kind && id.Wh != null) return id;   // already resolved
+    if (id && typeof id === 'object') {
+      const kind = id.kind || (id.d ? (id.l ? 'cyl' : 'coin') : 'lipo'), t = +(id.t ?? id.d), w = +(id.w ?? id.d), l = +(id.l ?? id.d);
+      if (!(t > 0 && w > 0 && l > 0)) throw new Error('custom battery: give {t, w, l} in mm (or {d, t} for a coin, {d, l} for a cylinder)');
+      const mAh = +id.mAh || Math.round(w * l * t / 1000 * 85);   // ≈ 85 mAh per cm³ for small LiPo pouches
+      return { id: 'custom', name: id.name || `custom ${kind} ${t} × ${w} × ${l} mm`, kind, t: kind === 'cyl' ? w : t, w, l, d: id.d, mAh, V: 3.7, rechargeable: id.rechargeable !== false, max_mA: +id.max_mA || mAh, Wh: +(mAh * 3.7 / 1000).toFixed(2), estimated: !id.mAh, note: 'custom size' + (id.mAh ? '' : ' — capacity estimated from the volume (≈ 85 mAh/cm³); use the seller’s value') };
+    }
     const k = String(id || '').toLowerCase().replace(/^lipo[-_ ]?/, 'lipo-').replace(/\s+/g, '');
-    const b = BATTERIES.find(x => x.id === k || x.id === 'lipo-' + k || x.name.toLowerCase() === k);
-    if (!b) throw new Error(`Unknown battery "${id}". Known: ${BATTERIES.map(x => x.id).join(', ')}`);
+    let b = BATTERIES.find(x => x.id === k || x.id === 'lipo-' + k || x.name.toLowerCase() === k);
+    if (!b && /^(lipo-)?\d{6}$/.test(k)) { const c = k.replace('lipo-', ''), d = lipoCode(c); return battery({ kind: 'lipo', name: `LiPo ${c} (${d.t} × ${d.w} × ${d.l} mm, not in the list)`, ...d }); }
+    if (!b) throw new Error(`Unknown battery "${id}". Known: ${BATTERIES.map(x => x.id).join(', ')} — or any LiPo code (lipo-302020) or your own size {t, w, l, mAh}`);
     const dims = b.kind === 'coin' ? { w: b.d, l: b.d, t: b.t } : b.kind === 'cyl' ? { w: b.d, l: b.l, t: b.d } : { w: b.w, l: b.l, t: b.t };
     return Object.assign({}, b, dims, { Wh: +(b.mAh * b.V / 1000).toFixed(2) });
   }
@@ -238,17 +291,19 @@ const Enclosure = (() => {
     if (q.max_thickness) L = L.filter(b => b.t <= q.max_thickness);
     if (q.max_width || q.max_length) { const a = Math.min(q.max_width || 1e9, q.max_length || 1e9), c = Math.max(q.max_width || 0, q.max_length || 0) || a; L = L.filter(b => Math.min(b.w, b.l) <= a && Math.max(b.w, b.l) <= c); }
     if (q.peak_mA) L = L.filter(b => b.max_mA >= q.peak_mA);
+    // charge rate: the charger's current against the capacity (LiPo ≤ 1 C, LIR coins ≤ 0.5 C)
+    const chg = b => { if (!q.charge_mA || !b.rechargeable) return {}; const C = q.charge_mA / b.mAh, lim = b.kind === 'coin' ? 0.5 : 1; return { charge_C: +C.toFixed(2), charge_ok: C <= lim + 1e-9, charge_note: C > lim ? `${q.charge_mA} mA is ${C.toFixed(1)} C — above ${lim} C for this cell: lower the charge current (charger's PROG resistor) or pick a bigger cell` : undefined }; };
     return L.sort((a, b) => a.mAh - b.mAh).map(b => Object.assign({ id: b.id, name: b.name, kind: b.kind, size_mm: b.kind === 'coin' ? `Ø${b.d} × ${b.t}` : b.kind === 'cyl' ? `Ø${b.d} × ${b.l}` : `${b.t} × ${b.w} × ${b.l}`, mAh: b.mAh, V: b.V, Wh: b.Wh, rechargeable: b.rechargeable, max_mA: b.max_mA, volume_cm3: +(b.w * b.l * b.t / 1000).toFixed(2) },
-      q.avg_mA ? { runtime_h: +(b.mAh * 0.85 / q.avg_mA).toFixed(1) } : {}, q.verbose ? { note: b.note } : {}));
+      q.avg_mA ? { runtime_h: +(b.mAh * 0.85 / q.avg_mA).toFixed(1) } : {}, chg(b), q.verbose ? { note: b.note } : {}));
   }
 
   // ---------------- parameters ----------------
   const DEFAULTS = {
     wall: 2.0, floor: 2.0, lidThickness: 2.0, clearance: 1.0, pcbThickness: 1.6, topClearance: 3.0, extraHeight: 0,
-    standoffHeight: 5.0, standoffDiameter: 6.0, screwHole: 2.5, lidFit: 0.25, lipHeight: 3.0, lipWidth: 1.2,
+    standoffHeight: 5.0, standoffDiameter: 6.0, screwHole: 2.5, lidFit: 0.3, lipHeight: 3.0, lipWidth: 1.2,
     vents: true, ventWidth: 1.6, ventLength: 18, ventSpacing: 3.5, autoConnectorCutouts: true, autoLidHoles: true,
     cutouts: [], partHeights: {}, explode: 12,
-    battery: '', batteryPlace: 'under',   // loose cell in the box (see batteries()): under the board, beside it (+X) or above the parts
+    battery: '', batteryPlace: 'under', process: 'mjf',   // process: mjf | sls | sla | fdm — the manufacturability check's limits   // loose cell in the box (see batteries()): under the board, beside it (+X) or above the parts
   };
   const params = () => Object.assign({}, DEFAULTS, Model.S.enclosure || {}, { cutouts: ((Model.S.enclosure || {}).cutouts || []).slice(), partHeights: Object.assign({}, (Model.S.enclosure || {}).partHeights || {}) });
   function setParams(u = {}) {
@@ -257,7 +312,8 @@ const Enclosure = (() => {
       // mode: 'box' = this parametric box, 'custom' = free-form 3D script (shape3d.js) stored in .script
       if (k === 'mode') { if (!['box', 'custom'].includes(v)) throw new Error('mode must be "box" or "custom"'); cur.mode = v; continue; }
       if (k === 'script') { cur.script = String(v || ''); continue; }
-      if (k === 'battery') { if (v) battery(v); cur.battery = v ? battery(v).id : ''; continue; }
+      if (k === 'battery') { if (v) battery(v); cur.battery = !v ? '' : typeof v === 'object' ? v : battery(v).id === 'custom' ? v : battery(v).id; continue; }
+      if (k === 'process') { if (!['mjf', 'sls', 'sla', 'fdm'].includes(v)) throw new Error('process must be mjf, sls, sla or fdm'); cur.process = v; continue; }
       if (k === 'batteryPlace') { if (!['under', 'beside', 'above'].includes(v)) throw new Error('batteryPlace must be under, beside or above'); cur.batteryPlace = v; continue; }
       if (!(k in DEFAULTS)) throw new Error(`Unknown enclosure parameter "${k}". Known: mode, script, ${Object.keys(DEFAULTS).join(', ')}`);
       if (k === 'partHeights') { cur.partHeights = Object.assign({}, cur.partHeights || {}); for (const [r, h] of Object.entries(v || {})) { if (h == null || h === '') delete cur.partHeights[r]; else cur.partHeights[r] = +h; } }
@@ -279,6 +335,7 @@ const Enclosure = (() => {
     return { index: cur.cutouts.length - 1, cutout: cut };
   }
 
+  const NORMAL2 = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
   function hull2(P) {   // convex hull (monotone chain), CCW
     P = P.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], up = [];
@@ -294,11 +351,22 @@ const Enclosure = (() => {
     const bpoly = Pcb.boardPoly().map(q => [q[0], -q[1]]);
     const cs = Pcb.placed();
     let topH = 0, botH = 0;
+    const bb = Pcb.boardPoly(), bX0 = Math.min(...bb.map(q => q[0])), bX1 = Math.max(...bb.map(q => q[0])), bY0 = Math.min(...bb.map(q => q[1])), bY1 = Math.max(...bb.map(q => q[1]));
     const parts = cs.map(c => {
-      const b = Pcb.fpBox(c), h = partHeight(c, P), bottom = Pcb.isBottom(c);
+      const mod = moduleInfo(c), b = mod ? mod.body : Pcb.fpBox(c), h = partHeight(c, P), bottom = Pcb.isBottom(c);
       if (bottom) botH = Math.max(botH, h); else topH = Math.max(topH, h);
       const tht = Pcb.padsOf(c).some(p => p.drill); if (tht && !bottom) botH = Math.max(botH, 1.8); // leads under the board
-      return { ref: c.ref, value: c.value, type: c.type, x0: b[0], x1: b[2], y0: -b[3], y1: -b[1], h, bottom, edge: Pcb.edgeInfo(c), c };
+      let edge = Pcb.edgeInfo(c), port = null;
+      if (mod && mod.port) {
+        // a module's USB port opens to the outside when the module sits within 3 mm of that board edge
+        const q = mod.port, gap = { left: b[0] - bX0, right: bX1 - b[2], top: b[1] - bY0, bottom: bY1 - b[3] }[q.side];
+        if (gap < 3) {
+          const zc = h - q.fromTop, e = { left: [b[0], -q.along], right: [b[2], -q.along], top: [q.along, -b[1]], bottom: [q.along, -b[3]] }[q.side];
+          port = { kind: q.kind, side: { left: 'left', right: 'right', top: 'back', bottom: 'front' }[q.side], x: e[0], y: e[1], zc, w: q.w, h: q.h, out: q.out, module: mod.name };
+          edge = { plug: true, front: NORMAL2[q.side], port: true };
+        }
+      }
+      return { ref: c.ref, value: c.value, type: c.type, x0: b[0], x1: b[2], y0: -b[3], y1: -b[1], h, bottom, edge, port, module: mod && mod.name, c };
     });
     // a loose battery: under the board (the standoffs lift the PCB over it), beside it (+X) or on top of the parts
     const bt = P.battery ? battery(P.battery) : null, bx = Math.min(...bpoly.map(q => q[0])), bX = Math.max(...bpoly.map(q => q[0])), by = Math.min(...bpoly.map(q => q[1])), bY = Math.max(...bpoly.map(q => q[1]));
@@ -334,6 +402,11 @@ const Enclosure = (() => {
     const P = L.P, out = [];
     if (P.autoConnectorCutouts) for (const p of L.parts) {
       if (!p.edge || !p.edge.plug || p.bottom) continue;
+      if (p.port) {   // a module's USB port: its own size and height, not the module's
+        const q = p.port, horiz = q.side === 'front' || q.side === 'back';
+        out.push({ auto: true, ref: p.ref, side: q.side, shape: 'rect', centre: horiz ? q.x : q.y, w: q.w + 1.2, h: q.h + 1.2, z: L.pcbTop + q.zc, label: `${p.ref} ${q.kind} (${q.module})` });
+        continue;
+      }
       const c = p.c, b = Pcb.fpBox(c), S = Model.S;
       const d = { left: b[0], right: S.board.w - b[2], back: b[1], front: S.board.h - b[3] };
       const side = Object.entries(d).sort((a, q) => a[1] - q[1])[0][0];
@@ -555,6 +628,9 @@ const Enclosure = (() => {
     files[name + '-enclosure-lid.stl'] = stl(r.lid, 'enclosure lid', lidPrintTf(r.L));
     files[name + '-enclosure.scad'] = scad(r);
     files[name + '-enclosure-README.txt'] = readme(r);
+    // STEP too (JLC3DP takes either); the lid as it prints, like its STL
+    // STEP when the mesh closes into a solid (Custom 3D always does; this box's mesh may not — then STL only)
+    if (typeof Shape3D !== 'undefined') for (const [k, polys] of [['base', r.base], ['lid', r.lid]]) { const st = Shape3D.stepOfPolys(`${name}-enclosure-${k}`, polys); if (st) files[`${name}-enclosure-${k}.step`] = st; }
     return { files, info: describe(r) };
   }
   const f3 = v => (+v).toFixed(3);
@@ -621,6 +697,6 @@ const Enclosure = (() => {
   }
   // CSG kernel, shared with the script modeller (shape3d.js)
   const csg = { setQuality, get HQ() { return HQ; }, guard, V, Plane, Poly, union, subtract, intersect, repair, zipSeams, fillHoles, earcut, ccw, dedupe, offset, area, triangles, stl, meshArrays };
-  return { DEFAULTS, BATTERIES, battery, batteries, setQuality, mode, script, params, setParams, addCutout, layout, build, exportFiles, describe, meshArrays, partHeight, stl, offset, csg };
+  return { DEFAULTS, BATTERIES, MODULES, moduleInfo, battery, batteries, setQuality, mode, script, params, setParams, addCutout, layout, build, exportFiles, describe, meshArrays, partHeight, stl, offset, csg };
 })();
 if (typeof module !== 'undefined') module.exports = Enclosure;

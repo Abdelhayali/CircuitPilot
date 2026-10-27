@@ -42,11 +42,7 @@ export async function projectFiles(ctx, inc) {
     if (inc.has('jlcpcb')) { files[`jlcpcb/${base}-BOM-JLCPCB.csv`] = X.bomJlc(); files[`jlcpcb/${base}-CPL-JLCPCB.csv`] = X.cpl(); }
     if (inc.has('enclosure')) {
       try {
-        if (ctx.Enclosure.mode() === 'custom') {
-          const sc = (() => { try { return ctx.Shape3D.context(ctx.Enclosure.layout()); } catch { return { pcb: null }; } })(), r = ctx.Shape3D.run(ctx.Enclosure.script(), sc, { mesh: false });
-          for (const p of r.parts) files[`enclosure/${base}-${p.name}.stl`] = p.stl;
-          files[`enclosure/${base}-enclosure.scad`] = r.scad;
-        } else { const { files: e } = ctx.Enclosure.exportFiles(); for (const [n, d] of Object.entries(e)) files['enclosure/' + n] = d; }
+        const { files: e } = ctx.Engine.enclosureFiles({ service: 'all' }); for (const [n, d] of Object.entries(e)) files['enclosure/' + n] = d;
       } catch (e) { skipped.push('enclosure: ' + e.message); }
     }
     if (inc.has('easyeda')) {

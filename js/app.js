@@ -285,7 +285,19 @@ const App = (() => {
     return { mime: jpeg ? 'image/jpeg' : 'image/png', data: url.slice(url.indexOf(',') + 1), w: c.width, h: c.height };
   }
   const blob64 = async b => { const u = new Uint8Array(await b.arrayBuffer()); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
+  // the enclosure the request was made for (a.enc): the tool server saves the design and asks for its picture at once, so
+  // this window may not have the new version yet — wait for it, else draw that version (B8: no picture of the old model)
+  async function withEnclosure(a, draw) {
+    if (!a.enc) return draw();
+    const want = JSON.stringify(a.enc), same = () => JSON.stringify(Model.S.enclosure || {}) === want;
+    for (let i = 0; i < 32 && !same(); i++) await new Promise(r => setTimeout(r, 250));
+    if (same()) return draw();
+    const keep = Model.S.enclosure;
+    Model.S.enclosure = JSON.parse(want);
+    try { return await draw(true); } finally { Model.S.enclosure = keep; EncView.invalidate(); }
+  }
   async function renderForAI(a = {}) {
+    if (a.view === 'enclosure' && a.enc) { const { enc, ...rest } = a; return withEnclosure(a, fresh => renderForAI(Object.assign(rest, fresh ? { fresh: true } : {}))); }
     const v = a.view, big = a.full ? 3000 : 1400;   // full: export-quality images (PNG, up to 3000 px)
     if (v === 'pdf_pcb') { const r = await PcbPdf.export({ blob: true }); return { mime: 'application/pdf', data: await blob64(r.blob), pages: r.pages }; }
     if (v === 'pdf_doc') { const b = await DocView.pdf({ blob: true }); if (!b) throw new Error('The datasheet PDF is already being built — try again'); return { mime: 'application/pdf', data: await blob64(b) }; }
@@ -293,14 +305,14 @@ const App = (() => {
       if (v === 'schematic') { const i = Math.max(0, Math.min(Sch.sheets().length - 1, (+a.sheet || 1) - 1)); return toAIImage(await DocView.svgToPng(Sch.exportSVG(i), 3000, '#ffffff', 20), false, big); }
       if (v === 'pcb') { Pcb.render(); return toAIImage(await DocView.svgToPng(Pcb.exportSVG(), 3000, '#000', 20), false, big); }
       if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', 2400, 1600); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, false, big); }
-      if (v === 'enclosure') { const r = await EncView.snapshot({ w: 2400, h: 1600, explode: !!a.exploded, angle: a.angle, section: a.section, overview: !!a.overview }); if (!r) throw new Error('No enclosure yet'); return toAIImage(r, false, big); }
+      if (v === 'enclosure') { const r = await EncView.snapshot({ w: 2400, h: 1600, explode: !!a.exploded, angle: a.angle, section: a.section, at: a.at, thickness: !!a.thickness, fresh: !!a.fresh, overview: !!a.overview }); if (!r) throw new Error('No enclosure yet'); return toAIImage(r, false, big); }
     }
     // size: small (640 px JPEG, a quick look for few tokens) · normal (1400 px) · large (2000 px)
     const lim = a.size === 'small' ? (a.overview ? 900 : 640) : a.size === 'large' ? 2000 : 1400, small = a.size === 'small';
     if (v === 'schematic') { const i = Math.max(0, Math.min(Sch.sheets().length - 1, (+a.sheet || 1) - 1)); return toAIImage(await DocView.svgToPng(Sch.exportSVG(i), Math.max(lim, 1000)), small, lim); }
     if (v === 'pcb') { Pcb.render(); return toAIImage(await DocView.svgToPng(Pcb.exportSVG(), Math.max(lim, 1000), '#000'), small, lim); }
     if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', small ? 900 : 1400, small ? 600 : 940); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, true, lim); }
-    if (v === 'enclosure') { const r = await EncView.snapshot({ w: a.overview ? (small ? 1100 : 1800) : small ? 900 : 1400, h: a.overview ? (small ? 760 : 1240) : small ? 600 : 940, explode: !!a.exploded, angle: a.angle, section: a.section, overview: !!a.overview }); if (!r) throw new Error('No enclosure yet: set one up first (set_enclosure or set_enclosure_script)'); return toAIImage(r, true, lim); }
+    if (v === 'enclosure') { const r = await EncView.snapshot({ w: a.overview ? (small ? 1100 : 1800) : small ? 900 : 1400, h: a.overview ? (small ? 760 : 1240) : small ? 600 : 940, explode: !!a.exploded, angle: a.angle, section: a.section, at: a.at, thickness: !!a.thickness, fresh: !!a.fresh, overview: !!a.overview }); if (!r) throw new Error('No enclosure yet: set one up first (set_enclosure or set_enclosure_script)'); return toAIImage(r, true, lim); }
     throw new Error('Unknown view ' + v);
   }
 
@@ -1112,7 +1124,7 @@ const App = (() => {
       for (const [n, t] of Object.entries(Pcb.gerbers())) add('gerbers/' + n, t);
       add('jlcpcb/' + base + '-BOM-JLCPCB.csv', Exports.bomJlc()); add('jlcpcb/' + base + '-CPL-JLCPCB.csv', Exports.cpl());
       add(base + '-pcb.svg', Pcb.exportSVG());
-      try { const e = Enclosure.exportFiles(); for (const [n, d] of Object.entries(e.files)) add('enclosure/' + n, d); } catch (e) { skipped.push('enclosure: ' + e.message); }
+      try { const e = await EncView.exportFiles(); for (const [n, d] of Object.entries(e)) add('enclosure/' + n, d); } catch (e) { skipped.push('enclosure: ' + e.message); }
       try { const sch = EasyEDA.exportSchematic({}), pcb = EasyEDA.exportPcb(); add('easyeda/SCH_' + base + '.json', sch); add('easyeda/PCB_' + base + '.json', pcb); } catch (e) { skipped.push('EasyEDA: ' + e.message); }
     } else skipped.push('PCB files (no PCB yet)');
     const shots = [['schematic', 'schematic.png', { sheet: 1 }]].concat(Sch.sheets().slice(1).map((_, i) => ['schematic', `schematic-sheet${i + 2}.png`, { sheet: i + 2 }]))
@@ -1188,7 +1200,7 @@ const App = (() => {
     Engine.env.myLib = () => Projects.myLib;
     Engine.env.savePart = def => Projects.savePart(def).then(() => renderParts());
     Engine.env.route = runRouter;
-    Engine.env.shape = code => EncView.runScript(code);
+    Engine.env.shape = (code, opts) => EncView.runScript(code, opts);
     Engine.env.searchKey = () => AI.settings.braveKey;
     // web version (no server.py): mark the page, and redraw the provider routes once that is known
     AI.onWeb().then(w => { document.body.classList.toggle('web', w); try { provRender(); } catch (e) { } });

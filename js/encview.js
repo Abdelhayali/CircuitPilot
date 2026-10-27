@@ -3,7 +3,7 @@
 const EncView = (() => {
   const $ = s => document.querySelector(s);
   const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
-  const WORKER = 'js/shape-worker.js?v=202610280100';
+  const WORKER = 'js/shape-worker.js?v=202610280600';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
   function loadThree() {
@@ -45,12 +45,13 @@ const EncView = (() => {
     $('#encLid').onclick = () => { ui.lid = !ui.lid; $('#encLid').classList.toggle('on', ui.lid); place(); };
     $('#encPcb').onclick = () => { ui.pcb = !ui.pcb; $('#encPcb').classList.toggle('on', ui.pcb); place(); };
     $('#encXray').onclick = () => { ui.xray = !ui.xray; $('#encXray').classList.toggle('on', ui.xray); place(); };
+    $('#encThick').onclick = () => { ui.thick = !ui.thick; $('#encThick').classList.toggle('on', ui.thick); if (ui.thick) boxThickness(); place(); };
     $('#encSection').onclick = () => { ui.section = ui.section ? null : 'x'; $('#encSection').classList.toggle('on', !!ui.section); place(); };
     $('#encRender').onclick = renderDialog;
     $('#encDims').onclick = () => { ui.showDims = !ui.showDims; $('#encDims').classList.toggle('on', ui.showDims); drawOverlay(); draw(); };
     $('#encMeasure').onclick = () => setMeasure(!ui.measure);
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && active && ui.measure) { if (ui.pendingA || ui.rulers.length) { ui.pendingA = null; ui.rulers = []; drawOverlay(); draw(); dimText(); } else setMeasure(false); } });
-    $('#encStl').onclick = () => exportAll('stl'); $('#encScad').onclick = () => exportAll('scad'); $('#encZip').onclick = () => exportAll('zip');
+    $('#encStl').onclick = () => exportAll('stl'); $('#encScad').onclick = () => exportAll('scad'); $('#encZip').onclick = () => exportAll('zip'); $('#encMetal').onclick = () => exportAll('metal');
     $('#encOrder').onclick = () => {
       // open the quote page inside the click (popup blockers), then build + download the STLs
       window.open('https://jlc3dp.com/3d-printing-quote', '_blank', 'noopener');
@@ -130,6 +131,50 @@ const EncView = (() => {
     const T = window.THREE, cap = new T.Mesh(mesh.geometry, new T.MeshBasicMaterial({ color: 0xd9534f, side: T.BackSide }));
     cap.visible = false; cap.userData.cap = true; mesh.add(cap); return mesh;
   }
+  // wall-thickness heatmap: per triangle, from the manufacturability check (red under the minimum wall, orange under 1.5 ×)
+  // the mesh cut into small triangles (≤ 1.2 mm), each coloured by the nearest thickness sample — a big triangle no
+  // longer turns red as a whole because of one thin spot at its corner
+  function heatGeometry(mesh, smp, wall) {
+    const T = window.THREE, src = mesh.geometry.attributes.position.array, out = [], st = [], cell = 1.5, grid = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
+    for (let i = 0; i < smp.length; i += 4) { const k = key(Math.floor(smp[i] / cell), Math.floor(smp[i + 1] / cell), Math.floor(smp[i + 2] / cell)); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); }
+    const near = (x, y, z) => { let best = 2.25, t = Infinity; const cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell);
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) for (const i of grid.get(key(cx + a, cy + b, cz + c)) || []) { const d = (smp[i] - x) ** 2 + (smp[i + 1] - y) ** 2 + (smp[i + 2] - z) ** 2; if (d < best) { best = d; t = smp[i + 3]; } }
+      return t; };
+    for (let i = 0; i < src.length; i += 9) st.push([[src[i], src[i + 1], src[i + 2]], [src[i + 3], src[i + 4], src[i + 5]], [src[i + 6], src[i + 7], src[i + 8]]]);
+    while (st.length && out.length < 4e6) {
+      const [a, b, c] = st.pop(), L = [[a, b, c], [b, c, a], [c, a, b]].map(([p, q, r]) => [Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]), p, q, r]).sort((x, y) => y[0] - x[0])[0];
+      if (L[0] <= 1.2) { out.push(a, b, c); continue; }
+      const [, p, q, r] = L, m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2]; st.push([p, m, r], [m, q, r]);
+    }
+    const pos = new Float32Array(out.length * 3), col = new Float32Array(out.length * 3), grey = new T.Color(0xb8bec6);
+    const pick = t => t < wall ? [0.9, 0.22, 0.21] : t < wall * 1.5 ? [0.98, 0.55, 0.0] : t < wall * 2 ? [0.99, 0.85, 0.2] : [grey.r, grey.g, grey.b];
+    for (let i = 0; i < out.length; i += 3) {
+      const c = pick(near((out[i][0] + out[i + 1][0] + out[i + 2][0]) / 3, (out[i][1] + out[i + 1][1] + out[i + 2][1]) / 3, (out[i][2] + out[i + 1][2] + out[i + 2][2]) / 3));
+      for (let k = 0; k < 3; k++) { pos.set(out[i + k], (i + k) * 3); col.set(c, (i + k) * 3); }
+    }
+    const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(pos, 3)); g.setAttribute('color', new T.BufferAttribute(col, 3)); g.computeVertexNormals();
+    return g;
+  }
+  function applyThickness() {
+    const list = ui.built && ui.built.custom ? (meshes.parts || []) : [meshes.base, meshes.lid].filter(Boolean);
+    for (const m of list) {
+      const smp = m.userData.samples, on = !!(ui.thick && smp);
+      if (on && !m.userData.heatGeo) m.userData.heatGeo = heatGeometry(m, smp, ui.wallMin || 1);
+      if (!m.userData.plainGeo) m.userData.plainGeo = m.geometry;
+      const g = on ? m.userData.heatGeo : m.userData.plainGeo;
+      if (m.geometry !== g) { m.geometry = g; for (const c of m.children) if (c.userData.cap) c.geometry = g; }
+      if (m.userData.baseColor == null) m.userData.baseColor = m.material.color.getHex();
+      m.material.vertexColors = on; m.material.color.setHex(on ? 0xffffff : m.userData.baseColor); m.material.needsUpdate = true;
+    }
+  }
+  // the box has no thickness data from its build: run the check once when the heatmap is asked for
+  function boxThickness() {
+    if (!ui.built || ui.built.custom || meshes.base.userData.samples) return;
+    try {
+      const d = Shape3D.checkBox(ui.built, scriptCtx(), { process: Enclosure.params().process, cap: 15000, openPts: 1 });
+      meshes.base.userData.thick = d.thick.base; meshes.lid.userData.thick = d.thick.lid; meshes.base.userData.samples = d.samples.base; meshes.lid.userData.samples = d.samples.lid; ui.wallMin = d.rules.wall;
+    } catch (e) { App.toast('Thickness check failed: ' + e.message); }
+  }
   function applySection() {
     if (!root) return;
     const on = !!ui.section, pl = clipPlane();
@@ -138,7 +183,8 @@ const EncView = (() => {
       const box = new window.THREE.Box3(); root.updateMatrixWorld(true); root.traverse(m => { if (m.isMesh && m.visible && !m.userData.cap) box.expandByObject(m); });
       const c = box.isEmpty() ? new window.THREE.Vector3() : box.getCenter(new window.THREE.Vector3());
       const ax = ui.section === 'y' ? 'x' : 'y', side = (ax === 'y' ? Math.sin(cam.th) : Math.cos(cam.th)) >= 0 ? -1 : 1;
-      pl.normal.set(ax === 'x' ? side : 0, ax === 'y' ? side : 0, 0); pl.constant = -(ax === 'x' ? c.x : c.y) * side;
+      const at = (ax === 'x' ? c.x : c.y) + (+ui.sectionAt || 0);   // ui.sectionAt: mm from the middle
+      pl.normal.set(ax === 'x' ? side : 0, ax === 'y' ? side : 0, 0); pl.constant = -at * side;
     }
     root.traverse(m => {
       if (!m.isMesh) return;
@@ -194,13 +240,13 @@ const EncView = (() => {
       }
       if (meshes.pcb) meshes.pcb.visible = ui.pcb;
       for (const m of meshes.extras || []) m.visible = ui.pcb;
-      applySection(); drawOverlay(); draw(); return;
+      applyThickness(); applySection(); drawOverlay(); draw(); return;
     }
     const L = ui.built.L, ex = ui.explode ? (L.P.explode || 12) + L.P.lipHeight : 0;
     if (meshes.base) { meshes.base.material.opacity = ui.xray ? 0.35 : 1; meshes.base.material.depthWrite = !ui.xray; }
     if (meshes.lid) { meshes.lid.visible = ui.lid; meshes.lid.position.z = ex; meshes.lid.material.opacity = ui.xray ? 0.35 : 1; meshes.lid.material.depthWrite = !ui.xray; }
     if (meshes.pcb) meshes.pcb.visible = ui.pcb;
-    applySection(); drawOverlay(); draw();
+    applyThickness(); applySection(); drawOverlay(); draw();
   }
   // ---------- custom mode: free-form 3D script (shape3d.js) built in a Web Worker ----------
   let worker = null, seq = 0, lastRun = null, codeDirty = false;
@@ -218,14 +264,14 @@ const EncView = (() => {
   }
   function scriptCtx() { try { return Shape3D.context(Enclosure.layout()); } catch (e) { return { pcb: null }; } }
   // build a script (cached: the same script on the same board is not rebuilt)
-  function runScript(code) {
-    const ctx = scriptCtx(), key = code + '\u0000' + JSON.stringify(ctx);
+  function runScript(code, extra = {}) {
+    const ctx = scriptCtx(), o = Object.assign({ timeLimitMs: 110000, process: Enclosure.params().process }, extra), key = code + '\u0000' + JSON.stringify(ctx) + JSON.stringify(o);
     if (lastRun && lastRun.key === key) return lastRun.p;
     const id = ++seq;
     const p = new Promise((res, rej) => {
       const t = setTimeout(() => { if (worker) worker.terminate(); worker = null; pending.delete(id); rej(new Error('The 3D script ran longer than 2 minutes and was stopped — use a lower resolution(), fewer hull points or fewer booleans.')); }, 120000);
       pending.set(id, { res, rej, t });
-      getWorker().postMessage({ id, code, ctx, opts: { timeLimitMs: 110000 } });
+      getWorker().postMessage({ id, code, ctx, opts: o });
     });
     lastRun = { key, p };
     ui.running = true; out();
@@ -289,6 +335,8 @@ const EncView = (() => {
       const m = withCap(new T.Mesh(g, new T.MeshStandardMaterial({ color: col, roughness: 0.6, metalness: 0.05, transparent: true, opacity: 1, side: T.DoubleSide })));
       Object.assign(m.userData, p); root.add(m); return m;
     });
+    ui.wallMin = r.report && r.report.dfm ? r.report.dfm.rules.wall : 1;
+    $('#encMetal').classList.toggle('hidden', !r.parts.some(p => p.kind === 'metal'));
     meshes.extras = (r.extras || []).filter(x => x.kind === 'battery').map(b => { const m = batteryMesh(b, [0, 0, 0]); root.add(m); return m; });
     meshes.pcb = null;
     if (c.ctx.pcb) { try { const L = Enclosure.layout(), g = pcbGroup(L); g.position.set(-c.ctx.origin[0], -c.ctx.origin[1], -c.ctx.origin[2]); meshes.pcb = g; root.add(g); } catch (e) { } }
@@ -356,7 +404,8 @@ const EncView = (() => {
     const P = Enclosure.params(), S = Model.S;
     let d = null; try { d = Enclosure.describe(); } catch (e) { }
     const mode = Enclosure.mode();
-    let h = `<div class="ph">Enclosure</div><div class="seg encmodeseg"><button data-m="box" class="${mode === 'box' ? 'on' : ''}">Box</button><button data-m="custom" class="${mode === 'custom' ? 'on' : ''}">Custom 3D</button></div>`;
+    let h = `<div class="ph">Enclosure</div><div class="seg encmodeseg"><button data-m="box" class="${mode === 'box' ? 'on' : ''}">Box</button><button data-m="custom" class="${mode === 'custom' ? 'on' : ''}">Custom 3D</button></div>
+      <label title="The manufacturability check (thin walls, knife edges, slits, fit, openings) uses this process's limits">Print process<select id="encProc">${[['mjf', 'MJF nylon (PA12 / PA11) — min wall 1.0'], ['sls', 'SLS nylon — min wall 1.0'], ['sla', 'SLA resin — min wall 0.8'], ['fdm', 'FDM (PLA / PETG) — min wall 1.2']].map(([v, t]) => `<option value="${v}" ${P.process === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>`;
     if (mode === 'custom') {
       const c = ui.custom, r = c && c.r;
       h += `<div class="muted small">Free-form model from a 3D script: wristbands, chest patches, clips, curved or organic cases. Describe what you need to the AI — e.g. <i>“make a Whoop-style wristband pod for this board with a USB-C opening”</i> or <i>“ECG chest patch with 3 snap-electrode holes 60 mm apart”</i> — or edit the script yourself.</div>
@@ -374,6 +423,7 @@ const EncView = (() => {
       else if (c && c.err) h += `<div class="bad small">⚠ ${esc(c.err.message)}</div>`;
       el.innerHTML = h;
       el.querySelectorAll('.encmodeseg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+      $('#encProc').onchange = e => { Model.mutate(() => Enclosure.setParams({ process: e.target.value })); if (meshes.base) delete meshes.base.userData.samples; };
       $('#encOpenCode').onclick = () => toggleCode(true);
       $('#qBuild').onclick = () => {
         Object.assign(quick, { template: $('#qTpl').value, shape: $('#qShape').value, battery: $('#qBat').value, batteryPlace: $('#qPlace').value, label: $('#qLabel').value.trim() });
@@ -409,6 +459,7 @@ const EncView = (() => {
       <div class="muted small">Heights are estimated from the package; change any to fit real parts.</div>`;
     el.innerHTML = h;
     el.querySelectorAll('.encmodeseg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+    $('#encProc').onchange = e => { Model.mutate(() => Enclosure.setParams({ process: e.target.value })); };
     el.querySelectorAll('[data-ep]').forEach(i => i.onchange = () => { try { Model.mutate(() => Enclosure.setParams({ [i.dataset.ep]: i.type === 'checkbox' ? i.checked : +i.value })); } catch (e) { App.toast(e.message); } });
     el.querySelectorAll('[data-ph]').forEach(i => i.onchange = () => Model.mutate(() => Enclosure.setParams({ partHeights: { [i.dataset.ph]: i.value === '' ? null : +i.value } })));
     el.querySelectorAll('[data-rmcut]').forEach(b => b.onclick = () => Model.mutate(() => { const c = (Model.S.enclosure.cutouts || []).slice(); c.splice(+b.dataset.rmcut, 1); Model.S.enclosure = Object.assign({}, Model.S.enclosure, { cutouts: c }); }));
@@ -445,7 +496,7 @@ const EncView = (() => {
       const w = new Worker(WORKER), t = setTimeout(() => { w.terminate(); rej(new Error('high-resolution build took longer than 6 minutes')); }, 360000);
       w.onmessage = e => { clearTimeout(t); w.terminate(); e.data.ok ? res(e.data.r) : rej(new Error(e.data.error)); };
       w.onerror = e => { clearTimeout(t); w.terminate(); rej(new Error(e.message || 'worker error')); };
-      w.postMessage({ id: 1, code, ctx: scriptCtx(), opts: { quality: 'high', mesh: false, check: false, timeLimitMs: 340000 } });
+      w.postMessage({ id: 1, code, ctx: scriptCtx(), opts: { quality: 'high', mesh: false, check: false, step: true, timeLimitMs: 340000 } });
     });
   }
   async function exportCustom(kind) {
@@ -460,16 +511,14 @@ const EncView = (() => {
       catch (e) { App.toast('High-resolution build failed (' + e.message + ') — exporting the preview mesh instead', 7000); r = prev; }
       finally { clearInterval(tick); hqBusy = false; }
     }
-    const base = (Model.S.name || 'design').replace(/[^\w.-]+/g, '_'), files = {};
-    for (const p of r.parts) files[`${base}-${p.name}.stl`] = p.stl;
-    files[base + '-enclosure.scad'] = r.scad;
-    files[base + '-enclosure-script.js'] = Enclosure.script();
-    files[base + '-enclosure-README.txt'] = ['CircuitPilot custom enclosure — ' + (Model.S.name || 'design'), '', ...r.parts.map(p => `${p.name}: ${p.size_mm.join(' x ')} mm, ${p.volume_cm3} cm3`), '',
-      'STL files are oriented for printing (lids/covers flipped where the script asks for it) and sit on the bed.',
-      'The .scad file is equivalent OpenSCAD source; the -script.js file is the CircuitPilot 3D script (paste it into the Enclosure script editor).'].join('\n');
-    if (kind === 'stl') { for (const n of Object.keys(files).filter(n => n.endsWith('.stl'))) App.download(n, new Blob([files[n]], { type: 'model/stl' })); }
+    // print parts (STL + STEP) for JLC3DP, sheet parts (DXF + STEP + a panel) for JLCCNC, a README with the order settings each
+    const base = (Model.S.name || 'design').replace(/[^\w.-]+/g, '_'), proc = Enclosure.params().process;
+    const pack = svc => Shape3D.exportPack(r, { base, service: svc, process: proc, script: Enclosure.script(), pcb: scriptCtx().pcb }).files;
+    const printed = r.parts.filter(p => (p.kind || 'print') === 'print');
+    if (kind === 'stl') { for (const p of printed) App.download(`${base}-${p.name}.stl`, new Blob([p.stl], { type: 'model/stl' })); }
     else if (kind === 'scad') App.download(base + '-enclosure.scad', r.scad, 'text/plain');
-    else App.download(base + '-enclosure.zip', makeZip(files));
+    else if (kind === 'metal') { if (!r.parts.some(p => p.kind === 'metal')) { App.toast('This design has no sheet-metal parts (electrode plates…)'); return false; } App.download(base + '-sheet-metal-JLCCNC.zip', makeZip(pack('jlccnc'))); }
+    else App.download(base + '-enclosure.zip', makeZip(pack('all')));
     App.toast(`Exported ${r.parts.length} part${r.parts.length > 1 ? 's' : ''}${r !== prev ? ` · high resolution (${r.parts.reduce((a, p) => a + p.triangles, 0).toLocaleString()} triangles)` : ''}`, 6000);
     return true;
   }
@@ -583,7 +632,8 @@ const EncView = (() => {
     const D = ui.dims, last = ui.rulers[ui.rulers.length - 1];
     const a = D && ui.built ? `<b>${D.size.map(mm).join(' × ')} mm</b>${D.wall ? ` · wall ${mm(D.wall.t)}` : ''}${D.floor ? ` · floor ${mm(D.floor.t)}` : ''}${D.lid ? ` · lid ${mm(D.lid.t)}` : ''} mm` : '';
     const b = ui.measure ? `<div class="encruler">📏 ${ui.pendingA ? 'click the second point' : 'click a point on the model'}${last ? ` · last: <b>${mm(last.b.distanceTo(last.a))} mm</b>` : ''} · corners snap · Esc clears</div>` : '';
-    el.innerHTML = a + b; el.style.display = a || b ? 'block' : 'none';
+    const c = ui.thick ? `<div class="encruler"><span style="color:#e53935">■</span> under ${ui.wallMin || 1} mm · <span style="color:#fb8c00">■</span> under ${((ui.wallMin || 1) * 1.5).toFixed(1)} · <span style="color:#fdd835">■</span> under ${((ui.wallMin || 1) * 2).toFixed(1)} mm (${({ mjf: 'MJF', sls: 'SLS', sla: 'SLA', fdm: 'FDM' })[Enclosure.params().process] || 'MJF'} minimum wall)</div>` : '';
+    el.innerHTML = a + b + c; el.style.display = a || b || c ? 'block' : 'none';
   }
   function setMeasure(on) {
     ui.measure = on; ui.pendingA = null; if (!on) ui.rulers = [];
@@ -618,7 +668,8 @@ const EncView = (() => {
   // 4 views in one picture: angled, exploded, cut in half, from below (what the AI gets after a build; the Render button)
   async function overview(o = {}) {
     const w = o.w || 1600, h = o.h || 1100, cw = Math.round(w / 2), ch = Math.round(h / 2);
-    const views = [['Angled', { angle: 'iso', dims: o.dims !== false }], ['Exploded', { angle: 'iso', explode: true }], ['Cut in half', { angle: 'iso', section: 'x', dims: o.dims !== false }], ['From below', { angle: 'under' }]];
+    const views = [['Angled', { angle: 'iso', dims: o.dims !== false }], ['Exploded', { angle: 'iso', explode: true }], ['Cut in half', { angle: 'iso', section: 'x', dims: o.dims !== false }], ['From below', { angle: 'under' }]]
+      .map(([l, v]) => [o.thickness ? l + ' · wall thickness' : l, Object.assign(v, o.thickness ? { thickness: true, dims: false } : {})]);
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const g = c.getContext('2d'); g.fillStyle = o.bg || '#ffffff'; g.fillRect(0, 0, w, h);
     let k = 0;
@@ -644,10 +695,11 @@ const EncView = (() => {
       const code = Enclosure.script(); if (!code.trim()) return null;
       try { await runScript(code); } catch (e) { return null; }
       showCustom(false);
-    } else { if (dirty || !ui.built || ui.built.custom) rebuild(false); }
+    } else { if (o.fresh || dirty || !ui.built || ui.built.custom) rebuild(false); }
     if (!ui.built || !root) return null;
-    const keep = { cam: Object.assign({}, cam), explode: ui.explode, lid: ui.lid, xray: ui.xray, pcb: ui.pcb, section: ui.section, dims: ui.showDims }, size = renderer.getSize(new T.Vector2()), pr = renderer.getPixelRatio(), oc = renderer.getClearColor(new T.Color()).getHex(), oa = renderer.getClearAlpha();
-    ui.explode = !!o.explode; ui.lid = o.lid !== false; ui.xray = false; ui.pcb = o.pcb !== false; ui.section = o.section || null; ui.showDims = !!o.dims;
+    const keep = { cam: Object.assign({}, cam), explode: ui.explode, lid: ui.lid, xray: ui.xray, pcb: ui.pcb, section: ui.section, dims: ui.showDims, thick: ui.thick, at: ui.sectionAt }, size = renderer.getSize(new T.Vector2()), pr = renderer.getPixelRatio(), oc = renderer.getClearColor(new T.Color()).getHex(), oa = renderer.getClearAlpha();
+    ui.explode = !!o.explode; ui.lid = o.lid !== false; ui.xray = false; ui.pcb = o.pcb !== false; ui.section = o.section || null; ui.showDims = !!o.dims; ui.thick = !!o.thickness; ui.sectionAt = +o.at || 0;
+    if (ui.thick) boxThickness();
     const [th, ph] = ANGLES[o.angle] || [o.th ?? -1.0, o.ph ?? 1.05]; cam.th = th; cam.ph = ph;
     place();
     const box = new T.Box3(); root.updateMatrixWorld(true); root.traverse(m => { if (m.isMesh && m.visible && !m.userData.cap) box.expandByObject(m); });
@@ -658,7 +710,7 @@ const EncView = (() => {
     const fov = camera.fov * Math.PI / 180, span = Math.max(sz.x, sz.y, sz.z) * (o.dims ? 1.75 : 1.45); cam.r = span / 2 / Math.tan(fov / 2);   // room for the dimension lines
     draw();
     const url = renderer.domElement.toDataURL('image/png');
-    Object.assign(cam, keep.cam); ui.explode = keep.explode; ui.lid = keep.lid; ui.xray = keep.xray; ui.pcb = keep.pcb; ui.section = keep.section; ui.showDims = keep.dims;
+    Object.assign(cam, keep.cam); ui.explode = keep.explode; ui.lid = keep.lid; ui.xray = keep.xray; ui.pcb = keep.pcb; ui.section = keep.section; ui.showDims = keep.dims; ui.thick = keep.thick; ui.sectionAt = keep.at;
     renderer.setPixelRatio(pr); renderer.setSize(size.x, size.y); renderer.setClearColor(oc, oa); place(); resize(); draw();
     return { url, w, h };
   }
@@ -688,5 +740,11 @@ const EncView = (() => {
     draw1();
   }
   function dataBlob(url) { const b = atob(url.slice(url.indexOf(',') + 1)), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Blob([u], { type: 'image/png' }); }
-  return { init, show, hide, props, ui, rebuild: () => rebuild(true), runScript, snapshot, renderDialog };
+  // the order files for the project export (custom: built at high resolution in a worker)
+  async function exportFiles() {
+    if (Enclosure.mode() !== 'custom') return Enclosure.exportFiles().files;
+    const r = await buildHQ(Enclosure.script()), base = (Model.S.name || 'design').replace(/[^\w.-]+/g, '_');
+    return Shape3D.exportPack(r, { base, service: 'all', process: Enclosure.params().process, script: Enclosure.script(), pcb: scriptCtx().pcb }).files;
+  }
+  return { init, show, hide, props, ui, rebuild: () => rebuild(true), invalidate: () => { dirty = true; }, runScript, snapshot, renderDialog, exportFiles };
 })();

@@ -206,12 +206,49 @@ const Enclosure = (() => {
     return fp && fp.pads.some(p => p.drill) ? 6 : 1.6;
   }
 
+  // ---------------- batteries (loose cells that live in the enclosure, wired to the board) ----------------
+  // Sizes are the cell's own (LiPo: incl. the protection board, without the wire). Capacities are typical market
+  // values: check the seller's datasheet. kind: coin (d × t), lipo (pouch t × w × l, named TTWWLL: thickness in 0.1 mm, a leading 10 = 10 mm), cyl (d × l).
+  const LIION = 'Li-ion rechargeable, 3.7 V nominal, 4.2 V full: needs a Li-ion charger (TP4054 / MCP73831 / BQ24075) and a protection circuit (LiPo packs include one)';
+  const BATTERIES = [
+    ...[['LIR1220', 12.5, 2.0, 8], ['LIR1632', 16, 3.2, 25], ['LIR2025', 20, 2.5, 30], ['LIR2032', 20, 3.2, 40], ['LIR1254', 12, 5.4, 60], ['LIR2450', 24.5, 5.0, 120], ['LIR2477', 24.5, 7.7, 180]]
+      .map(([n, d, t, mAh]) => ({ id: n.toLowerCase(), name: n, kind: 'coin', d, t, mAh, V: 3.7, rechargeable: true, max_mA: Math.round(mAh * 0.5), note: 'rechargeable Li-ion coin cell (tabbed version to solder wires); charge ≤ 0.5 C at 4.2 V. ' + LIION })),
+    ...[['CR1220', 12.5, 2.0, 40, 1], ['CR1632', 16, 3.2, 140, 2], ['CR2032', 20, 3.2, 225, 3], ['CR2450', 24.5, 5.0, 620, 5], ['CR2477', 24.5, 7.7, 1000, 5]]
+      .map(([n, d, t, mAh, cont]) => ({ id: n.toLowerCase(), name: n, kind: 'coin', d, t, mAh, V: 3.0, rechargeable: false, max_mA: cont, note: `primary (not rechargeable) lithium 3 V coin; ~${cont} mA continuous, short pulses ~15 mA with a large capacitor — fine for BLE beacons / sensors, not for radios that stream` })),
+    ...[['301020', 45], ['401020', 60], ['401030', 100], ['401230', 150], ['402030', 180], ['502030', 250], ['502535', 400], ['503035', 500], ['523450', 1000], ['603450', 1200], ['803450', 1500], ['103450', 1800], ['102050', 1000]]
+      .map(([c, mAh]) => { const t = c.startsWith('10') ? 10 : +c.slice(0, 2) / 10, w = +c.slice(2, 4), l = +c.slice(4, 6); return { id: 'lipo-' + c, name: `LiPo ${c} (${t} × ${w} × ${l} mm)`, kind: 'lipo', t, w, l, mAh, V: 3.7, rechargeable: true, max_mA: mAh, note: 'LiPo pouch with protection board and JST-PH 2.0 / wire leads; 1 C continuous; leave ~0.5 mm around it (pouches swell). ' + LIION }; }),
+    ...[['10440', 10, 44, 350], ['14500', 14, 50, 800], ['16340', 16, 34, 700], ['18350', 18, 35, 900], ['18650', 18.4, 65, 3000], ['21700', 21, 70, 4500]]
+      .map(([n, d, l, mAh]) => ({ id: n, name: `${n} Li-ion cell (Ø${d} × ${l} mm)`, kind: 'cyl', d, l, mAh, V: 3.7, rechargeable: true, max_mA: Math.round(mAh * (+n > 18000 ? 2 : 1)), note: 'cylindrical Li-ion; use a protected cell or add a protection IC (DW01 + FS8205), holder or nickel strip. ' + LIION })),
+  ];
+  // footprint of a battery lying flat: w (x) × l (y) × t (z)
+  function battery(id) {
+    if (id && typeof id === 'object') return id;
+    const k = String(id || '').toLowerCase().replace(/^lipo[-_ ]?/, 'lipo-').replace(/\s+/g, '');
+    const b = BATTERIES.find(x => x.id === k || x.id === 'lipo-' + k || x.name.toLowerCase() === k);
+    if (!b) throw new Error(`Unknown battery "${id}". Known: ${BATTERIES.map(x => x.id).join(', ')}`);
+    const dims = b.kind === 'coin' ? { w: b.d, l: b.d, t: b.t } : b.kind === 'cyl' ? { w: b.d, l: b.l, t: b.d } : { w: b.w, l: b.l, t: b.t };
+    return Object.assign({}, b, dims, { Wh: +(b.mAh * b.V / 1000).toFixed(2) });
+  }
+  // catalogue filtered and sorted for a choice: capacity, size limits, the current the design draws → runtime
+  function batteries(q = {}) {
+    let L = BATTERIES.map(b => battery(b.id));
+    if (q.kind) L = L.filter(b => b.kind === q.kind);
+    if (q.rechargeable != null) L = L.filter(b => b.rechargeable === !!q.rechargeable);
+    if (q.min_mAh) L = L.filter(b => b.mAh >= q.min_mAh);
+    if (q.max_thickness) L = L.filter(b => b.t <= q.max_thickness);
+    if (q.max_width || q.max_length) { const a = Math.min(q.max_width || 1e9, q.max_length || 1e9), c = Math.max(q.max_width || 0, q.max_length || 0) || a; L = L.filter(b => Math.min(b.w, b.l) <= a && Math.max(b.w, b.l) <= c); }
+    if (q.peak_mA) L = L.filter(b => b.max_mA >= q.peak_mA);
+    return L.sort((a, b) => a.mAh - b.mAh).map(b => Object.assign({ id: b.id, name: b.name, kind: b.kind, size_mm: b.kind === 'coin' ? `Ø${b.d} × ${b.t}` : b.kind === 'cyl' ? `Ø${b.d} × ${b.l}` : `${b.t} × ${b.w} × ${b.l}`, mAh: b.mAh, V: b.V, Wh: b.Wh, rechargeable: b.rechargeable, max_mA: b.max_mA, volume_cm3: +(b.w * b.l * b.t / 1000).toFixed(2) },
+      q.avg_mA ? { runtime_h: +(b.mAh * 0.85 / q.avg_mA).toFixed(1) } : {}, q.verbose ? { note: b.note } : {}));
+  }
+
   // ---------------- parameters ----------------
   const DEFAULTS = {
     wall: 2.0, floor: 2.0, lidThickness: 2.0, clearance: 1.0, pcbThickness: 1.6, topClearance: 3.0, extraHeight: 0,
     standoffHeight: 5.0, standoffDiameter: 6.0, screwHole: 2.5, lidFit: 0.25, lipHeight: 3.0, lipWidth: 1.2,
     vents: true, ventWidth: 1.6, ventLength: 18, ventSpacing: 3.5, autoConnectorCutouts: true, autoLidHoles: true,
     cutouts: [], partHeights: {}, explode: 12,
+    battery: '', batteryPlace: 'under',   // loose cell in the box (see batteries()): under the board, beside it (+X) or above the parts
   };
   const params = () => Object.assign({}, DEFAULTS, Model.S.enclosure || {}, { cutouts: ((Model.S.enclosure || {}).cutouts || []).slice(), partHeights: Object.assign({}, (Model.S.enclosure || {}).partHeights || {}) });
   function setParams(u = {}) {
@@ -220,6 +257,8 @@ const Enclosure = (() => {
       // mode: 'box' = this parametric box, 'custom' = free-form 3D script (shape3d.js) stored in .script
       if (k === 'mode') { if (!['box', 'custom'].includes(v)) throw new Error('mode must be "box" or "custom"'); cur.mode = v; continue; }
       if (k === 'script') { cur.script = String(v || ''); continue; }
+      if (k === 'battery') { if (v) battery(v); cur.battery = v ? battery(v).id : ''; continue; }
+      if (k === 'batteryPlace') { if (!['under', 'beside', 'above'].includes(v)) throw new Error('batteryPlace must be under, beside or above'); cur.batteryPlace = v; continue; }
       if (!(k in DEFAULTS)) throw new Error(`Unknown enclosure parameter "${k}". Known: mode, script, ${Object.keys(DEFAULTS).join(', ')}`);
       if (k === 'partHeights') { cur.partHeights = Object.assign({}, cur.partHeights || {}); for (const [r, h] of Object.entries(v || {})) { if (h == null || h === '') delete cur.partHeights[r]; else cur.partHeights[r] = +h; } }
       else if (k === 'cutouts') cur.cutouts = v;
@@ -240,6 +279,13 @@ const Enclosure = (() => {
     return { index: cur.cutouts.length - 1, cutout: cut };
   }
 
+  function hull2(P) {   // convex hull (monotone chain), CCW
+    P = P.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], up = [];
+    for (const p of P) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+    for (const p of P.slice().reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+    return lo.slice(0, -1).concat(up.slice(0, -1));
+  }
   // ---------------- model ----------------
   // board coords (x right, y down) → enclosure coords (x right, y up)
   function layout() {
@@ -254,13 +300,27 @@ const Enclosure = (() => {
       const tht = Pcb.padsOf(c).some(p => p.drill); if (tht && !bottom) botH = Math.max(botH, 1.8); // leads under the board
       return { ref: c.ref, value: c.value, type: c.type, x0: b[0], x1: b[2], y0: -b[3], y1: -b[1], h, bottom, edge: Pcb.edgeInfo(c), c };
     });
-    const standoff = Math.max(P.standoffHeight, botH + 1.0);
+    // a loose battery: under the board (the standoffs lift the PCB over it), beside it (+X) or on top of the parts
+    const bt = P.battery ? battery(P.battery) : null, bx = Math.min(...bpoly.map(q => q[0])), bX = Math.max(...bpoly.map(q => q[0])), by = Math.min(...bpoly.map(q => q[1])), bY = Math.max(...bpoly.map(q => q[1]));
+    const standoff = Math.max(P.standoffHeight, botH + 1.0, bt && P.batteryPlace === 'under' ? botH + bt.t + 1.2 : 0);
     const pcbZ = P.floor + standoff, pcbTop = pcbZ + P.pcbThickness;
-    const H = +(pcbTop + topH + P.topClearance + P.extraHeight).toFixed(2);
-    const inner = offset(bpoly, P.clearance), outer = offset(bpoly, P.clearance + P.wall);
+    let H = +(pcbTop + topH + P.topClearance + P.extraHeight + (bt && P.batteryPlace === 'above' ? bt.t + 0.8 : 0)).toFixed(2);
+    let bat = null, fp = bpoly;
+    if (bt) {
+      // the longer side of the cell along the board's longer side
+      const [w, l] = (bX - bx >= bY - by) === (bt.w >= bt.l) ? [bt.w, bt.l] : [bt.l, bt.w], cx = (bx + bX) / 2, cy = (by + bY) / 2;
+      const x0 = P.batteryPlace === 'beside' ? bX + 1.5 : cx - w / 2, y0 = cy - l / 2;
+      const z0 = P.batteryPlace === 'above' ? pcbTop + topH + 0.4 : P.floor + 0.2;
+      bat = Object.assign({}, bt, { x0, y0, x1: x0 + w, y1: y0 + l, z0, z1: z0 + bt.t, place: P.batteryPlace });
+      if (P.batteryPlace === 'beside') H = Math.max(H, +(P.floor + bt.t + P.topClearance).toFixed(2));
+      // the cavity grows to hold the cell: outline = board outline joined with the battery rectangle
+      const r = [[bat.x0, bat.y0], [bat.x1, bat.y0], [bat.x1, bat.y1], [bat.x0, bat.y1]];
+      if (bat.x0 < bx || bat.x1 > bX || bat.y0 < by || bat.y1 > bY) fp = hull2([...bpoly, ...r]);
+    }
+    const inner = offset(fp, P.clearance), outer = offset(fp, P.clearance + P.wall);
     const xs = outer.map(q => q[0]), ys = outer.map(q => q[1]);
     const holes = (S.pcb.holes || []).map(h => ({ x: h.x, y: -h.y, d: h.d }));
-    return { P, bpoly, inner, outer, parts, standoff, pcbZ, pcbTop, H, topH, botH, holes, bbox: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
+    return { P, bpoly, inner, outer, parts, standoff, pcbZ, pcbTop, H, topH, botH, holes, battery: bat, bbox: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
   }
   // where each side wall is (in enclosure coords) and which board coordinate runs along it
   function sideInfo(L, side) {
@@ -547,6 +607,7 @@ const Enclosure = (() => {
       mounting_holes: L.holes.length, supports: L.holes.length || supportPoints(L).length,
       cutouts: cuts.map((c, i) => ({ side: c.side, shape: c.shape, w: +(+c.w).toFixed(2), h: +(+c.h).toFixed(2), label: c.label, auto: !!c.auto, index: c.auto ? undefined : P.cutouts.indexOf(P.cutouts.find(q => q.label === c.label && q.side === c.side)) })),
       part_heights: Object.fromEntries(L.parts.map(p => [p.ref, p.h])),
+      battery: L.battery ? { id: L.battery.id, name: L.battery.name, mAh: L.battery.mAh, place: L.battery.place, box_mm: [L.battery.x0, L.battery.y0, L.battery.z0, L.battery.x1, L.battery.y1, L.battery.z1].map(v => +v.toFixed(2)) } : null,
     };
   }
   // three.js-friendly flat arrays for the preview
@@ -560,6 +621,6 @@ const Enclosure = (() => {
   }
   // CSG kernel, shared with the script modeller (shape3d.js)
   const csg = { setQuality, get HQ() { return HQ; }, guard, V, Plane, Poly, union, subtract, intersect, repair, zipSeams, fillHoles, earcut, ccw, dedupe, offset, area, triangles, stl, meshArrays };
-  return { DEFAULTS, setQuality, mode, script, params, setParams, addCutout, layout, build, exportFiles, describe, meshArrays, partHeight, stl, offset, csg };
+  return { DEFAULTS, BATTERIES, battery, batteries, setQuality, mode, script, params, setParams, addCutout, layout, build, exportFiles, describe, meshArrays, partHeight, stl, offset, csg };
 })();
 if (typeof module !== 'undefined') module.exports = Enclosure;

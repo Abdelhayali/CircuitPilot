@@ -547,3 +547,11 @@ ul.drc li { cursor: pointer; } ul.drc li.on { outline: 1px solid var(--accent); 
 .as-tabs .tag.webonly { display: none; color: var(--warn); }
 body.web .as-tabs .tag.webonly { display: inline; }
 .as-open { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line, rgba(127,127,127,.25)); }
+/* enclosure render dialog */
+.enc-render { position: absolute; inset: 0; z-index: 30; background: rgba(0, 0, 0, .55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.enc-render .er-box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; width: min(1200px, 100%); max-height: 100%; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 12px 40px rgba(0, 0, 0, .35); }
+.enc-render .er-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.enc-render .er-img { flex: 1; min-height: 240px; display: flex; align-items: center; justify-content: center; overflow: auto; background: var(--bg); }
+.enc-render .er-img img { max-width: 100%; max-height: calc(100vh - 160px); display: block; }
+.enc-render .chk { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.enc-tpl .encgrid select, .enc-tpl .encgrid input { width: 100%; }

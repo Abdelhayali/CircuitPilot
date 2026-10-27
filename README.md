@@ -150,7 +150,9 @@ API keys are stored in your browser's localStorage and sent directly from the pa
 | `js/easyeda.js` | EasyEDA interchange: schematic export, PCB import |
 | `js/easyedapro.js` | EasyEDA Pro project import (.epro / .epro2): schematic sheets + PCB |
 | `js/kicad.js` | KiCad official footprint library for the part editor (index in `data/kicad-footprints.txt`, rebuilt with `tools/kicad_footprint_index.py`) |
-| `js/enclosure.js`, `js/shape3d.js`, `js/shape-worker.js` | Parametric box enclosure, CSG kernel, custom 3D script modeller (+ sandboxed worker) |
+| `js/enclosure.js`, `js/shape3d.js`, `js/shape-worker.js` | Parametric box enclosure, battery catalogue, CSG kernel, custom 3D script modeller (+ sandboxed worker) |
+| `js/vendor/manifold.js`, `.wasm` | Manifold 3D kernel (Apache-2.0), fast booleans for the enclosure |
+| `js/strokefont.js` | Stroke font for silkscreen text and engraved enclosure labels |
 | `js/ai.js` | Providers, tool definitions, agent loop |
 | `js/app.js` | Panels, chat, settings, exports |
 | `js/engine.js` | Design tools shared by the copilot, MCP server and REST API |
@@ -336,12 +338,15 @@ Live feedback: the coordinate bar shows X/Y, layer, width, net, and warns when t
 
 ## Enclosure (3D print)
 
-The **Enclosure** tab builds a printable case around the current PCB and previews it in 3D (drag to orbit, right-drag to pan, wheel to zoom; *Explode*, *X-ray*, *Lid*, *PCB* toggles).
+The **Enclosure** tab builds a printable case around the current PCB and previews it in 3D (drag to orbit, right-drag to pan, wheel to zoom; *Explode*, *X-ray*, *Lid*, *PCB* and *Section* toggles — Section cuts the model in half, cut walls in red, to check wall thickness, the lid lip and how the board and battery sit).
+
+- **📷 Render**: a picture of the finished design — 4 views in one image (angled, exploded, cut in half, from below) or one large angled / exploded / cut / top / bottom view, light or dark background — saved as PNG. The AI gets the same 4-view picture after every enclosure build, so it sees what it made.
 
 - **Fits the board**: the cavity follows the board outline (rectangle, rounded, round or custom) plus a clearance gap; the height comes from the tallest part (estimated per package — override any part height).
 - **Board support**: click **＋ Add M3 mounting holes** (adds non-plated Ø3.2 mm holes to the PCB, kept clear of parts and copper, in the NPTH drill file) to get **screw standoffs**; without holes the board rests on corner supports. Standoffs rise automatically to clear parts on the bottom side.
 - **Openings**: automatic for edge connectors (USB, DC jack…, at the right wall and height) and holes in the lid above LEDs and buttons; add your own rectangle / circle cutouts on any wall, the lid or the floor.
 - **Lid**: snap-fit lip with an adjustable fit tolerance, optional vent slots.
+- **Battery**: pick a loose cell — rechargeable **LIR** coin cells (LIR1220 … LIR2477), primary **CR** coins, **LiPo** pouches (301020 … 103450, with protection board) or cylindrical Li-ion (10440 … 21700) — and where it goes (under the board, beside it, above the parts): the box grows to hold it and the 3D view shows it. The AI chooses one with `list_batteries` (size limits, capacity, runtime from the average current, peak current) and tells you the runtime.
 - **Export**: **STL ⤓** (base + lid; the lid is already oriented for printing), **OpenSCAD ⤓** (parametric source of the same design), or **All (.zip)** with print notes.
 - **AI**: "make the walls 3 mm, add a 6×4 mm cable slot on the right and more room above the board" → `set_enclosure`, `add_enclosure_cutout`, `add_mounting_holes`, `get_enclosure`; Claude Code can also `export_enclosure` straight to a folder.
 
@@ -352,15 +357,18 @@ Switch the Enclosure tab to **Custom 3D** for anything that is not a box: a Whoo
 > "Make a wristband pod like Whoop for this board: 22 mm strap, USB-C opening, as thin as possible"
 > "ECG chest node with 3 snap-electrode holes 60 mm apart on the skin side and a window over the LED"
 
-The AI writes a short **3D script** (`set_enclosure_script`): rounded boxes, convex hulls, extrude / revolve, union / difference / intersection, transforms — positioned relative to the PCB, whose outline, part boxes, heights and edge connectors it gets as context. Every build returns a **fit report** (printed parts colliding with the board or components, script errors with line numbers), so the AI iterates until it is clean.
+The fastest way is a **template with parameters** — `set_enclosure_script {template: "wrist-whoop", params: {battery: "lipo-402030", strap: 20, label: "NODE-01"}}`: no code to write, built in about a second, and the result comes back with a **picture** (4 views) and a **fit report**. You can do the same without the AI in **Properties → Quick design** (template, shape, battery, engraved text → ▶ Build). For anything the templates cannot do, the AI writes a short **3D script**: rounded boxes, convex hulls, extrude / revolve, union / difference / intersection, transforms — positioned relative to the PCB, whose outline, part boxes, heights and edge connectors it gets as context. Every build returns the fit report (printed parts colliding with the board, components or battery, script errors with line numbers), so the AI iterates until it is clean.
+
+- **Fast geometry**: booleans run on **Manifold** (WebAssembly) — exact, always watertight, a template builds in ≈0.5 s instead of 5–17 s (the self-contained BSP kernel is the fallback where WebAssembly is unavailable). High-resolution STLs for printing take under a second.
+- **More modelling tools**: `.bend(R)` wraps a part around the wrist / arm / chest, `.smooth()` rounds every edge into an organic shape, `.warp(fn)` free deformation, `.trim(plane)`, `.array` / `.grid` / `.polar` / `.mirrorCopy` patterns, `text()` engraved or embossed labels, `honeycomb()` grilles, `screwBoss()` (heat-set inserts or self-tapping, M2–M3), `countersink()`, `batteryCradle()`, and measurements while modelling: `gap(a, b)`, `measure(s)`.
 
 - **35 tested templates**, all sized from your board: 10 wrist wearables (Whoop-style pod, round / square / hex / octagon watches with spring-bar lugs, capsules, slim bands, cuffs — concave wrist backs), 10 chest / ECG (3-lead oval, heart-rate strap pod, Holter 5-lead with belt clip, round and hex 3-electrode patches, adhesive patches with flange, lead-wire box, 4-electrode patch), 7 other body-worn (ankle, arm, headband, pendant, key fob, belt clip, badge) and 8 boxes. Every template is checked on real boards: the PCB and every part are inside, nothing collides, every printed part is watertight.
-- **Enclosure kit** for the AI and for your own scripts: `envelope()` (board + every part), outlines that contain it (oval, circle, pill, hex, octagon, squircle), soft rounded bodies, wrist curves, strap lugs, snap-electrode holes, belt clips, loops, connector openings, LED / button windows, board posts, and a lid with a press-fit lip.
+- **Enclosure kit** for the AI and for your own scripts: `envelope()` (board + every part, plus a battery under / beside / above the board), outlines that contain it (oval, circle, pill, hex, octagon, squircle), soft rounded bodies, wrist curves, strap lugs, snap-electrode holes, belt clips, loops, connector openings, LED / button windows, board posts, and a lid with a press-fit lip.
 - **</> Script** opens the editor (Ctrl+Enter to build, templates: wristband pod, ECG patch, rounded box; **?** shows the API).
 - Builds run in a sandboxed Web Worker (no network access) and produce **watertight meshes**.
 - **Export**: one **STL per part** (lids/covers flipped for printing), equivalent **OpenSCAD** source, and the script itself in the zip.
 
-The geometry engine (CSG with watertight-mesh repair) is self-contained JavaScript, so it runs in the browser and in the MCP server; only the 3D preview loads three.js from cdnjs.
+The geometry runs in the browser and in the MCP server (Manifold is bundled in `js/vendor`, so the desktop app works offline); only the 3D preview loads three.js from cdnjs.
 
 Fit check: a part counts as *not enclosed* only when its centre, or most of a grid of points in its box, can see out of the enclosure; parts whose estimated box only touches a wall are listed under `near_wall` (set their real height with `set_enclosure {partHeights}`). Coin-cell holders are estimated at 4.4 mm with the cell. `envelope({side: 'top' | 'bottom', parts, exclude})` sizes a body from only some parts.
 
@@ -413,4 +421,5 @@ CircuitPilot's design, code and UI are original work. It uses third-party **data
 - **Open libraries**: KiCad symbols and footprints (gitlab.com/kicad/libraries, CC-BY-SA 4.0 with an exception for designs), SparkFun KiCad Libraries (github.com/sparkfun/SparkFun-KiCad-Libraries, CC-BY 4.0), Digi-Key KiCad Library (github.com/Digi-Key/digikey-kicad-library, CC-BY-SA 4.0 with an exception for designs).
 - **Part symbols & footprints** for database parts: the **JLCEDA/EasyEDA official library** — https://easyeda.com · https://lceda.cn. Its terms require this source to be declared; parts are used here only to design boards to be made with these parts.
 - **three.js** (MIT) for the 3D previews; the CSG algorithm in `js/enclosure.js` follows csg.js by Evan Wallace (MIT).
+- **Manifold** (Apache-2.0, github.com/elalish/manifold) — the fast 3D boolean kernel, bundled unchanged in `js/vendor/` (only the module wrapper is adapted to load as a classic script; licence in `js/vendor/manifold-LICENSE.txt`).
 - Web search results come from DuckDuckGo (or Brave Search with your own key).

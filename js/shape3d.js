@@ -197,7 +197,7 @@ const Shape3D = (() => {
   // ---------- 3D shapes (lazy node tree → polygons + OpenSCAD) ----------
   class Shape {
     constructor(node) { this.node = node; }
-    get polys() { return evalNode(this.node); }
+    get polys() { return MK ? polysOfM(evalM(this.node)) : evalNode(this.node); }
     translate(v) { return new Shape({ op: 'translate', v: vec3(v, 'translate'), c: [this.node] }); }
     rotate(a, axis) {
       if (axis) return new Shape({ op: 'rotate', a: num(a, 'angle'), axis: vec3(axis, 'axis'), c: [this.node] });
@@ -206,11 +206,29 @@ const Shape3D = (() => {
     scale(v) { return new Shape({ op: 'scale', v: vec3(v, 'scale', 1), c: [this.node] }); }
     mirror(v) { return new Shape({ op: 'mirror', v: vec3(v, 'mirror'), c: [this.node] }); }
     color(c) { return new Shape({ op: 'color', col: String(c), c: [this.node] }); }
+    // deform every vertex: fn([x, y, z]) changes the array in place (refine() first for smooth bends)
+    warp(fn) { if (typeof fn !== 'function') throw new Error('warp(fn): fn([x, y, z]) must change the point in place'); return new Shape({ op: 'warp', fn, c: [this.node] }); }
+    refine(len = 1) { len = num(len, 'refine length'); if (len <= 0.05) throw new Error('refine(len): len > 0.05 mm'); return new Shape({ op: 'refine', len, c: [this.node] }); }
+    // organic: rounds every edge sharper than angle (degrees) by subdividing to len mm triangles
+    smooth(o = {}) { if (typeof o === 'number') o = { refine: o }; return new Shape({ op: 'smooth', angle: num(o.angle ?? 60, 'angle'), smoothness: Math.max(0, Math.min(1, num(o.smoothness ?? 0, 'smoothness'))), len: Math.max(0.2, num(o.refine ?? 1, 'refine')), c: [this.node] }); }
+    // keep the side of the plane the normal points to (offset = distance of the plane from the origin)
+    trim(normal, offset = 0) { return new Shape({ op: 'trim', normal: vec3(normal, 'normal'), offset: num(offset, 'offset'), c: [this.node] }); }
+    // wrap around a cylinder of radius R below the shape (wrist / arm / chest curve): lines along `along` (x | y) follow it,
+    // z = o.z (default 0) keeps its length; the ends drop
+    bend(R, o = {}) {
+      R = num(R, 'bend radius'); if (R <= 1) throw new Error('bend(R): R > 1 mm'); const z0 = num(o.z ?? 0, 'z'), ax = o.along === 'x' ? 0 : 1;
+      return this.refine(o.refine ?? Math.max(0.6, Math.min(2, R / 30))).warp(q => { const rr = R + q[2] - z0, a = q[ax] / R; q[ax] = rr * Math.sin(a); q[2] = z0 - R + rr * Math.cos(a); });
+    }
+    mirrorCopy(v) { return union(this, this.mirror(v)); }
+    // copies: .array(n, [dx, dy, dz]) in a row, .grid(nx, ny, dx, dy) centred, .polar(n, {angle = 360, start = 0}) around Z
+    array(n, step) { const d = vec3(step, 'step'); return union(Array.from({ length: Math.max(1, Math.round(n)) }, (_, i) => this.translate([d[0] * i, d[1] * i, d[2] * i]))); }
+    grid(nx, ny, dx, dy, o = {}) { const ox = o.center === false ? 0 : -(nx - 1) * dx / 2, oy = o.center === false ? 0 : -(ny - 1) * dy / 2, L = []; for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) L.push(this.translate([ox + i * dx, oy + j * dy, 0])); return union(L); }
+    polar(n, o = {}) { const a = num(o.angle ?? 360, 'angle'), st = a >= 360 ? a / n : a / Math.max(1, n - 1); return union(Array.from({ length: Math.max(1, Math.round(n)) }, (_, i) => this.rotate([0, 0, (o.start || 0) + i * st]))); }
     union(...o) { return union(this, ...o); }
     subtract(...o) { return difference(this, ...o); }
     difference(...o) { return difference(this, ...o); }
     intersect(...o) { return intersection(this, ...o); }
-    get bounds() { const b = bboxOf(this.polys); return { min: b.slice(0, 3), max: b.slice(3), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] }; }
+    get bounds() { const b = MK ? mBounds(evalM(this.node)) : bboxOf(this.polys); return { min: b.slice(0, 3), max: b.slice(3), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] }; }
   }
   const need3 = (s, fn) => { if (s instanceof Shape) return s.node; if (is2(s)) throw new Error(`${fn}(): got a 2D shape — extrude() or revolve() it first`); throw new Error(`${fn}(): expected a 3D shape, got ${s === undefined ? 'undefined' : typeof s}`); };
   const list = (args, fn) => args.flat(Infinity).filter(s => s != null && s !== false).map(s => need3(s, fn));
@@ -306,12 +324,75 @@ const Shape3D = (() => {
       case 'difference': { P = evalNode(n.c[0]); const rest = n.c.slice(1).map(evalNode); const ba = bboxOf(P); for (const b of rest) { tick(); if (b.length && overlap(ba, bboxOf(b))) P = C.subtract(P, b); } break; }
       case 'intersection': P = n.c.map(evalNode).reduce((a, b) => { tick(); return C.intersect(a, b); }); break;
       case 'color': P = evalNode(n.c[0]); break;
+      case 'warp': case 'refine': case 'smooth': throw new Error(`${n.op === 'warp' ? 'bend() / warp()' : n.op + '()'} needs the fast 3D kernel (WebAssembly), which could not be loaded here`);
+      case 'trim': { const nn = vec3(n.normal, 'normal'), l = Math.hypot(...nn) || 1, u = nn.map(x => x / l), big = 2000;
+        const box = transform(evalNode({ op: 'cube', size: [big, big, big], center: true }), [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]);
+        const ax = Math.abs(u[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1], x = [u[1] * ax[2] - u[2] * ax[1], u[2] * ax[0] - u[0] * ax[2], u[0] * ax[1] - u[1] * ax[0]], xl = Math.hypot(...x), X = x.map(q => q / xl), Y = [u[1] * X[2] - u[2] * X[1], u[2] * X[0] - u[0] * X[2], u[0] * X[1] - u[1] * X[0]];
+        const c = n.offset + big / 2, M = [[X[0], Y[0], u[0], u[0] * c], [X[1], Y[1], u[1], u[1] * c], [X[2], Y[2], u[2], u[2] * c]];
+        P = C.intersect(evalNode(n.c[0]), transform(box, M)); break; }
       default: P = transform(evalNode(n.c[0]), matrixOf(n));
     }
     n._p = P;
     return P;
   }
   function tick() { if (budget && Date.now() > budget) throw new Error('Model too complex: took longer than the time limit. Use fewer segments (fn), fewer/lower-resolution spheres in hulls, or fewer boolean operations.'); }
+
+  // ---------- fast kernel: Manifold (WASM, js/vendor) — exact booleans, always watertight, ~50× faster than the BSP
+  // above, which stays as the fallback (no WASM, or Manifold refused an input). Same node tree, same results.
+  let MF = null, MK = null;   // Manifold module; live Manifold objects of the current run (freed when it ends)
+  function useManifold(m) { try { if (m && m.setup) m.setup(); MF = m && m.Manifold ? m : null; } catch (e) { MF = null; } return !!MF; }
+  const kept = m => { MK.push(m); return m; };
+  const xsec = s => kept(MF.CrossSection.ofPolygons([s.pts.map(q => [q[0], q[1]])], 'Positive'));
+  const mat4 = M => [M[0][0], M[1][0], M[2][0], 0, M[0][1], M[1][1], M[2][1], 0, M[0][2], M[1][2], M[2][2], 0, M[0][3], M[1][3], M[2][3], 1];
+  function spherePts(r, fn, c = [0, 0, 0]) {
+    const rings = Math.max(2, Math.round(fn / 2)), out = [];
+    for (let i = 0; i <= rings; i++) { const ph = Math.PI * i / rings; for (let k = 0; k < (i && i < rings ? fn : 1); k++) { const th = 2 * Math.PI * k / fn; out.push([c[0] + r * Math.sin(ph) * Math.cos(th), c[1] + r * Math.sin(ph) * Math.sin(th), c[2] + r * Math.cos(ph)]); } }
+    return out;
+  }
+  function evalM(n) {
+    if (n._m) return n._m;
+    const { Manifold: M3, CrossSection: CS } = MF;
+    let m;
+    switch (n.op) {
+      case 'cube': m = M3.cube(n.size, !!n.center); break;
+      case 'cylinder': m = M3.cylinder(n.h, n.r1, n.r2, fnFor(Math.max(n.r1, n.r2), n.fn), !!n.center); break;
+      case 'sphere': m = M3.sphere(n.r, fnFor(n.r, n.fn)); break;
+      case 'torus': m = kept(kept(CS.circle(n.r, fnFor(n.r, n.fn2))).translate([n.R, 0])).revolve(fnFor(n.R + n.r, n.fn), 360); break;
+      case 'extrude': m = xsec(n.shape).extrude(n.h, 0, 0, n.scale, false); if (n.center) m = kept(m).translate([0, 0, -n.h / 2]); break;
+      case 'revolve':
+        if (n.shape.pts.some(q => q[0] < -1e-9)) throw new Error('revolve(): the profile must lie at x ≥ 0 (x = distance from the Z axis, y = height)');
+        m = xsec(n.shape).revolve(fnFor(Math.max(...n.shape.pts.map(q => q[0])), n.fn), n.angle); break;
+      case 'roundedBox': {
+        const [x, y, z] = n.size, r = n.r, o = n.center ? [0, 0, 0] : [x / 2, y / 2, z / 2], fn = fnFor(r, n.fn), pts = [];
+        for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) pts.push(...spherePts(r, fn, [o[0] + sx * (x / 2 - r), o[1] + sy * (y / 2 - r), o[2] + sz * (z / 2 - r)]));
+        m = M3.hull(pts); break;
+      }
+      case 'hull': m = M3.hull(n.c.map(evalM)); break;
+      case 'rings': m = M3.hull(n.rings.flatMap(r => r.pts.map(q => [q[0], q[1], r.z]))); break;
+      case 'union': m = M3.union(n.c.map(evalM)); break;
+      case 'difference': m = M3.difference(n.c.map(evalM)); break;
+      case 'intersection': m = M3.intersection(n.c.map(evalM)); break;
+      case 'color': return (n._m = evalM(n.c[0]));
+      case 'translate': m = evalM(n.c[0]).translate(n.v); break;
+      case 'scale': m = evalM(n.c[0]).scale(n.v); break;
+      case 'mirror': m = evalM(n.c[0]).mirror(n.v); break;
+      case 'rotate': m = n.axis ? evalM(n.c[0]).transform(mat4(matrixOf(n))) : evalM(n.c[0]).rotate(n.v); break;
+      case 'warp': m = evalM(n.c[0]).warp(n.fn); break;
+      case 'refine': m = evalM(n.c[0]).refineToLength(n.len); break;
+      case 'smooth': { const s = kept(evalM(n.c[0]).smoothOut(n.angle, n.smoothness)); m = s.refineToLength(n.len); break; }
+      case 'trim': m = evalM(n.c[0]).trimByPlane(n.normal, n.offset); break;
+      default: throw new Error('unsupported 3D operation ' + n.op);
+    }
+    return (n._m = kept(m));
+  }
+  // triangles of a Manifold as BSP polygons (vertices shared, so the rest of the pipeline works unchanged)
+  function polysOfM(m) {
+    const { V } = K(), g = m.getMesh(), np = g.numProp, P = g.vertProperties, T = g.triVerts, vs = new Array(P.length / np), out = [];
+    for (let i = 0, k = 0; i < P.length; i += np, k++) vs[k] = new V(P[i], P[i + 1], P[i + 2]);
+    for (let i = 0; i < T.length; i += 3) { const p = mk([vs[T[i]], vs[T[i + 1]], vs[T[i + 2]]]); if (p) out.push(p); }
+    return out;
+  }
+  const mBounds = m => { const b = m.boundingBox(); return [b.min[0], b.min[1], b.min[2], b.max[0], b.max[1], b.max[2]]; };
 
   // OpenSCAD source of a node tree
   function scadOf(n, ind = '') {
@@ -327,6 +408,9 @@ const Shape3D = (() => {
       case 'hull': case 'union': case 'difference': case 'intersection': return `${ind}${n.op}() {\n${kids()}\n${ind}}`;
       case 'rings': return `${ind}hull() {\n${n.rings.map(r => `${i2}translate([0, 0, ${f(r.z)}]) linear_extrude(height=0.01) polygon(${'[' + r.pts.map(q => `[${f(q[0])}, ${f(q[1])}]`).join(', ') + ']'});`).join('\n')}\n${ind}}`;
       case 'color': return `${ind}color("${n.col.replace(/"/g, '')}")\n${kids()}`;
+      case 'warp': case 'refine': case 'smooth': return `${ind}// ${n.op}(): no OpenSCAD equivalent; the shape below is before it (the STL has it)\n${kids()}`;
+      case 'trim': { const l = Math.hypot(...n.normal) || 1, u = n.normal.map(x => x / l), c = n.offset + 1000;
+        return `${ind}intersection() {\n${kids()}\n${i2}translate(${fv(u.map(x => x * c))}) rotate(${fv([0, Math.acos(Math.max(-1, Math.min(1, u[2]))) * 180 / Math.PI, Math.atan2(u[1], u[0]) * 180 / Math.PI])}) cube(2000, center=true);\n${ind}}`; }
       case 'translate': return `${ind}translate(${fv(n.v)})\n${kids()}`;
       case 'scale': return `${ind}scale(${fv(n.v)})\n${kids()}`;
       case 'mirror': return `${ind}mirror(${fv(n.v)})\n${kids()}`;
@@ -375,6 +459,9 @@ CONTEXT: pcb = {w, h, thickness, shape:'round'|'ellipse'|'rect'|'rounded'|'polyg
     revolve(shape2d, {angle=360, fn}) (profile in X=radius / Y=height plane swept around Z — bands, rings, domes, curved straps),
     hull(...shapes) (convex hull — smooth organic pods from spheres/cylinders), union(...), difference(a, ...b), intersection(...)
     methods: .translate([x,y,z]) .rotate([ax,ay,az]) (degrees, X then Y then Z) or .rotate(deg, [axis]) .scale(s|[x,y,z]) .mirror([x,y,z]) .color('name') .union() .subtract() .intersect() .bounds {min,max,size}
+    shaping: .bend(R, {along:'y'|'x', z:0}) wraps the shape around a cylinder of radius R below it (wrist / arm / chest curve, ends drop; z keeps its length)
+      .smooth({refine=1, angle=60}) organic rounding of every sharp edge (subdivides to refine-mm triangles: slower, use ≥ 1) .refine(mm) .warp(p => {p[2] += …}) free deformation (change p in place)
+      .trim([nx,ny,nz], offset) keeps the side of a plane .mirrorCopy([1,0,0]) .array(n,[dx,dy,dz]) .grid(nx,ny,dx,dy) .polar(n,{angle=360,start=0}) (copies, unioned)
 HELPERS: board(extra=0) → PCB slab (outline offset by extra, z 0…thickness); partBoxes({clearance=0.5, side}) → union of component boxes (for cavities);
     resolution(fn) sets segments per circle (default adaptive 12–48; lower = faster); range(a,b,step); log(...); Math.*, PI.
 ENCLOSURE KIT (use these — the board then always fits):
@@ -386,8 +473,16 @@ ENCLOSURE KIT (use these — the board then always fits):
     wristCurve(span, zLow, R) → {sag, cutter}: subtract cutter for a concave underside (cylinder along X; rotate 90° for X straps)
     strapLugs({W, L, z, strap, style: 'slot'|'pins'|'bar', t, cx, cy}) → {add, cut};  snapStuds? use cylinders d 4.2 through the floor for ECG snap electrodes
     beltClip(W, L, zLow, cx, cy);  loop(L, z, cx, cy, R, r) (lanyard / key ring);  ventSlots(e, zTop, n);  mountEars(W, zLow, cx, cy) → {add, cut}
+    BATTERY: envelope({battery: 'lipo-502030' | 'lir2032' | '18650' …, batteryPlace: 'under' (on the floor below the board) | 'above' (over the parts) | 'beside' (+X)}) makes room
+      for a loose cell (e.battery = its box {x0,y0,z0,x1,y1,z1,w,l,t,shape}); batteryCradle(e) → ribs on the floor that hold it; batteryBox(e, clearance) → the cell as a solid;
+      battery(id) → its data. Ids and sizes: list_batteries (LIR / CR coins, LiPo pouches TTWWLL, 10440 … 21700). The fit check reports collisions with the battery.
+    text('LABEL', {size=5, depth=0.6, stroke, align:'center'|'left'|'right', mirror}) → flat 3D text (A-Z 0-9 - . / + : # …) on XY z 0…depth: subtract to engrave, union to emboss
+    honeycomb(w, l, {cell=4, wall=1.2, h=20, at:[x,y,z]}) → hexagon grille cutter;  screwBoss({x, y, z0, h, screw:'M2'|'M2.5'|'M3', insert}) → {add, cut} (heat-set insert or self-tap)
+    countersink(x, y, zTop, {d=3.2, head}) → cutter;  gap(a, b, max=10) → smallest distance between shapes (mm);  measure(s) → {volume_mm3, area_mm2, min, max, size}
     Pattern: shell = difference(union(softSolid(out, zLow, zTop+t), extras), cavity(e), cuts, connectorCuts(e), topWindows(e, zt)); shell = union(shell, boardPosts(e)); [base, lid] = splitLid(shell, e, e.zTop).
-    TEMPLATES: 35 ready scripts (10 wrist, 10 chest / ECG, 7 other body-worn, 8 boxes) — get them with enclosure_script_help({template: id}) and adapt.
+    TEMPLATES: 35 ready scripts (10 wrist, 10 chest / ECG, 7 other body-worn, 8 boxes). FASTEST: set_enclosure_script({template: id, params: {…}}) — no code needed
+      (params: shape, wall, r, rTop, rBot, curve, axis, lugs, strap, electrodes, minW, minL, flange, clip, loop, ears, vents, headroom, battery, batteryPlace, label …).
+      For more, get the script with enclosure_script_help({template: id}) and edit it.
 OUTPUT: part(name, shape, {color, explode:[x,y,z] (offset in the exploded preview), print:{rotate:[ax,ay,az]} (orientation for the STL, dropped onto the bed)}).
     Each part is one STL. If no part() is called, the returned shape becomes part "model".
 TIPS: hollow shells = difference(outer, inner) where inner is the same shape smaller by the wall; split into a "bottom" and a "top"/"lid" part along a Z plane with intersection(shell, cube) — add a lip so they snap/press-fit (0.15–0.25 mm clearance);
@@ -490,7 +585,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     L.push(`const minW = ${o.minW || 0}, minL = ${o.minL || 0};   // minimum outer size (e.g. electrode spacing)`);
     L.push(`const strapAxis = '${o.axis || 'y'}';         // direction the strap / body curve runs (x | y)`);
     if (o.lugs) L.push(`const strap = ${o.strap || 22}, lugStyle = '${o.lugs}';   // strap width, slot | pins | bar`);
-    L.push(`const e = envelope({ gap: 0.5, headroom: ${o.headroom ?? 0.8} });`);
+    L.push(`const e = envelope({ gap: 0.5, headroom: ${o.headroom ?? 0.8}${o.battery ? `, battery: '${o.battery}', batteryPlace: '${o.batteryPlace || 'under'}'` : ''} });${o.battery ? '   // loose battery (list: battery ids in enclosure_script_help)' : ''}`);
     L.push(`const extra = Math.max(t + ${o.margin ?? 1}, (minW - e.w) / 2, (minL - e.l) / 2);`);
     L.push(`const out = outlineAround(shape, e, extra, corner);`);
     L.push(`const B = out.bounds, BW = B[2] - B[0], BL = B[3] - B[1];`);
@@ -509,8 +604,8 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       L.push(`// snap-electrode studs (Ø3.9–4 mm studs → Ø4.2 holes) on the ${o.studsTop ? 'top (lead wires snap on)' : 'skin side'}`);
       const lay = { '3lead': `[[B[0] + 9, e.cy], [B[2] - 9, e.cy], [e.cx, B[1] + 8]]`, '2bar': `[[B[0] + 9, e.cy], [B[2] - 9, e.cy]]`, '5lead': `[[B[0] + 9, B[1] + 9], [B[2] - 9, B[1] + 9], [B[0] + 9, B[3] - 9], [B[2] - 9, B[3] - 9], [e.cx, B[1] + 8]]`, '4square': `[[B[0] + 9, B[1] + 9], [B[2] - 9, B[1] + 9], [B[0] + 9, B[3] - 9], [B[2] - 9, B[3] - 9]]`, 'tri': `[90, 210, 330].map(a => [e.cx + (Math.min(BW, BL) / 2 - 9) * Math.cos(a * PI / 180), e.cy + (Math.min(BW, BL) / 2 - 9) * Math.sin(a * PI / 180)])` }[o.electrodes];
       L.push(`const studs = ${lay};`);
-      if (o.studsTop) L.push(`for (const [x, y] of studs) { adds.push(cylinder({ d: 9, h: 1.5 }).translate([x, y, zt - 0.01])); cuts.push(cylinder({ d: 4.2, h: t + 2 }).translate([x, y, zt - t - 0.5])); }`);
-      else L.push(`for (const [x, y] of studs) { adds.push(cylinder({ d: 9, h: 1.5 }).translate([x, y, zLow - 1.5])); cuts.push(cylinder({ d: 4.2, h: e.zFloor - zLow + 2.5 }).translate([x, y, zLow - 2])); }`);
+      if (o.studsTop) L.push(`for (const [x, y] of studs) { adds.push(cylinder({ d: 9, h: 1.8 }).translate([x, y, zt - 0.3])); cuts.push(cylinder({ d: 4.2, h: t + 2 }).translate([x, y, zt - t - 0.5])); }`);
+      else L.push(`for (const [x, y] of studs) { adds.push(cylinder({ d: 9, h: 1.8 }).translate([x, y, zLow - 1.5])); cuts.push(cylinder({ d: 4.2, h: e.zFloor - zLow + 2.5 }).translate([x, y, zLow - 2])); }`);
     }
     if (o.clip) L.push(`adds.push(beltClip(BW, BL, zLow, e.cx, e.cy));   // spring clip on the back`);
     if (o.loop) L.push(`adds.push(loop(BL, (zLow + zt) / 2, e.cx, e.cy, ${o.loopR || 4}, ${o.loopr || 1.6}));   // lanyard / key-ring loop`);
@@ -519,6 +614,8 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     L.push(`const inner = out.offset(-t);                    // hollow inside, following the outer shape`);
     L.push(`let shell = difference(union(body, ...adds), hollow(out, e, t, roundTop), ...cuts, cutter, connectorCuts(e), topWindows(e, zt));`);
     L.push(`shell = union(shell, boardPosts(e));`);
+    if (o.battery) L.push(`shell = union(shell, batteryCradle(e));                // ribs on the floor that hold the cell`);
+    if (o.label) L.push(`shell = difference(shell, text('${o.label}', { size: ${o.labelSize || 4}, depth: 0.6 }).translate([e.cx, e.cy + ${o.labelY || 0}, zt - 0.6]));   // engraved on top`);
     L.push(`const [base, lid] = splitLid(shell, e, e.zTop, { fit: 0.2, lipH: ${o.lipH ?? 1.6}, inner });`);
     L.push(`part('${o.baseName || 'base'}', base, { color: '${o.c1 || 'dimgray'}' });`);
     L.push(`part('${o.lidName || 'lid'}', lid, { color: '${o.c2 || 'gainsboro'}', explode: [0, 0, 14], print: { rotate: [180, 0, 0] } });`);
@@ -566,6 +663,32 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     { id: 'box-slim', cat: 'Box', name: 'Slim card', desc: 'thin low-profile case', shape: 'rect', r: 2, wall: 1.4, headroom: 0.5, rTop: 1, rBot: 0.6 },
   ];
   for (const t of TEMPLATES) t.code = recipe(t);
+  // a template with some of its settings changed (the AI sends {template, params} instead of a whole script)
+  const PARAMS = {
+    shape: ['rect', 'oval', 'circle', 'pill', 'hex', 'octagon', 'squircle'], wall: 'mm (1.2-3)', r: 'corner radius mm (rect)', rTop: 'top edge rounding mm', rBot: 'bottom edge rounding mm',
+    curve: 'concave underside radius mm (wrist 30-40, ankle 45, arm 50, head 80; 0 = flat)', axis: ['x', 'y'], lugs: ['slot', 'pins', 'bar', 'none'], strap: 'strap width mm', lugT: 'lug thickness mm',
+    electrodes: ['none', '3lead', '2bar', '5lead', '4square', 'tri'], studsTop: 'bool: snap studs on top (lead wires)', minW: 'min outer width mm', minL: 'min outer length mm', flange: 'adhesive flange width mm (0 = none)',
+    clip: 'bool: belt clip', loop: 'bool: lanyard loop', ears: 'bool: screw ears', vents: 'number of vent slots (0 = none)', headroom: 'mm above the tallest part', margin: 'extra mm around the board', lipH: 'lid lip height mm',
+    battery: 'battery id (list_batteries) or none', batteryPlace: ['under', 'above', 'beside'], label: 'text engraved on top (A-Z 0-9 - . /)', labelSize: 'text height mm', res: 'segments per circle (16-64)', c1: 'base colour', c2: 'lid colour',
+  };
+  function fromTemplate(id, params = {}) {
+    const t = TEMPLATES.find(x => x.id === id);
+    if (!t) throw new Error(`Unknown template "${id}". Templates: ${TEMPLATES.map(x => x.id).join(', ')}`);
+    const o = Object.assign({}, t);
+    for (const [k, v] of Object.entries(params || {})) {
+      if (!(k in PARAMS)) throw new Error(`Unknown template parameter "${k}". Known: ${Object.keys(PARAMS).join(', ')}`);
+      const spec = PARAMS[k];
+      if (v === null || v === '' || v === 'none' || v === false) { delete o[k]; continue; }
+      if (Array.isArray(spec)) { if (!spec.includes(v)) throw new Error(`${k} must be one of ${spec.join(', ')}`); o[k] = v; }
+      else if (/^bool/.test(spec)) o[k] = !!v;
+      else if (k === 'battery') o[k] = Enclosure.battery(v).id;
+      else if (k === 'label') { const L = String(v).toUpperCase(); if (!/^[A-Z0-9 .\-\/+:#()=*,?_]{1,24}$/.test(L)) throw new Error('label: 1-24 characters A-Z 0-9 and - . / + : # ( )'); o[k] = L; }
+      else if (k === 'c1' || k === 'c2') { if (!/^#?[\w]{1,20}$/.test(String(v))) throw new Error(k + ': a colour name or #rrggbb'); o[k] = String(v); }
+      else { const n = +v; if (!isFinite(n) || n < 0 || n > 400) throw new Error(`${k} must be a number (mm)`); o[k] = n; }
+    }
+    o.name = t.name + (Object.keys(params || {}).length ? ' (customised)' : '');
+    return recipe(o);
+  }
 
   // legacy names
   Object.assign(EXAMPLES, { wristband: TEMPLATES.find(t => t.id === 'wrist-whoop').code, ecg: TEMPLATES.find(t => t.id === 'chest-ecg3').code, box: TEMPLATES.find(t => t.id === 'box-rounded').code });
@@ -591,7 +714,17 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
   }
 
   function run(code, ctx = {}, opts = {}) {
-    const t0 = Date.now(), parts = [], logs = [];
+    // fast kernel unless asked for the BSP one (or it is not loaded); a kernel failure retries once with the BSP
+    if (MF && opts.kernel !== 'bsp') { try { return run1(code, ctx, Object.assign({}, opts, { kernel: 'manifold' })); } catch (e) { if (!e.kernel) throw e; } }
+    return run1(code, ctx, Object.assign({}, opts, { kernel: 'bsp' }));
+  }
+  function run1(code, ctx = {}, opts = {}) {
+    MK = opts.kernel === 'manifold' ? [] : null;
+    try { return run2(code, ctx, opts); }
+    finally { if (MK) for (const m of MK) { try { m.delete(); } catch (e) { } } MK = null; }
+  }
+  function run2(code, ctx = {}, opts = {}) {
+    const t0 = Date.now(), parts = [], logs = [], extras = [];
     budget = t0 + (opts.timeLimitMs || 90000); K().guard.deadline = budget;
     HQ3 = opts.quality === 'high'; K().setQuality(HQ3 ? 'high' : 'preview');
     FN = 0;
@@ -619,19 +752,33 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     // Space the board needs: PCB outline + every part box (connectors that open outward excepted), plus a gap.
     K2.envelope = (o = {}) => {
       const gap = o.gap ?? 0.5, head = o.headroom ?? 0.8, standoff = o.standoff ?? 1.2;
-      if (!pcb) { const w = o.w ?? 32, l = o.l ?? 24; return { w, l, cx: 0, cy: 0, x0: -w / 2, y0: -l / 2, x1: w / 2, y1: l / 2, top: 6, under: 0, zFloor: -standoff, zTop: 6 + head, plugs: [], leds: [], buttons: [], gap }; }
-      const xs = pcb.outline.map(q => q[0]), ys = pcb.outline.map(q => q[1]);
+      // no board yet: a w × l (default 32 × 24) cavity 6 mm tall, as if it held a bare board of that size
+      const pb = pcb || (() => { const w = (o.w ?? 32) / 2 - gap, l = (o.l ?? 24) / 2 - gap; return { outline: [[-w, -l], [w, -l], [w, l], [-w, l]], parts: [], thickness: 6 }; })();
+      const xs = pb.outline.map(q => q[0]), ys = pb.outline.map(q => q[1]);
       let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
       // side: 'top' / 'bottom' — only that side's parts; parts / exclude: by reference
       const only = o.parts ? new Set(o.parts) : null, skip = new Set(o.exclude || []);
-      const use = pcb.parts.filter(p => (!o.side || o.side === 'both' || p.side === o.side) && (!only || only.has(p.ref)) && !skip.has(p.ref));
+      const use = pb.parts.filter(p => (!o.side || o.side === 'both' || p.side === o.side) && (!only || only.has(p.ref)) && !skip.has(p.ref));
       for (const p of use) if (!(p.plug && p.edge)) { x0 = Math.min(x0, p.x0); x1 = Math.max(x1, p.x1); y0 = Math.min(y0, p.y0); y1 = Math.max(y1, p.y1); }
       x0 -= gap; y0 -= gap; x1 += gap; y1 += gap;
-      const top = Math.max(pcb.thickness, ...use.filter(p => p.side === 'top').map(p => pcb.thickness + p.h));
-      const under = Math.max(0, ...use.filter(p => p.side === 'bottom').map(p => p.h));
-      return { w: x1 - x0, l: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, x0, y0, x1, y1, top, under, zFloor: -(under + standoff), zTop: top + head, gap,
-        plugs: pcb.parts.filter(p => p.plug && p.edge), leds: pcb.parts.filter(p => p.side === 'top' && (/led/i.test(p.type) || /\bled\b/i.test(String(p.value || '')))),
-        buttons: pcb.parts.filter(p => p.side === 'top' && /switch|button|tact/i.test(p.type)) };
+      let top = Math.max(pb.thickness, ...use.filter(p => p.side === 'top').map(p => pb.thickness + p.h));
+      let under = Math.max(0, ...use.filter(p => p.side === 'bottom').map(p => p.h)), bat = null;
+      if (o.battery) {
+        // a loose cell: 'under' the board (on the floor), 'above' the parts (under the lid) or 'beside' the board (+X, on the floor)
+        const b = Enclosure.battery(o.battery), place = o.batteryPlace || 'under', bottomH = under;
+        if (!['under', 'above', 'beside'].includes(place)) throw new Error("envelope(): batteryPlace must be 'under', 'above' or 'beside'");
+        const [bw, bl] = ((x1 - x0) >= (y1 - y0)) === (b.w >= b.l) ? [b.w, b.l] : [b.l, b.w], bx = place === 'beside' ? x1 + 1.5 : (x0 + x1) / 2 - bw / 2, by = (y0 + y1) / 2 - bl / 2;
+        let z0, z1;
+        if (place === 'under') { under = Math.max(under, bottomH + 0.5 + b.t - standoff); z1 = -(bottomH + 0.3); z0 = z1 - b.t; }
+        else if (place === 'above') { z0 = top + 0.3; z1 = z0 + b.t; top = z1; }
+        else { z0 = -(under + standoff) + 0.2; z1 = z0 + b.t; top = Math.max(top, z1); }
+        bat = { kind: 'battery', id: b.id, name: b.name, shape: b.kind, mAh: b.mAh, place, x0: bx, y0: by, x1: bx + bw, y1: by + bl, z0, z1, cx: bx + bw / 2, cy: by + bl / 2, w: bw, l: bl, t: b.t };
+        x0 = Math.min(x0, bat.x0 - gap); x1 = Math.max(x1, bat.x1 + gap); y0 = Math.min(y0, bat.y0 - gap); y1 = Math.max(y1, bat.y1 + gap);
+        if (!extras.some(x => x.id === bat.id && Math.abs(x.z0 - bat.z0) < 1e-6 && Math.abs(x.x0 - bat.x0) < 1e-6)) extras.push(bat);
+      }
+      return { w: x1 - x0, l: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, x0, y0, x1, y1, top, under, zFloor: -(under + standoff), zTop: top + head, gap, battery: bat,
+        plugs: pb.parts.filter(p => p.plug && p.edge), leds: pb.parts.filter(p => p.side === 'top' && (/led/i.test(p.type) || /\bled\b/i.test(String(p.value || '')))),
+        buttons: pb.parts.filter(p => p.side === 'top' && /switch|button|tact/i.test(p.type)) };
     };
     // 2D outline of a given style that contains the envelope rectangle plus a margin (centred on the envelope)
     K2.outlineAround = (style, e, m = 2, r = 3) => {
@@ -674,6 +821,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       for (const [x, y] of spots) {
         if (!inPoly(x, y)) continue;
         if (pcb.parts.some(p => p.side === 'bottom' && x > p.x0 - d / 2 - 0.3 && x < p.x1 + d / 2 + 0.3 && y > p.y0 - d / 2 - 0.3 && y < p.y1 + d / 2 + 0.3)) continue;
+        const B = e.battery; if (B && B.z1 < 0.1 && x > B.x0 - d / 2 - 0.3 && x < B.x1 + d / 2 + 0.3 && y > B.y0 - d / 2 - 0.3 && y < B.y1 + d / 2 + 0.3) continue;   // the cell is there
         let post = cylinder({ d: pcb.holes.length ? Math.max(d, 4.5) : d, h: -e.zFloor + 0.01 }).translate([x, y, e.zFloor - 0.01]);
         if (pcb.holes.length) post = difference(post, cylinder({ d: 2.5, h: 20, center: true }).translate([x, y, e.zFloor]));
         list.push(post);
@@ -757,9 +905,64 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     // lanyard / key-ring loop on the +Y end
     K2.loop = (L, z, cx = 0, cy = 0, R = 4, r = 1.6) => torus({ R, r, fn: 48, fn2: 16 }).translate([cx, cy + L / 2 + R - r * 0.5, z]);   // flat ring tab (prints without support)
     // ventilation slots through the lid
-    K2.ventSlots = (e, zt, n = 5) => { const w = Math.min(e.w * 0.5, 30), list = []; for (let k = 0; k < n; k++) list.push(roundedBox([w, 1.4, 30], 0.6).translate([e.cx, e.cy - (n - 1) * 1.8 + k * 3.6, zt])); return union(list); };
+    // (only through the lid: from just below the split to above the top, never down into the base and its floor)
+    K2.ventSlots = (e, zt, n = 5) => { const w = Math.min(e.w * 0.5, 30), z0 = Math.min(e.zTop, zt - 1) - 0.3, h = zt + 2 - z0, list = []; for (let k = 0; k < n; k++) list.push(roundedBox([w, 1.4, h], 0.6).translate([e.cx, e.cy - (n - 1) * 1.8 + k * 3.6, z0 + h / 2])); return union(list); };
     // mounting ears with screw holes on ±X
     K2.mountEars = (W, zb, cx = 0, cy = 0, th = 3) => { const add = [], cut = []; for (const s of [-1, 1]) { add.push(roundedBox([12, 14, th], 1.2).translate([cx + s * (W / 2 + 5), cy, zb + th / 2])); cut.push(cylinder({ d: 3.4, h: 20, center: true }).translate([cx + s * (W / 2 + 6), cy, zb])); } return { add: union(add), cut: union(cut) }; };
+    // ---------- more modelling helpers ----------
+    // the cell as a solid (show it, or subtract it with a clearance for a pocket); a floor cradle that keeps it in place
+    K2.batteryBox = (e, c = 0) => {
+      const B = e && e.battery; if (!B) throw new Error('batteryBox(e): call envelope({battery: id}) first');
+      if (B.shape === 'coin') return cylinder({ d: B.w + 2 * c, h: B.t + 2 * c }).translate([B.cx, B.cy, B.z0 - c]);
+      if (B.shape === 'cyl') return cylinder({ d: B.t + 2 * c, h: Math.max(B.w, B.l) + 2 * c, center: true }).rotate(B.w > B.l ? [0, 90, 0] : [90, 0, 0]).translate([B.cx, B.cy, (B.z0 + B.z1) / 2]);
+      return roundedBox([B.w + 2 * c, B.l + 2 * c, B.t + 2 * c], Math.min(0.8, B.t / 2 - 0.01 + c)).translate([B.cx, B.cy, (B.z0 + B.z1) / 2]);
+    };
+    K2.batteryCradle = (e, o = {}) => {
+      const B = e && e.battery; if (!B || B.place === 'above') return null;
+      const c = o.clearance ?? 0.4, w = o.wall ?? 1.2, h = Math.min(o.height ?? 2.5, B.t * 0.7) + 0.3, z = e.zFloor - 0.3;   // 0.3 mm into the floor: one solid with it
+      if (B.shape === 'coin') return difference(cylinder({ d: B.w + 2 * (c + w), h }), cylinder({ d: B.w + 2 * c, h: h + 2 }).translate([0, 0, -1]), cube([B.w * 0.5, B.w + 10, h + 2], { center: true }).translate([0, 0, h / 2])).translate([B.cx, B.cy, z]);   // open on two sides for the tabs
+      const W = B.w + 2 * c, L = B.l + 2 * c, a = Math.min(8, W / 3), b = Math.min(8, L / 3), ribs = [];
+      // L-shaped corner ribs (the long leg covers the corner, so each L is one piece)
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) ribs.push(cube([a + w, w, h]).translate([sx < 0 ? -W / 2 - w : W / 2 - a, sy < 0 ? -L / 2 - w : L / 2, 0]), cube([w, b, h]).translate([sx < 0 ? -W / 2 - w : W / 2, sy < 0 ? -L / 2 : L / 2 - b, 0]));
+      return union(ribs).translate([B.cx, B.cy, z]);
+    };
+    // text from the stroke font (A-Z, 0-9, - . / + : # ...): flat on XY, z 0 ... depth, centred on [0, 0]. Emboss: union it onto a
+    // face; engrave: subtract it. o: {size (cap height, mm), depth, stroke (line width), align: 'center' | 'left' | 'right', mirror}
+    K2.text = (str, o = {}) => {
+      const size = num(o.size ?? 5, 'size'), depth = num(o.depth ?? 0.6, 'depth'), sw = Math.max(0.3, num(o.stroke ?? Math.max(0.4, size * 0.14), 'stroke')), r = sw / 2;
+      const lines = StrokeFont.strokeText(String(str), 0, 0, size, o.align === 'left' ? 'start' : o.align === 'right' ? 'end' : 'middle', !!o.mirror), segs = [];
+      const dot = api2.circle(r, { fn: 10 });
+      for (const L of lines) {
+        if (L.length === 1) { segs.push(extrude(dot.translate([L[0][0], -L[0][1] - size / 2]), depth)); continue; }
+        for (let i = 0; i < L.length - 1; i++) { const a = L[i], b = L[i + 1]; segs.push(extrude(api2.hull2d(dot.translate([a[0], -a[1] - size / 2]), dot.translate([b[0], -b[1] - size / 2])), depth)); }
+      }
+      if (!segs.length) throw new Error('text(): nothing to write');
+      return union(segs);
+    };
+    // hexagon vent / speaker grille cutter: a w x l field of hexagonal holes (cell = across flats), h tall, centred on o.at = [x, y, z]
+    K2.honeycomb = (w, l, o = {}) => {
+      const cell = o.cell ?? 4, wall = o.wall ?? 1.2, h = o.h ?? 20, [x, y, z] = o.at || [0, 0, 0], R = cell / Math.sqrt(3), dx = cell + wall, dy = (cell + wall) * Math.sqrt(3) / 2, L = [];
+      const hex = extrude(api2.polygon([0, 60, 120, 180, 240, 300].map(a => [R * Math.cos((a + 30) * Math.PI / 180), R * Math.sin((a + 30) * Math.PI / 180)])), h, { center: true });
+      for (let j = 0, yy = -l / 2 + R; yy <= l / 2 - R + 1e-6; j++, yy += dy) for (let xx = -w / 2 + cell / 2 + (j % 2 ? dx / 2 : 0); xx <= w / 2 - cell / 2 + 1e-6; xx += dx) L.push(hex.translate([x + xx, y + yy, z]));
+      if (!L.length) throw new Error('honeycomb(): the field is smaller than one cell');
+      return union(L);
+    };
+    // screw boss: {x, y, z0 (bottom), h, screw: 'M2' | 'M2.5' | 'M3', insert: true (heat-set insert hole) | false (self-tapping pilot)} -> {add, cut}
+    K2.screwBoss = (o = {}) => {
+      const S = { M2: [1.6, 3.2], 'M2.5': [2.0, 3.6], M3: [2.5, 4.0] }[o.screw || 'M3']; if (!S) throw new Error("screwBoss(): screw must be 'M2', 'M2.5' or 'M3'");
+      const hole = o.insert ? S[1] : S[0], d = o.d ?? hole + 3.2, h = num(o.h ?? 5, 'h'), x = o.x || 0, y = o.y || 0, z0 = o.z0 || 0, depth = o.insert ? Math.min(h, 5) : h;
+      return { add: cylinder({ d, h }).translate([x, y, z0]), cut: cylinder({ d: hole, h: depth + 0.01 }).translate([x, y, z0 + h - depth]) };
+    };
+    // countersunk screw hole down through a plate whose top is at z: {d (shank), head, depth}
+    K2.countersink = (x, y, z, o = {}) => { const d = o.d ?? 3.2, hd = o.head ?? d * 2, dep = o.depth ?? 20; return union(cylinder({ d, h: dep }).translate([x, y, z - dep]), cylinder({ d1: d, d2: hd, h: (hd - d) / 2 + 0.01 }).translate([x, y, z - (hd - d) / 2])); };
+    // measurements while modelling: smallest distance between two shapes (searched up to max mm), volume / area / bounds
+    K2.gap = (a, b, max = 10) => { if (!MK) throw new Error('gap() needs the fast 3D kernel'); return +evalM(need3(a, 'gap')).minGap(evalM(need3(b, 'gap')), max).toFixed(3); };
+    K2.measure = s => {
+      const n = need3(s, 'measure');
+      if (MK) { const m = evalM(n), b = mBounds(m); return { volume_mm3: +m.volume().toFixed(2), area_mm2: +m.surfaceArea().toFixed(2), min: b.slice(0, 3), max: b.slice(3), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] }; }
+      const P = evalNode(n), b = bboxOf(P); return { volume_mm3: +volumeOf(P).toFixed(2), min: b.slice(0, 3), max: b.slice(3), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]] };
+    };
+    K2.battery = id => Enclosure.battery(id);
     const names = Object.keys(lib);
     let ret;
     try {
@@ -768,15 +971,43 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       ret = fn(...names.map(k => lib[k]), { log: lib.log, warn: lib.log, error: lib.log });
       if (!parts.length && ret instanceof Shape) lib.part('model', ret);
       if (!parts.length) throw new Error('The script made no parts — call part("name", shape) (or return a shape).');
-      for (const p of parts) { p.polys = K().fillHoles(K().zipSeams(K().repair(p.shape.polys.map(q => q.clone())))); if (!p.polys.length) throw new Error(`part "${p.name}" is empty (check the boolean operations / positions)`); }
+      for (const p of parts) {
+        if (MK) {
+          p.m = evalM(p.shape.node);
+          // slivers under 1 mm³ left by cuts that graze a curved wall are debris, not features: drop them
+          const d = p.m.decompose(); d.forEach(kept);
+          if (d.length > 1) { const big = d.filter(x => x.volume() >= 1); if (big.length && big.length < d.length) { p.m = kept(MF.Manifold.compose(big)); p.dropped = d.length - big.length; } }
+          p.polys = p.m.isEmpty() ? [] : polysOfM(p.m);
+        }
+        else p.polys = K().fillHoles(K().zipSeams(K().repair(p.shape.polys.map(q => q.clone()))));
+        if (!p.polys.length) throw new Error(`part "${p.name}" is empty (check the boolean operations / positions)`);
+      }
     } catch (e) {
+      // errors from inside the WASM kernel (not the script's own): the caller retries with the BSP kernel
+      if (MK && (!(e instanceof Error) || /Binding|wasm|memory|abort|ManifoldError|deleted|RuntimeError/i.test(String(e && (e.name + e.message))))) { budget = null; K().guard.deadline = 0; HQ3 = false; K().setQuality('preview'); throw Object.assign(new Error('3D kernel: ' + (e && e.message || e)), { kernel: true }); }
       const m = String(e && e.stack || '').match(/eval at [^\n]*?<anonymous>:(\d+):(\d+)/) || String(e && e.stack || '').match(/^\s*at [^\n(]*\(?<anonymous>:(\d+):(\d+)/m);
       const err = new Error((e && e.message || String(e)) + (m ? ` (script line ${+m[1] - 3})` : ''));
       err.line = m ? +m[1] - 3 : null; err.logs = logs; budget = null; K().guard.deadline = 0; HQ3 = false; K().setQuality('preview'); throw err;
     }
     // fit report: shells must not cut into the board or the components
     const report = { collisions: [], warnings: [] };
-    if (pcb && opts.check !== false) {
+    const bats = extras.filter(x => x.kind === 'battery');
+    if (pcb && opts.check !== false && MK) {
+      // exact: volume of each printed part inside the board / each component box / the battery
+      const M3 = MF.Manifold, tg = [{ with: 'PCB', m: xsec(new Shape2D(pcb.outline)).extrude(pcb.thickness) }];
+      kept(tg[0].m);
+      for (const q of pcb.parts.slice(0, 300)) { const w = Math.max(0.05, q.x1 - q.x0), d = Math.max(0.05, q.y1 - q.y0), h = Math.max(0.05, q.h); tg.push({ with: q.ref, m: kept(M3.cube([w, d, h]).translate([q.x0, q.y0, q.side === 'top' ? pcb.thickness : -h])) }); }
+      for (const b of bats) tg.push({ with: 'battery ' + b.name, m: b.shape === 'coin' ? kept(kept(M3.cylinder(b.t, b.w / 2, b.w / 2, 64)).translate([b.cx, b.cy, b.z0]))
+        : b.shape === 'cyl' ? kept(kept(kept(M3.cylinder(Math.max(b.w, b.l), b.t / 2, b.t / 2, 64, true)).rotate(b.w > b.l ? [0, 90, 0] : [90, 0, 0])).translate([b.cx, b.cy, (b.z0 + b.z1) / 2])) : kept(M3.cube([b.w, b.l, b.t]).translate([b.x0, b.y0, b.z0])) });
+      for (const p of parts) {
+        const pb = mBounds(p.m);
+        for (const t of tg) {
+          if (!overlap(pb, mBounds(t.m))) continue;
+          const v = kept(p.m.intersect(t.m)).volume();
+          if (v > 0.5) report.collisions.push({ part: p.name, with: t.with, overlap_mm3: +v.toFixed(1) });
+        }
+      }
+    } else if (pcb && opts.check !== false) {
       // sample points inside the board and each component box; count those that fall inside a printed part
       const inPoly = (x, y, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, yi] = P[i], [xj, yj] = P[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
       const targets = [];
@@ -788,6 +1019,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
         for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++) pts.push([p.x0 + w * (i + 0.5) / nx, p.y0 + d * (j + 0.5) / ny, z0 + p.h * (k + 0.5) / nz]);
         targets.push({ with: p.ref, pts, cell: w * d * p.h / (nx * ny * nz) });
       }
+      for (const b of bats) { const pts = []; for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) for (let k = 0; k < 3; k++) { const P = [b.x0 + b.w * (i + 0.5) / 5, b.y0 + b.l * (j + 0.5) / 5, b.z0 + b.t * (k + 0.5) / 3], r = b.shape === 'coin' ? Math.hypot(P[0] - b.cx, P[1] - b.cy) / (b.w / 2) : b.shape === 'cyl' ? (b.w > b.l ? Math.hypot(P[1] - b.cy, P[2] - (b.z0 + b.z1) / 2) : Math.hypot(P[0] - b.cx, P[2] - (b.z0 + b.z1) / 2)) / (b.t / 2) : 0; if (r <= 1) pts.push(P); } targets.push({ with: 'battery ' + b.name, pts, cell: b.w * b.l * b.t / 75 }); }
       for (const p of parts) {
         const pb = bboxOf(p.polys), T = K().triangles(p.polys).map(([a, b, c]) => [a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z]);
         // bucket triangles on a Y-Z grid: a ray along X only meets the triangles of its own cell
@@ -849,6 +1081,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       const pc = [pcb.outline.reduce((a, q) => a + q[0], 0) / pcb.outline.length, pcb.outline.reduce((a, q) => a + q[1], 0) / pcb.outline.length];
       const boardPts = pcb.outline.map(q => [q[0] + (pc[0] - q[0]) * 0.03, q[1] + (pc[1] - q[1]) * 0.03, pcb.thickness / 2]).concat([[pc[0], pc[1], pcb.thickness / 2]]);
       if (boardPts.some(P => escapes(P) >= 3)) out.push('PCB');
+      for (const b of bats) if (escapes([b.cx, b.cy, (b.z0 + b.z1) / 2]) >= 3) out.push('battery');
       for (const p of pcb.parts) {
         if (p.plug && p.edge) continue;
         // the part's box is only an estimate (its corners stick out of curved walls and floors): it is outside when its
@@ -868,13 +1101,17 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     const { V } = K();
     const out = parts.map(p => {
       const b = bboxOf(p.polys), tris = K().triangles(p.polys);
-      const edges = new Map(), q = v => `${Math.round(v.x * 1e4)},${Math.round(v.y * 1e4)},${Math.round(v.z * 1e4)}`;
-      for (const [a, bb, c] of tris) for (const [u, w] of [[a, bb], [bb, c], [c, a]]) { const ku = q(u), kw = q(w); if (ku === kw) continue; const k = ku < kw ? ku + '|' + kw : kw + '|' + ku; edges.set(k, (edges.get(k) || 0) + 1); }
-      let open = 0; for (const n of edges.values()) if (n % 2) open++;
-      // separate solid pieces (polygons sharing a vertex belong together): a printed part should be one piece
-      const par = new Map(), find = k => { while (par.get(k) !== k) { par.set(k, par.get(par.get(k))); k = par.get(k); } return k; };
-      for (const pl of p.polys) { const ks = pl.v.map(q); for (const k of ks) if (!par.has(k)) par.set(k, k); const r0 = find(ks[0]); for (const k of ks) { const r1 = find(k); if (r1 !== r0) par.set(r1, r0); } }
-      const pieces = new Set([...par.keys()].map(find)).size;   // odd = a real hole; 4 = closed (non-manifold) seam
+      let open = 0, pieces = 1;
+      if (p.m) { const d = p.m.decompose(); pieces = d.length; for (const x of d) x.delete(); if (p.dropped) report.warnings.push(`part "${p.name}": ${p.dropped} sliver${p.dropped > 1 ? 's' : ''} under 1 mm³ removed`); }   // Manifold output is watertight by construction
+      else {
+        const edges = new Map(), q = v => `${Math.round(v.x * 1e4)},${Math.round(v.y * 1e4)},${Math.round(v.z * 1e4)}`;
+        for (const [a, bb, c] of tris) for (const [u, w] of [[a, bb], [bb, c], [c, a]]) { const ku = q(u), kw = q(w); if (ku === kw) continue; const k = ku < kw ? ku + '|' + kw : kw + '|' + ku; edges.set(k, (edges.get(k) || 0) + 1); }
+        for (const n of edges.values()) if (n % 2) open++;
+        // separate solid pieces (polygons sharing a vertex belong together): a printed part should be one piece
+        const par = new Map(), find = k => { while (par.get(k) !== k) { par.set(k, par.get(par.get(k))); k = par.get(k); } return k; };
+        for (const pl of p.polys) { const ks = pl.v.map(q); for (const k of ks) if (!par.has(k)) par.set(k, k); const r0 = find(ks[0]); for (const k of ks) { const r1 = find(k); if (r1 !== r0) par.set(r1, r0); } }
+        pieces = new Set([...par.keys()].map(find)).size;   // odd = a real hole; 4 = closed (non-manifold) seam
+      }
       // print orientation: rotate, then sit on the bed (z min = 0), centred on x/y
       let tf = null;
       if (p.print && p.print.rotate) {
@@ -895,8 +1132,8 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     const scad = ['// CircuitPilot custom enclosure — OpenSCAD source generated from the 3D script (mm).', '// Coordinates: origin = PCB outline centre, Z = 0 at the PCB bottom.', '// Render one part: put ! in front of its call at the bottom, F6, then export STL.', '']
       .concat(parts.map(p => `module ${p.name.replace(/[^\w]/g, '_')}() {\n${scadOf(p.shape.node, '  ')}\n}\n`))
       .concat(parts.map(p => `${p.color ? `color("${p.color}") ` : ''}${p.explode ? `translate(${fv(p.explode)}) ` : ''}${p.name.replace(/[^\w]/g, '_')}();`)).join('\n') + '\n';
-    return { parts: out, scad, logs, report, ms: Date.now() - t0 };
+    return { parts: out, scad, logs, report, extras: extras.map(x => Object.assign({}, x)), kernel: MK ? 'manifold' : 'bsp', ms: Date.now() - t0 };
   }
-  return { run, context, HELP, EXAMPLES, TEMPLATES, Shape, Shape2D };
+  return { run, context, useManifold, get fast() { return !!MF; }, HELP, EXAMPLES, TEMPLATES, PARAMS, fromTemplate, recipe, Shape, Shape2D };
 })();
 if (typeof module !== 'undefined') module.exports = Shape3D;

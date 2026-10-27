@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 
-const FILES = [['lib.js', 'Lib'], ['model.js', 'Model'], ['pcb.js', 'Pcb'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['kicad.js', 'KiCad'],
+const FILES = [['lib.js', 'Lib'], ['model.js', 'Model'], ['strokefont.js', 'StrokeFont'], ['pcb.js', 'Pcb'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['kicad.js', 'KiCad'],
   ['openlib.js', 'OpenLib'], ['easyeda.js', 'EasyEDA'], ['exports.js', 'Exports'], ['blocks.js', 'Blocks'], ['engine.js', 'Engine']];
 
 export function loadEngine(root, log = () => { }) {
@@ -13,6 +13,11 @@ export function loadEngine(root, log = () => { }) {
   });
   for (const [file, name] of FILES)
     vm.runInContext(fs.readFileSync(path.join(root, 'js', file), 'utf8') + `\n;globalThis.${name} = ${name};`, ctx, { filename: file });
+  // fast 3D kernel (Manifold, WASM) for the enclosure scripts; ready within ms, until then the BSP kernel is used
+  try {
+    vm.runInContext(fs.readFileSync(path.join(root, 'js', 'vendor', 'manifold.js'), 'utf8'), ctx, { filename: 'manifold.js' });
+    ctx.ManifoldModule({ wasmBinary: fs.readFileSync(path.join(root, 'js', 'vendor', 'manifold.wasm')) }).then(m => ctx.Shape3D.useManifold(m), e => log('3D kernel not loaded: ' + e.message));
+  } catch (e) { log('3D kernel not loaded: ' + e.message); }
   // open-library part lists straight from the app folder
   ctx.OpenLib.readIndex = async () => fs.readFileSync(path.join(root, 'data', 'open-parts.txt'), 'utf8');
   ctx.KiCad.readIndex = async () => fs.readFileSync(path.join(root, 'data', 'kicad-footprints.txt'), 'utf8');

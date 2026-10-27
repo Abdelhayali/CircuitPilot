@@ -293,14 +293,14 @@ const App = (() => {
       if (v === 'schematic') { const i = Math.max(0, Math.min(Sch.sheets().length - 1, (+a.sheet || 1) - 1)); return toAIImage(await DocView.svgToPng(Sch.exportSVG(i), 3000, '#ffffff', 20), false, big); }
       if (v === 'pcb') { Pcb.render(); return toAIImage(await DocView.svgToPng(Pcb.exportSVG(), 3000, '#000', 20), false, big); }
       if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', 2400, 1600); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, false, big); }
-      if (v === 'enclosure') { const r = await EncView.snapshot({ w: 2400, h: 1600, explode: !!a.exploded }); if (!r) throw new Error('No enclosure yet'); return toAIImage(r, false, big); }
+      if (v === 'enclosure') { const r = await EncView.snapshot({ w: 2400, h: 1600, explode: !!a.exploded, angle: a.angle, section: a.section, overview: !!a.overview }); if (!r) throw new Error('No enclosure yet'); return toAIImage(r, false, big); }
     }
     // size: small (640 px JPEG, a quick look for few tokens) · normal (1400 px) · large (2000 px)
-    const lim = a.size === 'small' ? 640 : a.size === 'large' ? 2000 : 1400, small = a.size === 'small';
+    const lim = a.size === 'small' ? (a.overview ? 900 : 640) : a.size === 'large' ? 2000 : 1400, small = a.size === 'small';
     if (v === 'schematic') { const i = Math.max(0, Math.min(Sch.sheets().length - 1, (+a.sheet || 1) - 1)); return toAIImage(await DocView.svgToPng(Sch.exportSVG(i), Math.max(lim, 1000)), small, lim); }
     if (v === 'pcb') { Pcb.render(); return toAIImage(await DocView.svgToPng(Pcb.exportSVG(), Math.max(lim, 1000), '#000'), small, lim); }
     if (v === 'pcb_3d') { const r = await Pcb3D.snapshot(a.side || 'iso', small ? 900 : 1400, small ? 600 : 940); if (!r) throw new Error('The 3D view is not available'); return toAIImage(r, true, lim); }
-    if (v === 'enclosure') { const r = await EncView.snapshot({ w: small ? 900 : 1400, h: small ? 600 : 940, explode: !!a.exploded }); if (!r) throw new Error('No enclosure yet: set one up first (set_enclosure or set_enclosure_script)'); return toAIImage(r, true, lim); }
+    if (v === 'enclosure') { const r = await EncView.snapshot({ w: a.overview ? (small ? 1100 : 1800) : small ? 900 : 1400, h: a.overview ? (small ? 760 : 1240) : small ? 600 : 940, explode: !!a.exploded, angle: a.angle, section: a.section, overview: !!a.overview }); if (!r) throw new Error('No enclosure yet: set one up first (set_enclosure or set_enclosure_script)'); return toAIImage(r, true, lim); }
     throw new Error('Unknown view ' + v);
   }
 

@@ -1,6 +1,6 @@
 'use strict';
 // Runs placement + the autorouter off the UI thread. Receives the design, returns the new PCB.
-importScripts('lib.js', 'model.js', 'pcb.js');
+importScripts('lib.js', 'model.js', 'strokefont.js', 'pcb.js');
 self.onmessage = e => {
   const { state, opt = {}, place } = e.data;
   try {

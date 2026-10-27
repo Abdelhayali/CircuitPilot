@@ -333,7 +333,7 @@ const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project
 const TOOLS = [...EXTRA, ...Engine.TOOLS.filter(t => !EXTRA.some(x => x.name === t.name)).map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema }))]
   .map(t => NO_PROJECT_ARG.has(t.name) ? t : Object.assign({}, t, { input_schema: Object.assign({}, t.input_schema, { properties: Object.assign({ project: PROJECT_ARG }, t.input_schema.properties || {}) }) }));
 // tools that need no project at all
-const NO_PROJECT = new Set(['search_parts', 'web_search', 'web_fetch', 'list_my_parts', 'enclosure_script_help']);
+const NO_PROJECT = new Set(['search_parts', 'web_search', 'web_fetch', 'list_my_parts', 'enclosure_script_help', 'list_batteries']);
 const RO = new Set(Engine.TOOLS.filter(t => t.ro).map(t => t.name));
 
 async function callTool(name, input = {}) {
@@ -548,7 +548,7 @@ const WORKFLOW = `1. New design: create_project {name}. To continue an existing 
 3. Schematic: add_components (give x/y positions, ~150 units apart, related parts together) → connect pins with named nets (GND, +3V3, +5V are power nets) → run_erc and fix errors. Use sheets (add_sheet) for big designs.
 4. Look at it: view_design {view:"schematic"} and fix crowded or confusing areas.
 5. PCB: generate_pcb (board size if the user gave one) → pcb_status / run_drc → if nets are unrouted: optimize_pcb → add_copper_pour GND → run_drc. Check with view_design {view:"pcb"} and {view:"pcb_3d"}.
-6. Optional: enclosure (get_enclosure / set_enclosure, or enclosure_script_help for wearables and custom cases; check with view_design {view:"enclosure"}), datasheet text (set_documentation), Gerbers (export_gerbers {out_dir}).
+6. Optional: enclosure — set_enclosure (parametric box) or, for wearables and custom cases, set_enclosure_script {template, params} (35 templates, no code, ~1 s, returns a 4-view picture + fit report); battery: list_batteries, then params {battery, batteryPlace}; check details with view_design {view:"enclosure", overview / section / angle}. Datasheet text (set_documentation), Gerbers (export_gerbers {out_dir}).
 Tell the user what you built and what to check (footprints against datasheets, antenna keep-out, power ratings).`;
 
 const INSTRUCTIONS = `CircuitPilot is an AI schematic + PCB designer. These tools edit the CURRENT project (see list_projects / open_project / create_project); the user sees every change live in the CircuitPilot browser app.

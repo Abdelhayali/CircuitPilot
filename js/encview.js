@@ -2,7 +2,8 @@
 // Enclosure tab: parameters, 3D preview (three.js from cdnjs), STL / OpenSCAD export.
 const EncView = (() => {
   const $ = s => document.querySelector(s);
-  const ui = { explode: false, lid: true, pcb: true, xray: false, built: null, err: null };
+  const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null };
+  const WORKER = 'js/shape-worker.js?v=202610280100';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
   function loadThree() {
@@ -44,6 +45,8 @@ const EncView = (() => {
     $('#encLid').onclick = () => { ui.lid = !ui.lid; $('#encLid').classList.toggle('on', ui.lid); place(); };
     $('#encPcb').onclick = () => { ui.pcb = !ui.pcb; $('#encPcb').classList.toggle('on', ui.pcb); place(); };
     $('#encXray').onclick = () => { ui.xray = !ui.xray; $('#encXray').classList.toggle('on', ui.xray); place(); };
+    $('#encSection').onclick = () => { ui.section = ui.section ? null : 'x'; $('#encSection').classList.toggle('on', !!ui.section); place(); };
+    $('#encRender').onclick = renderDialog;
     $('#encStl').onclick = () => exportAll('stl'); $('#encScad').onclick = () => exportAll('scad'); $('#encZip').onclick = () => exportAll('zip');
     $('#encOrder').onclick = () => {
       // open the quote page inside the click (popup blockers), then build + download the STLs
@@ -68,7 +71,8 @@ const EncView = (() => {
   // ---------- three.js scene ----------
   function setupScene() {
     const T = window.THREE;
-    renderer = new T.WebGLRenderer({ antialias: true });
+    renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.localClippingEnabled = true;
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     const bg = () => renderer.setClearColor(getComputedStyle(document.documentElement).getPropertyValue('--view3d').trim() || '#12161c');
     bg(); window.addEventListener('themechange', () => { bg(); draw(); });
@@ -113,7 +117,33 @@ const EncView = (() => {
     const T = window.THREE, a = Enclosure.meshArrays(polys, opts.tf), g = new T.BufferGeometry();
     g.setAttribute('position', new T.BufferAttribute(a.pos, 3)); g.setAttribute('normal', new T.BufferAttribute(a.nor, 3));
     const m = new T.MeshStandardMaterial({ color, roughness: 0.65, metalness: 0.05, transparent: true, opacity: opts.opacity || 1, side: T.DoubleSide });
-    return new T.Mesh(g, m);
+    return withCap(new T.Mesh(g, m));
+  }
+  // section view: every material is clipped by one plane; the inside of a cut solid shows its back faces, drawn in a
+  // flat red so the cut walls read as solid (the usual CAD look)
+  const clip = { plane: null };
+  function clipPlane() { if (!clip.plane) clip.plane = new window.THREE.Plane(new window.THREE.Vector3(0, -1, 0), 0); return clip.plane; }
+  function withCap(mesh) {
+    const T = window.THREE, cap = new T.Mesh(mesh.geometry, new T.MeshBasicMaterial({ color: 0xd9534f, side: T.BackSide }));
+    cap.visible = false; cap.userData.cap = true; mesh.add(cap); return mesh;
+  }
+  function applySection() {
+    if (!root) return;
+    const on = !!ui.section, pl = clipPlane();
+    if (on) {
+      // cut through the middle of what is shown; keep the half away from the camera
+      const box = new window.THREE.Box3(); root.updateMatrixWorld(true); root.traverse(m => { if (m.isMesh && m.visible && !m.userData.cap) box.expandByObject(m); });
+      const c = box.isEmpty() ? new window.THREE.Vector3() : box.getCenter(new window.THREE.Vector3());
+      const ax = ui.section === 'y' ? 'x' : 'y', side = (ax === 'y' ? Math.sin(cam.th) : Math.cos(cam.th)) >= 0 ? -1 : 1;
+      pl.normal.set(ax === 'x' ? side : 0, ax === 'y' ? side : 0, 0); pl.constant = -(ax === 'x' ? c.x : c.y) * side;
+    }
+    root.traverse(m => {
+      if (!m.isMesh) return;
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      const capped = m.children.some(c => c.userData.cap);
+      for (const mt of mats) { mt.clippingPlanes = on ? [pl] : null; if (capped) mt.side = on ? window.THREE.FrontSide : window.THREE.DoubleSide; mt.needsUpdate = true; }
+      if (m.userData.cap) m.visible = on && m.parent.visible;
+    });
   }
   function pcbGroup(L) {
     const T = window.THREE, g = new T.Group();
@@ -122,6 +152,7 @@ const EncView = (() => {
     const board = new T.Mesh(new T.ExtrudeGeometry(sh, { depth: L.P.pcbThickness, bevelEnabled: false }), new T.MeshStandardMaterial({ color: 0x1f7a3a, roughness: 0.8 }));
     board.position.z = L.pcbZ; g.add(board);
     const colors = { part: 0x2b2b2b, ic: 0x2b2b2b, connector: 0xc9c9c9, resistor: 0x2a6cc0, capacitor: 0xb08850, capacitor_polarized: 0x2d3fa0, led: 0x37d67a, switch: 0x555555, regulator: 0x333333, battery: 0x222222 };
+    if (L.battery) g.add(batteryMesh(L.battery, [0, 0, 0]));
     for (const p of L.parts) {
       const w = Math.max(0.6, p.x1 - p.x0), d = Math.max(0.6, p.y1 - p.y0), h = Math.max(0.4, p.h);
       const col = p.edge && p.edge.plug ? 0xd8d8d8 : (colors[p.type] ?? 0x3a3a3a);
@@ -130,6 +161,16 @@ const EncView = (() => {
       g.add(b);
     }
     return g;
+  }
+  // a loose battery: coin = steel disc, LiPo = silver pouch, cylinder = blue wrapped cell (o = offset of the frame)
+  function batteryMesh(b, o) {
+    const T = window.THREE, w = b.x1 - b.x0, l = b.y1 - b.y0, t = b.z1 - b.z0, shape = b.shape || b.kind;
+    let geo, mat;
+    if (shape === 'coin') { geo = new T.CylinderGeometry(w / 2, w / 2, t, 48); geo.rotateX(Math.PI / 2); mat = new T.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 0.3, metalness: 0.85 }); }
+    else if (shape === 'cyl') { geo = new T.CylinderGeometry(t / 2, t / 2, Math.max(w, l), 40); if (w > l) geo.rotateZ(Math.PI / 2); mat = new T.MeshStandardMaterial({ color: 0x2f6fd0, roughness: 0.45, metalness: 0.2 }); }
+    else { geo = new T.BoxGeometry(w, l, t); mat = new T.MeshStandardMaterial({ color: 0xb8bcc4, roughness: 0.35, metalness: 0.7 }); }
+    const m = new T.Mesh(geo, mat); m.position.set((b.x0 + b.x1) / 2 + o[0], (b.y0 + b.y1) / 2 + o[1], (b.z0 + b.z1) / 2 + o[2]); m.userData.battery = true;
+    return m;
   }
   function syncToolbar() {
     const m = Enclosure.mode();
@@ -149,20 +190,21 @@ const EncView = (() => {
         m.material.opacity = ui.xray ? 0.35 : 1; m.material.depthWrite = !ui.xray;
       }
       if (meshes.pcb) meshes.pcb.visible = ui.pcb;
-      draw(); return;
+      for (const m of meshes.extras || []) m.visible = ui.pcb;
+      applySection(); draw(); return;
     }
     const L = ui.built.L, ex = ui.explode ? (L.P.explode || 12) + L.P.lipHeight : 0;
     if (meshes.base) { meshes.base.material.opacity = ui.xray ? 0.35 : 1; meshes.base.material.depthWrite = !ui.xray; }
     if (meshes.lid) { meshes.lid.visible = ui.lid; meshes.lid.position.z = ex; meshes.lid.material.opacity = ui.xray ? 0.35 : 1; meshes.lid.material.depthWrite = !ui.xray; }
     if (meshes.pcb) meshes.pcb.visible = ui.pcb;
-    draw();
+    applySection(); draw();
   }
   // ---------- custom mode: free-form 3D script (shape3d.js) built in a Web Worker ----------
   let worker = null, seq = 0, lastRun = null, codeDirty = false;
   const pending = new Map();
   function getWorker() {
     if (worker) return worker;
-    worker = new Worker('js/shape-worker.js');
+    worker = new Worker(WORKER);
     worker.onmessage = e => {
       const p = pending.get(e.data.id); if (!p) return;
       pending.delete(e.data.id); clearTimeout(p.t);
@@ -241,9 +283,10 @@ const EncView = (() => {
     meshes.parts = r.parts.map((p, i) => {
       const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(p.pos, 3)); g.setAttribute('normal', new T.BufferAttribute(p.nor, 3));
       let col; try { col = new T.Color(p.color || palette[i % palette.length]); } catch (e) { col = new T.Color(palette[i % palette.length]); }
-      const m = new T.Mesh(g, new T.MeshStandardMaterial({ color: col, roughness: 0.6, metalness: 0.05, transparent: true, opacity: 1, side: T.DoubleSide }));
-      m.userData = p; root.add(m); return m;
+      const m = withCap(new T.Mesh(g, new T.MeshStandardMaterial({ color: col, roughness: 0.6, metalness: 0.05, transparent: true, opacity: 1, side: T.DoubleSide })));
+      Object.assign(m.userData, p); root.add(m); return m;
     });
+    meshes.extras = (r.extras || []).filter(x => x.kind === 'battery').map(b => { const m = batteryMesh(b, [0, 0, 0]); root.add(m); return m; });
     meshes.pcb = null;
     if (c.ctx.pcb) { try { const L = Enclosure.layout(), g = pcbGroup(L); g.position.set(-c.ctx.origin[0], -c.ctx.origin[1], -c.ctx.origin[2]); meshes.pcb = g; root.add(g); } catch (e) { } }
     if (fit || !ui.fitted) {
@@ -256,7 +299,8 @@ const EncView = (() => {
   }
   function infoCustom() {
     const c = ui.custom, r = c && c.r;
-    $('#encInfo').innerHTML = r ? `<b>Custom 3D</b> · ${r.parts.map(p => `${esc(p.name)} ${p.size_mm.map(v => v.toFixed(1)).join('×')} mm`).join(' · ')}${r.report.collisions.length ? ' · <span class="bad">⚠ collisions</span>' : ''}<br><span class="muted">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom · ask the AI to change the design</span>`
+    const bat = r && (r.extras || []).find(x => x.kind === 'battery');
+    $('#encInfo').innerHTML = r ? `<b>Custom 3D</b> · ${r.parts.map(p => `${esc(p.name)} ${p.size_mm.map(v => v.toFixed(1)).join('×')} mm`).join(' · ')}${bat ? ` · 🔋 ${esc(bat.name)} ${bat.mAh} mAh` : ''}${r.report.collisions.length ? ' · <span class="bad">⚠ collisions</span>' : ''} · <span class="muted">built in ${(r.ms / 1000).toFixed(1)} s</span><br><span class="muted">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom · ask the AI to change the design</span>`
       : `<b>Custom 3D</b> · ${ui.running ? 'building…' : 'no model yet'}`;
   }
   function rebuild(fit) {
@@ -285,7 +329,7 @@ const EncView = (() => {
   }
   function info(r) {
     const d = Enclosure.describe(r);
-    $('#encInfo').innerHTML = `<b>${d.outer_mm.join(' × ')} mm</b> · base ${d.base_height} mm + lid ${d.lid_thickness} mm · tallest part ${d.tallest_part_mm} mm · ${d.mounting_holes ? d.mounting_holes + ' screw standoffs' : d.supports + ' corner supports'} · ${d.cutouts.length} cutouts<br><span class="muted">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom</span>`;
+    $('#encInfo').innerHTML = `<b>${d.outer_mm.join(' × ')} mm</b> · base ${d.base_height} mm + lid ${d.lid_thickness} mm · tallest part ${d.tallest_part_mm} mm · ${d.mounting_holes ? d.mounting_holes + ' screw standoffs' : d.supports + ' corner supports'} · ${d.cutouts.length} cutouts${d.battery ? ` · 🔋 ${esc(d.battery.name)} (${d.battery.place})` : ''}<br><span class="muted">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom</span>`;
   }
 
   // ---------- parameter panel (left Properties area) ----------
@@ -295,6 +339,13 @@ const EncView = (() => {
     ['Lid', [['lidThickness', 'Lid thickness'], ['lidFit', 'Lid fit tolerance'], ['lipHeight', 'Lip height'], ['lipWidth', 'Lip width']]],
     ['Vents', [['ventWidth', 'Slot width'], ['ventLength', 'Slot length'], ['ventSpacing', 'Slot pitch']]],
   ];
+  // battery picker: every cell of the catalogue, grouped (value = id)
+  function batteryOptions(cur) {
+    const groups = [['coin', 'Coin cells'], ['lipo', 'LiPo pouches'], ['cyl', 'Cylindrical Li-ion']];
+    return `<option value="">None</option>` + groups.map(([k, t]) => `<optgroup label="${t}">${Enclosure.batteries({ kind: k }).map(b => `<option value="${b.id}" ${b.id === cur ? 'selected' : ''}>${esc(b.kind === 'lipo' ? b.id.replace('lipo-', 'LiPo ') : b.name.replace(/ \(.*/, ''))} · ${b.size_mm} mm · ${b.mAh} mAh${b.rechargeable ? '' : ' · primary'}</option>`).join('')}</optgroup>`).join('');
+  }
+  const PLACES = [['under', 'under the board'], ['beside', 'beside the board'], ['above', 'above the parts']];
+  const quick = { template: 'box-rounded', shape: '', battery: '', batteryPlace: 'under', label: '' };
   function props(el) {
     const P = Enclosure.params(), S = Model.S;
     let d = null; try { d = Enclosure.describe(); } catch (e) { }
@@ -303,13 +354,27 @@ const EncView = (() => {
     if (mode === 'custom') {
       const c = ui.custom, r = c && c.r;
       h += `<div class="muted small">Free-form model from a 3D script: wristbands, chest patches, clips, curved or organic cases. Describe what you need to the AI — e.g. <i>“make a Whoop-style wristband pod for this board with a USB-C opening”</i> or <i>“ECG chest patch with 3 snap-electrode holes 60 mm apart”</i> — or edit the script yourself.</div>
-        <div class="row"><button id="encOpenCode">&lt;/&gt; Edit script</button></div>`;
+        <div class="row"><button id="encOpenCode">&lt;/&gt; Edit script</button></div>
+        <div class="ph small">Quick design (no code)</div><div class="enc-tpl"><div class="encgrid">
+          <label>Template<select id="qTpl">${['Wrist', 'Chest', 'Body', 'Box'].map(cat => `<optgroup label="${cat}">${Shape3D.TEMPLATES.filter(t => t.cat === cat).map(t => `<option value="${t.id}" ${t.id === quick.template ? 'selected' : ''} title="${esc(t.desc)}">${esc(t.name)}</option>`).join('')}</optgroup>`).join('')}</select></label>
+          <label>Shape<select id="qShape"><option value="">template's</option>${Shape3D.PARAMS.shape.map(v => `<option ${v === quick.shape ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+          <label>Battery<select id="qBat">${batteryOptions(quick.battery)}</select></label>
+          <label>Battery goes<select id="qPlace">${PLACES.map(([v, t]) => `<option value="${v}" ${v === quick.batteryPlace ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+          <label>Engraved text<input id="qLabel" maxlength="24" placeholder="e.g. NODE-01" value="${esc(quick.label)}"></label>
+        </div><div class="row"><button id="qBuild" class="primary">▶ Build</button></div>
+        <div class="muted small">Sized from your board. Replaces the script; built in about a second.</div></div>`;
       if (r) h += `<div class="ph small">Parts (one STL each)</div><table class="pins">${r.parts.map(p => `<tr><td>${esc(p.name)}</td><td>${p.size_mm.map(v => v.toFixed(1)).join(' × ')}</td></tr>`).join('')}</table>` +
         (r.report.collisions.length ? `<div class="bad small">⚠ ${r.report.collisions.map(x => esc(x.part + ' ↔ ' + x.with)).join(', ')}</div>` : '');
       else if (c && c.err) h += `<div class="bad small">⚠ ${esc(c.err.message)}</div>`;
       el.innerHTML = h;
       el.querySelectorAll('.encmodeseg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
       $('#encOpenCode').onclick = () => toggleCode(true);
+      $('#qBuild').onclick = () => {
+        Object.assign(quick, { template: $('#qTpl').value, shape: $('#qShape').value, battery: $('#qBat').value, batteryPlace: $('#qPlace').value, label: $('#qLabel').value.trim() });
+        const params = {}; if (quick.shape) params.shape = quick.shape; if (quick.battery) { params.battery = quick.battery; params.batteryPlace = quick.batteryPlace; } if (quick.label) params.label = quick.label;
+        try { const code = Shape3D.fromTemplate(quick.template, params); codeDirty = false; Model.mutate(() => Enclosure.setParams({ mode: 'custom', script: code })); dirty = true; ui.fitted = false; rebuild(true); }
+        catch (e) { App.toast(e.message); }
+      };
       return true;
     }
     if (!d) { el.innerHTML = h + `<div class="muted">${esc(ui.err || 'Generate the PCB first — the enclosure is fitted to it.')}</div>`; return true; }
@@ -319,6 +384,10 @@ const EncView = (() => {
       if (title === 'Board support') h += `<div class="row"><button id="encHoles">${(S.pcb.holes || []).length ? '↻ Re-place' : '＋ Add'} M3 mounting holes</button>${(S.pcb.holes || []).length ? '<button id="encNoHoles" class="danger">Remove holes</button>' : ''}</div><div class="muted small">${(S.pcb.holes || []).length ? (S.pcb.holes.length + ' holes on the PCB → screw standoffs') : 'No PCB holes: the board rests on corner supports'}</div>`;
       if (title === 'Vents') h += `<label class="chk"><input type="checkbox" data-ep="vents" ${P.vents ? 'checked' : ''}> Vent slots in the lid</label>`;
     }
+    h += `<div class="ph small">Battery</div><div class="encgrid">
+        <label>Cell<select id="encBat">${batteryOptions(P.battery)}</select></label>
+        <label>Goes<select id="encBatPlace">${PLACES.map(([v, t]) => `<option value="${v}" ${v === P.batteryPlace ? 'selected' : ''}>${t}</option>`).join('')}</select></label></div>
+      <div class="muted small">${d.battery ? `🔋 ${esc(d.battery.name)} · ${d.battery.mAh} mAh — the box grows to hold it.` : 'A loose cell wired to the board (LIR / CR coin, LiPo pouch, 18650 …). Rechargeable cells need a charger IC on the PCB.'}</div>`;
     h += `<div class="ph small">Cutouts</div>
       <label class="chk"><input type="checkbox" data-ep="autoConnectorCutouts" ${P.autoConnectorCutouts ? 'checked' : ''}> Openings for edge connectors (USB, jacks…)</label>
       <label class="chk"><input type="checkbox" data-ep="autoLidHoles" ${P.autoLidHoles ? 'checked' : ''}> Lid holes above LEDs and buttons</label>
@@ -337,6 +406,8 @@ const EncView = (() => {
     el.querySelectorAll('[data-ep]').forEach(i => i.onchange = () => { try { Model.mutate(() => Enclosure.setParams({ [i.dataset.ep]: i.type === 'checkbox' ? i.checked : +i.value })); } catch (e) { App.toast(e.message); } });
     el.querySelectorAll('[data-ph]').forEach(i => i.onchange = () => Model.mutate(() => Enclosure.setParams({ partHeights: { [i.dataset.ph]: i.value === '' ? null : +i.value } })));
     el.querySelectorAll('[data-rmcut]').forEach(b => b.onclick = () => Model.mutate(() => { const c = (Model.S.enclosure.cutouts || []).slice(); c.splice(+b.dataset.rmcut, 1); Model.S.enclosure = Object.assign({}, Model.S.enclosure, { cutouts: c }); }));
+    $('#encBat').onchange = e => { try { Model.mutate(() => Enclosure.setParams({ battery: e.target.value })); } catch (er) { App.toast(er.message); } };
+    $('#encBatPlace').onchange = e => { try { Model.mutate(() => Enclosure.setParams({ batteryPlace: e.target.value })); } catch (er) { App.toast(er.message); } };
     $('#ecAdd').onclick = () => { try { const side = $('#ecSide').value, lidish = side === 'lid' || side === 'floor'; Model.mutate(() => Enclosure.addCutout({ side, shape: $('#ecShape').value, width: +$('#ecW').value, height: +$('#ecH').value, u: +$('#ecU').value, x: +$('#ecU').value, y: $('#ecZ').value === '' ? 0 : +$('#ecZ').value, z: lidish || $('#ecZ').value === '' ? null : +$('#ecZ').value })); } catch (e) { App.toast(e.message); } };
     $('#encHoles').onclick = () => { try { const r = Model.mutate(() => Pcb.addMountingHoles({})); App.toast(`${r.holes.length} M3 mounting holes added to the PCB${r.skipped ? ` (${r.skipped} corners too crowded)` : ''} — Route the PCB again so tracks avoid them`, 6000); } catch (e) { App.toast(e.message); } };
     if ($('#encNoHoles')) $('#encNoHoles').onclick = () => Model.mutate(() => { Model.S.pcb.holes = []; });
@@ -365,7 +436,7 @@ const EncView = (() => {
   let hqBusy = false;
   function buildHQ(code) {
     return new Promise((res, rej) => {
-      const w = new Worker('js/shape-worker.js'), t = setTimeout(() => { w.terminate(); rej(new Error('high-resolution build took longer than 6 minutes')); }, 360000);
+      const w = new Worker(WORKER), t = setTimeout(() => { w.terminate(); rej(new Error('high-resolution build took longer than 6 minutes')); }, 360000);
       w.onmessage = e => { clearTimeout(t); w.terminate(); e.data.ok ? res(e.data.r) : rej(new Error(e.data.error)); };
       w.onerror = e => { clearTimeout(t); w.terminate(); rej(new Error(e.message || 'worker error')); };
       w.postMessage({ id: 1, code, ctx: scriptCtx(), opts: { quality: 'high', mesh: false, check: false, timeLimitMs: 340000 } });
@@ -396,8 +467,30 @@ const EncView = (() => {
     App.toast(`Exported ${r.parts.length} part${r.parts.length > 1 ? 's' : ''}${r !== prev ? ` · high resolution (${r.parts.reduce((a, p) => a + p.triangles, 0).toLocaleString()} triangles)` : ''}`, 6000);
     return true;
   }
-  // PNG of the enclosure for documents (off-screen, light background); o.explode lifts the lid / covers
+  // camera directions (orbit angles th / ph) for the named views
+  const ANGLES = { iso: [-1.0, 1.05], top: [-Math.PI / 2, 0.02], bottom: [-Math.PI / 2, Math.PI - 0.02], front: [-Math.PI / 2, Math.PI / 2], back: [Math.PI / 2, Math.PI / 2], left: [Math.PI, Math.PI / 2], right: [0, Math.PI / 2], under: [-0.9, 2.15] };
+  // 4 views in one picture: angled, exploded, cut in half, from below (what the AI gets after a build; the Render button)
+  async function overview(o = {}) {
+    const w = o.w || 1600, h = o.h || 1100, cw = Math.round(w / 2), ch = Math.round(h / 2);
+    const views = [['Angled', { angle: 'iso' }], ['Exploded', { angle: 'iso', explode: true }], ['Cut in half', { angle: 'iso', section: 'x' }], ['From below', { angle: 'under' }]];
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d'); g.fillStyle = o.bg || '#ffffff'; g.fillRect(0, 0, w, h);
+    let k = 0;
+    for (const [label, v] of views) {
+      const r = await snapshot(Object.assign({ w: cw, h: ch, bg: o.bg }, v));
+      if (!r) return null;
+      const img = new Image(); await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = r.url; });
+      const x = (k % 2) * cw, y = Math.floor(k / 2) * ch; g.drawImage(img, x, y);
+      g.font = `600 ${Math.round(ch / 22)}px system-ui, sans-serif`; g.fillStyle = '#333'; g.fillText(label, x + 12, y + Math.round(ch / 22) + 8);
+      k++;
+    }
+    g.strokeStyle = '#ddd'; g.lineWidth = 2; g.beginPath(); g.moveTo(cw, 0); g.lineTo(cw, h); g.moveTo(0, ch); g.lineTo(w, ch); g.stroke();
+    return { url: c.toDataURL('image/png'), w, h };
+  }
+  // PNG of the enclosure for documents (off-screen, light background); o.explode lifts the lid / covers,
+  // o.angle names the camera (iso, top, bottom, front, back, left, right, under), o.section cuts it in half ('x' | 'y')
   async function snapshot(o = {}) {
+    if (o.overview) return overview(o);
     const w = o.w || 1400, h = o.h || 950, bg = o.bg || '#ffffff';
     await loadThree(); const T = window.THREE;
     if (!renderer) setupScene();
@@ -407,19 +500,47 @@ const EncView = (() => {
       showCustom(false);
     } else { if (dirty || !ui.built || ui.built.custom) rebuild(false); }
     if (!ui.built || !root) return null;
-    const keep = { cam: Object.assign({}, cam), explode: ui.explode, lid: ui.lid, xray: ui.xray, pcb: ui.pcb }, size = renderer.getSize(new T.Vector2()), pr = renderer.getPixelRatio(), oc = renderer.getClearColor(new T.Color()).getHex(), oa = renderer.getClearAlpha();
-    ui.explode = !!o.explode; ui.lid = o.lid !== false; ui.xray = false; ui.pcb = o.pcb !== false; place();
-    const box = new T.Box3(); root.updateMatrixWorld(true); root.traverse(m => { if (m.isMesh && m.visible) box.expandByObject(m); });
+    const keep = { cam: Object.assign({}, cam), explode: ui.explode, lid: ui.lid, xray: ui.xray, pcb: ui.pcb, section: ui.section }, size = renderer.getSize(new T.Vector2()), pr = renderer.getPixelRatio(), oc = renderer.getClearColor(new T.Color()).getHex(), oa = renderer.getClearAlpha();
+    ui.explode = !!o.explode; ui.lid = o.lid !== false; ui.xray = false; ui.pcb = o.pcb !== false; ui.section = o.section || null;
+    const [th, ph] = ANGLES[o.angle] || [o.th ?? -1.0, o.ph ?? 1.05]; cam.th = th; cam.ph = ph;
+    place();
+    const box = new T.Box3(); root.updateMatrixWorld(true); root.traverse(m => { if (m.isMesh && m.visible && !m.userData.cap) box.expandByObject(m); });
     if (box.isEmpty()) return null;
     const c = box.getCenter(new T.Vector3()), sz = box.getSize(new T.Vector3());
     renderer.setPixelRatio(1); renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setClearColor(bg, 1);
-    cam.th = o.th ?? -1.0; cam.ph = o.ph ?? 1.05; cam.tx = c.x; cam.ty = c.y; cam.tz = c.z;
+    cam.tx = c.x; cam.ty = c.y; cam.tz = c.z;
     const fov = camera.fov * Math.PI / 180, span = Math.max(sz.x, sz.y, sz.z) * 1.45; cam.r = span / 2 / Math.tan(fov / 2);
     draw();
     const url = renderer.domElement.toDataURL('image/png');
-    Object.assign(cam, keep.cam); ui.explode = keep.explode; ui.lid = keep.lid; ui.xray = keep.xray; ui.pcb = keep.pcb;
+    Object.assign(cam, keep.cam); ui.explode = keep.explode; ui.lid = keep.lid; ui.xray = keep.xray; ui.pcb = keep.pcb; ui.section = keep.section;
     renderer.setPixelRatio(pr); renderer.setSize(size.x, size.y); renderer.setClearColor(oc, oa); place(); resize(); draw();
     return { url, w, h };
   }
-  return { init, show, hide, props, ui, rebuild: () => rebuild(true), runScript, snapshot };
+  // 📷 Render: the finished design as a picture (4 views, or one big angled view) to look at, save or share
+  async function renderDialog() {
+    if (!ui.built) { App.toast('Nothing to render yet'); return; }
+    let dlg = $('#encRenderDlg');
+    if (!dlg) {
+      dlg = document.createElement('div'); dlg.id = 'encRenderDlg'; dlg.className = 'enc-render';
+      dlg.innerHTML = `<div class="er-box"><div class="er-head"><b>Render</b><span class="seg" id="erMode"><button data-v="overview" class="on">4 views</button><button data-v="iso">Angled</button><button data-v="explode">Exploded</button><button data-v="section">Cut in half</button><button data-v="top">Top</button><button data-v="under">Below</button></span>
+        <label class="chk"><input type="checkbox" id="erDark"> Dark background</label><span style="flex:1"></span><button id="erSave" class="primary">Save PNG ⤓</button><button id="erClose" title="Close">✕</button></div><div class="er-img"><span class="spin"></span></div></div>`;
+      wrap.parentElement.appendChild(dlg);
+      dlg.addEventListener('click', e => { if (e.target === dlg) dlg.remove(); });
+      $('#erClose').onclick = () => dlg.remove();
+      $('#erMode').onclick = e => { const b = e.target.closest('button'); if (!b) return; dlg.querySelectorAll('#erMode button').forEach(x => x.classList.toggle('on', x === b)); draw1(); };
+      $('#erDark').onchange = draw1;
+      $('#erSave').onclick = () => { const i = dlg.querySelector('.er-img img'); if (i) App.download(`${(Model.S.name || 'design').replace(/[^\w.-]+/g, '_')}-enclosure-${dlg.dataset.v}.png`, dataBlob(i.src)); };
+    }
+    async function draw1() {
+      const v = dlg.querySelector('#erMode button.on').dataset.v, bg = $('#erDark').checked ? '#1b1f26' : '#ffffff', box = dlg.querySelector('.er-img');
+      dlg.dataset.v = v; box.innerHTML = '<span class="spin"></span>';
+      const o = { bg, w: 2400, h: 1600 };
+      if (v === 'overview') o.overview = true; else if (v === 'explode') Object.assign(o, { angle: 'iso', explode: true }); else if (v === 'section') Object.assign(o, { angle: 'iso', section: 'x' }); else o.angle = v;
+      try { const r = await snapshot(o); box.innerHTML = r ? `<img src="${r.url}" alt="enclosure render">` : '<div class="muted">Nothing to render</div>'; }
+      catch (e) { box.innerHTML = `<div class="bad">${esc(e.message)}</div>`; }
+    }
+    draw1();
+  }
+  function dataBlob(url) { const b = atob(url.slice(url.indexOf(',') + 1)), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Blob([u], { type: 'image/png' }); }
+  return { init, show, hide, props, ui, rebuild: () => rebuild(true), runScript, snapshot, renderDialog };
 })();

@@ -35,7 +35,7 @@ import webtools
 _jlc_status = {}   # JLCPCB API key check, cached 5 min
 
 PROXY_RE = re.compile(r"^/llm-proxy/(\d{1,5})(/.*)?$")
-STATIC_RE = re.compile(r"^/(|index\.html|styles\.css|favicon\.ico|js/[\w.-]+\.js|data/kicad-footprints\.txt|data/open-parts\.txt)$")
+STATIC_RE = re.compile(r"^/(|index\.html|styles\.css|favicon\.ico|js/[\w.-]+\.js|js/vendor/manifold\.(?:js|wasm)|data/kicad-footprints\.txt|data/open-parts\.txt)$")
 HOP_HEADERS = {"host", "origin", "referer", "connection", "content-length", "accept-encoding",
                "cookie", "cf-connecting-ip", "cf-ray", "cf-visitor", "cf-ipcountry", "cdn-loop",
                "x-forwarded-for", "x-forwarded-proto"}
@@ -129,6 +129,9 @@ def render_request(project, args, timeout=60.0):
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    # the 3D kernel (js/vendor/manifold.wasm) streams only as application/wasm; the Windows registry may not know it
+    extensions_map = dict(http.server.SimpleHTTPRequestHandler.extensions_map, **{".wasm": "application/wasm", ".mjs": "text/javascript"})
+
     def _authed(self):
         if not PASSWORD:
             return True

@@ -1462,6 +1462,14 @@ const Pcb = (() => {
       for (const v of st.gvias) if (v.id === id && (v.fixed || !soft)) viaAdd(tmpT, tmpV, v, w, -1);
       for (let k = 0; k < L * N; k++) blockT[k] = tmpT[k] > 0 ? 1 : 0;
       for (let k = 0; k < N; k++) blockV[k] = tmpV[k] > 0 ? 1 : 0;
+      // this net's own vias: a layer change on one reuses it (no second hole); next to it the hole-to-hole gap holds
+      for (const v of st.gvias) if (v.id === id && !v.hole) {
+        const rin = (v.d || R.viaDiameter) / 2, rout = R.viaDrill + R.minHoleToHole, n = Math.ceil(rout / g);
+        for (let dy = -n; dy <= n; dy++) for (let dx = -n; dx <= n; dx++) {
+          const x = v.x + dx, y = v.y + dy, dd = Math.hypot(dx, dy) * g; if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          if (dd >= rin && dd < rout) blockV[y * W + x] = 1;
+        }
+      }
       if (soft) { for (let k = 0; k < L * N; k++) softT[k] = M.rT[k] > 0 ? 1 : 0; for (let k = 0; k < N; k++) softV[k] = M.rV[k] > 0 ? 1 : 0; }
       const eT = R.edgeClearance + w / 2, eV = R.edgeClearance + vr;
       for (let i = 0; i < N; i++) { if (edge[i] < eT) { blockT[i] = 1; if (L > 1) blockT[N + i] = 1; } if (edge[i] < eV) blockV[i] = 1; }
@@ -1704,6 +1712,9 @@ const Pcb = (() => {
           const s = path[k], l = s >= N ? 1 : 0;
           if (l !== runL) {
             flush(null); const i = s % N, x = i % W, y = (i / W) | 0;
+            // on one of this net's vias already: the layer changes through it, no second via
+            const onVia = st.gvias.concat(myV).some(v => v.id === id && !v.hole && Math.hypot(v.x - x, v.y - y) * g < (v.d || R.viaDiameter) / 2);
+            if (onVia) { runL = l; run.push(s); tree.add(s); continue; }
             vs.push({ net: job.net, x: +(x * g).toFixed(4), y: +(y * g).toFixed(4), d: R.viaDiameter, drill: R.viaDrill });
             myV.push({ id, x, y, d: R.viaDiameter });
             for (let l2 = 0; l2 < L; l2++) markDisk(own, l2 * N, x, y, vr, R.viaDiameter);
@@ -2014,10 +2025,14 @@ const Pcb = (() => {
         if (bb[0] > ba[2] + Math.max(cl, R.minHoleToHole, +R.minPthToTrack || 0) + 2) break;
         if (bb[1] > ba[3] + cl + 2.3 || bb[3] < ba[1] - cl - 2.3) continue;
         const B = objs[j];
-        if (A.drill && B.drill && A.what !== B.what) {
+        // hole to hole, same net too (two vias drilled at almost the same spot); overlapping holes count as 0 mm.
+        // Error below 0.3 mm (what JLCPCB / EasyEDA check), warning up to the rule; pads of one part are the footprint's own
+        if (A.drill && B.drill) {
           const hd = Math.hypot(A.x - B.x, A.y - B.y) - A.drill / 2 - B.drill / 2;
-          if (hd < R.minHoleToHole - 1e-3 && hd > -1e-6 && !(A.what.startsWith('pad') && B.what.startsWith('pad') && A.what.split('.')[0] === B.what.split('.')[0]))
-            add('hole', `Holes ${A.what} / ${B.what} are ${hd.toFixed(3)} mm apart (minimum ${R.minHoleToHole})`, (A.x + B.x) / 2, (A.y + B.y) / 2, 'warning');
+          if (hd < R.minHoleToHole - 1e-3 && !(A.what.startsWith('pad') && B.what.startsWith('pad') && A.what.split('.')[0] === B.what.split('.')[0])) {
+            const same = A.net === B.net && !String(A.net).startsWith('~'), at = q => q.what.startsWith('via') ? `${q.what} at (${+q.x.toFixed(3)}, ${+q.y.toFixed(3)})` : q.what;
+            add('hole', `Holes ${at(A)} / ${at(B)} ${hd <= 0 ? 'overlap (0 mm apart)' : `are ${hd.toFixed(3)} mm apart`} (minimum ${R.minHoleToHole})${same && A.what.startsWith('via') && B.what.startsWith('via') ? ' — two vias of the same net at almost the same spot: delete one' : ''}`, (A.x + B.x) / 2, (A.y + B.y) / 2, hd < Math.min(0.3, R.minHoleToHole) - 1e-3 ? 'error' : 'warning');
+          }
         }
         if (A.net === B.net || !A.layers.some(l => B.layers.includes(l))) continue;
         // tracks keep more distance from drill holes (vias, plated pads, mounting holes)
@@ -2216,13 +2231,17 @@ const Pcb = (() => {
     const out = [], vias = [];
     let cur = { layer, pts: [[steps[0].x, steps[0].y]] };
     for (let i = 1; i < steps.length; i++) {
-      const s = steps[i], last = cur.pts[cur.pts.length - 1], b = [s.x, s.y];
+      const s = steps[i], last = cur.pts[cur.pts.length - 1];
+      // a via corner on a via of this net already there: the track goes through that via, no second hole
+      const ex = s.via && !(s.pad && s.pad.drill) ? S.pcb.vias.concat(vias).find(v => v.net === net && Math.hypot(v.x - s.x, v.y - s.y) < (v.d || R.viaDiameter) / 2) : null;
+      if (ex) { s.x = ex.x; s.y = ex.y; }
+      const b = [s.x, s.y];
       for (const k of knee(last, b)) cur.pts.push(k);
       cur.pts.push(b);
       if (s.pad && s.pad.layer && s.pad.layer !== cur.layer) throw new Error(`${s.pad.key} is an SMD pad on the ${s.pad.layer === 'F' ? 'top' : 'bottom'} layer but the track is on the ${cur.layer === 'F' ? 'top' : 'bottom'} here — put {x, y, via: true} before it`);
       const to = s.via ? (s.layer || (cur.layer === 'F' ? 'B' : 'F')) : s.layer;
       if (to && to !== cur.layer && i < steps.length - 1) {
-        out.push(cur); if (!s.pad || !s.pad.drill) vias.push({ net, x: s.x, y: s.y, d: R.viaDiameter, drill: R.viaDrill, manual: true });
+        out.push(cur); if (!ex && (!s.pad || !s.pad.drill)) vias.push({ net, x: s.x, y: s.y, d: R.viaDiameter, drill: R.viaDrill, manual: true });
         cur = { layer: to, pts: [b] };
       }
     }

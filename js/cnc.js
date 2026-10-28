@@ -187,7 +187,7 @@ const Cnc = (() => {
     // mirror: copper facing up on the machine, seen from below when the parts go on the other side
     let mirror = o.mirror === true || o.mirror === 'on' || o.mirror === 'true' ? true : o.mirror === false || o.mirror === 'off' || o.mirror === 'false' ? false : null;
     if (mirror === null) mirror = layer === 'B' || !smd.length;
-    if (layer === 'F' && smd.length && tht.length && !mirror) warnings.push('SMD and through-hole parts on the top copper: not mirrored (SMD sits on the copper), so the through-hole parts are also soldered on the copper side, leads not through the board');
+    if (layer === 'F' && smd.length && tht.length && !mirror) warnings.push('SMD and through-hole parts: not mirrored, the SMD parts sit on the copper. Through-hole parts go in from the bare side and are soldered on the copper side: match pin 1 to the square pad');
     const thick = o.board_thick > 0 ? o.board_thick : Pcb.boardThickness();
     if (!R.cnc) warnings.push('Design rules are not "CNC milling - 3018" (set_design_rules {preset: "cnc3018"}, or Rules in the PCB tab): tracks, gaps and rings may be too fine to mill safely');
     if (R.clearance < o.iso_dia + 0.05) warnings.push(`Design clearance ${R.clearance} mm is under the V-bit cut (${o.iso_dia} mm) + 0.05: copper that close is not separated — a finer V-bit (smaller iso_dia) or wider clearance (set_design_rules {preset: "home"}: 0.4 mm)`);

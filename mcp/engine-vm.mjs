@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 
-const FILES = [['lib.js', 'Lib'], ['model.js', 'Model'], ['strokefont.js', 'StrokeFont'], ['pcb.js', 'Pcb'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['kicad.js', 'KiCad'],
+const FILES = [['lib.js', 'Lib'], ['model.js', 'Model'], ['strokefont.js', 'StrokeFont'], ['pcb.js', 'Pcb'], ['cnc.js', 'Cnc'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['kicad.js', 'KiCad'],
   ['openlib.js', 'OpenLib'], ['easyeda.js', 'EasyEDA'], ['exports.js', 'Exports'], ['blocks.js', 'Blocks'], ['engine.js', 'Engine']];
 
 export function loadEngine(root, log = () => { }) {

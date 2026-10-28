@@ -1296,8 +1296,8 @@ const App = (() => {
     $$('[data-layer]').forEach(cb => cb.onchange = () => { Pcb.ui.show[cb.dataset.layer] = cb.checked; Pcb.render(); });
     $('#btnGerber').onclick = () => exportAs('gerber');
     // ---------- CNC milling (GRBL G-code): settings, preview, download ----------
-    const CNC_F = { iso_dia: 'cncIsoDia', iso_depth: 'cncIsoDepth', iso_passes: 'cncIsoPasses', iso_feed: 'cncIsoFeed', drill_feed: 'cncDrillFeed', cut_dia: 'cncCutDia', cut_step: 'cncCutStep', cut_feed: 'cncCutFeed', board_thick: 'cncThick', tabs: 'cncTabs', mirror: 'cncMirror', origin: 'cncOrigin', spindle: 'cncSpindle' };
-    const cncOpts = () => { const o = {}; for (const [k, id] of Object.entries(CNC_F)) { const el = $('#' + id); o[k] = el.tagName === 'SELECT' ? el.value : +el.value; } return o; };
+    const CNC_F = { iso_dia: 'cncIsoDia', iso_depth: 'cncIsoDepth', iso_passes: 'cncIsoPasses', iso_feed: 'cncIsoFeed', drill_feed: 'cncDrillFeed', cut_dia: 'cncCutDia', cut_step: 'cncCutStep', cut_feed: 'cncCutFeed', board_thick: 'cncThick', tabs: 'cncTabs', mirror: 'cncMirror', origin: 'cncOrigin', spindle: 'cncSpindle', drill_bits: 'cncBits' };
+    const cncOpts = () => { const o = {}; for (const [k, id] of Object.entries(CNC_F)) { const el = $('#' + id); o[k] = el.tagName === 'SELECT' || el.type === 'text' ? el.value : +el.value; } return o; };
     let cncLast = null;
     const cncRun = () => {
       $('#cncInfo').textContent = 'Working…'; cncLast = null;
@@ -1316,6 +1316,7 @@ const App = (() => {
     $('#btnCnc').onclick = () => {
       if (!Model.S.board.w || !Pcb.placed().length) { toast('No PCB yet'); return; }
       let saved = {}; try { saved = JSON.parse(localStorage.getItem('cp.cnc') || '{}'); } catch (e) { }
+      if (!saved.drill_bits) delete saved.origin;   // saved before the PCB corner became the default
       for (const [k, id] of Object.entries(CNC_F)) if (saved[k] !== undefined && k !== 'board_thick') $('#' + id).value = saved[k];
       $('#cncThick').value = Pcb.boardThickness();
       $('#cncModal').classList.remove('hidden'); cncRun();

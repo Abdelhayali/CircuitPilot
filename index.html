@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610300100">
+<link rel="stylesheet" href="styles.css?v=202610300200">
 </head>
 <body>
 <header id="top">
@@ -362,7 +362,7 @@
 <div id="cncModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>CNC milling (GRBL)</h2><button id="cncClose">✕</button></div>
-    <p class="muted" style="margin:2px 0 6px;font-size:12px">For a desktop CNC such as the 3018 Pro. X0 Y0 = lower-left corner of the job, Z0 = copper surface. One copper side only (Design rules → Home etching / CNC).</p>
+    <p class="muted" style="margin:2px 0 6px;font-size:12px">For a desktop CNC such as the 3018 Pro. X0 Y0 = lower-left corner of the PCB, Z0 = copper surface. One copper side only: ⚙ Rules → CNC milling — 3018.</p>
     <div class="cnc-grid">
       <fieldset><legend>V-bit (isolation)</legend>
         <label>Cut width, mm <input id="cncIsoDia" type="number" step="0.01" min="0.02" value="0.15"></label>
@@ -371,6 +371,7 @@
         <label>Feed, mm/min <input id="cncIsoFeed" type="number" step="10" min="10" value="120"></label>
       </fieldset>
       <fieldset><legend>Drill / end mill</legend>
+        <label>Drill bits, mm <input id="cncBits" type="text" value="0.8, 1.0" title="the drill bits you have; holes bigger than the biggest are widened"></label>
         <label>Drill feed, mm/min <input id="cncDrillFeed" type="number" step="5" min="5" value="40"></label>
         <label>End mill, mm <input id="cncCutDia" type="number" step="0.1" min="0.5" value="2"></label>
         <label>Step down, mm <input id="cncCutStep" type="number" step="0.05" min="0.05" value="0.3"></label>
@@ -380,7 +381,7 @@
         <label>Thickness, mm <input id="cncThick" type="number" step="0.1" min="0.2" value="1.6"></label>
         <label>Tabs <input id="cncTabs" type="number" step="1" min="0" max="12" value="4"></label>
         <label>Mirror <select id="cncMirror"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label>
-        <label>X0 Y0 <select id="cncOrigin"><option value="job">job corner</option><option value="board">board corner</option></select></label>
+        <label>X0 Y0 <select id="cncOrigin"><option value="board">PCB corner</option><option value="job">job corner</option></select></label>
         <label>Spindle S <input id="cncSpindle" type="number" step="100" min="0" value="1000"></label>
       </fieldset>
     </div>
@@ -407,38 +408,38 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610300100"></script>
-<script src="js/static-backend.js?v=202610300100"></script>
-<script src="js/lib.js?v=202610300100"></script>
-<script src="js/view.js?v=202610300100"></script>
-<script src="js/model.js?v=202610300100"></script>
-<script src="js/schematic.js?v=202610300100"></script>
-<script src="js/strokefont.js?v=202610300100"></script>
-<script src="js/pcb.js?v=202610300100"></script>
-<script src="js/cnc.js?v=202610300100"></script>
-<script src="js/pcbview.js?v=202610300100"></script>
-<script src="js/enclosure.js?v=202610300100"></script>
-<script src="js/shape3d.js?v=202610300100"></script>
-<script src="js/easyeda.js?v=202610300100"></script>
-<script src="js/libpanel.js?v=202610300100"></script>
-<script src="js/openlib.js?v=202610300100"></script>
-<script src="js/kicad.js?v=202610300100"></script>
-<script src="js/easyedapro.js?v=202610300100"></script>
-<script src="js/encview.js?v=202610300100"></script>
-<script src="js/encdesign.js?v=202610300100"></script>
-<script src="js/docview.js?v=202610300100"></script>
-<script src="js/pcb3d.js?v=202610300100"></script>
-<script src="js/blocks.js?v=202610300100"></script>
-<script src="js/engine.js?v=202610300100"></script>
-<script src="js/ai.js?v=202610300100"></script>
-<script src="js/exports.js?v=202610300100"></script>
-<script src="js/pcbpdf.js?v=202610300100"></script>
-<script src="js/folder.js?v=202610300100"></script>
-<script src="js/projects.js?v=202610300100"></script>
-<script src="js/cloud.js?v=202610300100"></script>
-<script src="js/editor.js?v=202610300100"></script>
-<script src="js/jlcorder.js?v=202610300100"></script>
-<script src="js/app.js?v=202610300100"></script>
+<script src="js/config.js?v=202610300200"></script>
+<script src="js/static-backend.js?v=202610300200"></script>
+<script src="js/lib.js?v=202610300200"></script>
+<script src="js/view.js?v=202610300200"></script>
+<script src="js/model.js?v=202610300200"></script>
+<script src="js/schematic.js?v=202610300200"></script>
+<script src="js/strokefont.js?v=202610300200"></script>
+<script src="js/pcb.js?v=202610300200"></script>
+<script src="js/cnc.js?v=202610300200"></script>
+<script src="js/pcbview.js?v=202610300200"></script>
+<script src="js/enclosure.js?v=202610300200"></script>
+<script src="js/shape3d.js?v=202610300200"></script>
+<script src="js/easyeda.js?v=202610300200"></script>
+<script src="js/libpanel.js?v=202610300200"></script>
+<script src="js/openlib.js?v=202610300200"></script>
+<script src="js/kicad.js?v=202610300200"></script>
+<script src="js/easyedapro.js?v=202610300200"></script>
+<script src="js/encview.js?v=202610300200"></script>
+<script src="js/encdesign.js?v=202610300200"></script>
+<script src="js/docview.js?v=202610300200"></script>
+<script src="js/pcb3d.js?v=202610300200"></script>
+<script src="js/blocks.js?v=202610300200"></script>
+<script src="js/engine.js?v=202610300200"></script>
+<script src="js/ai.js?v=202610300200"></script>
+<script src="js/exports.js?v=202610300200"></script>
+<script src="js/pcbpdf.js?v=202610300200"></script>
+<script src="js/folder.js?v=202610300200"></script>
+<script src="js/projects.js?v=202610300200"></script>
+<script src="js/cloud.js?v=202610300200"></script>
+<script src="js/editor.js?v=202610300200"></script>
+<script src="js/jlcorder.js?v=202610300200"></script>
+<script src="js/app.js?v=202610300200"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

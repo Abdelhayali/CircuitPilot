@@ -1124,7 +1124,10 @@ const Pcb = (() => {
     jlcpcb: { label: 'JLCPCB 2-layer — standard (0.25 mm tracks, vias 0.6/0.3)', values: { traceWidth: 0.25, powerTraceWidth: 0.5, clearance: 0.2, viaDiameter: 0.6, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_min: { label: 'JLCPCB 2-layer — 5/5 mil', values: { traceWidth: 0.127, powerTraceWidth: 0.3, clearance: 0.127, viaDiameter: 0.56, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_power: { label: 'JLCPCB 2-layer — power / robust', values: { traceWidth: 0.3, powerTraceWidth: 0.8, clearance: 0.25, viaDiameter: 0.8, viaDrill: 0.4, edgeClearance: 0.5, layers: 2, neckDown: true, ...JLC_MIN } },
-    home: { label: 'Home etching / CNC milling (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6 } },
+    // milling on a desktop CNC (3018 Pro …): the V-bit groove is ~0.15 mm and varies with the board's flatness, the
+    // machine has ~0.1 mm play and the drill wanders — wide tracks and gaps, big rings, one layer, no vias
+    cnc3018: { label: 'CNC milling — 3018 / GRBL desktop CNC (1 layer, 0.5 mm tracks, 0.4 mm gaps, 0.8 / 1.0 mm drills, no vias)', values: { traceWidth: 0.5, powerTraceWidth: 1.0, powerWider: true, clearance: 0.4, padClearance: 0.4, viaClearance: 0.4, pourClearance: 0.6, viaDiameter: 2.0, viaDrill: 0.8, edgeClearance: 1.5, layers: 1, neckDown: true, minTraceWidth: 0.4, minClearance: 0.4, minViaDrill: 0.8, minViaDiameter: 1.8, minAnnularRing: 0.5, minPthRing: 0.35, minHoleToHole: 1.0, minEdgeClearance: 1.5, minHoleSize: 0.8, pourMinArea: 2, trackStyle: '45', cnc: true } },
+    home: { label: 'Home etching (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6 } },
   };
   const DEFAULT_PRESET = 'jlcpcb_free_min';
   // JLCPCB measures tracks against drill holes too: via hole to track ≥ minHoleToTrack (0.2), plated hole to track
@@ -1977,6 +1980,17 @@ const Pcb = (() => {
     const costWarned = new Set();
     if (R.minPthRing) for (const c of cs) for (const p of padsOf(c, idx)) if (p.drill && (Math.min(p.w, p.h) - p.drill) / 2 < R.minPthRing - 1e-6)
       add('pad', `Pad ${p.key} ring ${((Math.min(p.w, p.h) - p.drill) / 2).toFixed(2)} < ${R.minPthRing} mm (plated through-hole)`, p.x, p.y, 'warning');
+    // CNC milling: one copper side — vias have nothing to join (a wire jumper does it), fine-pitch parts cannot be milled
+    if (R.cnc) {
+      for (const v of S.pcb.vias) add('via', `Via ${v.net || ''} on a milled 1-sided board: replace it with a wire jumper (or re-route without it)`, v.x, v.y);
+      if (new Set(S.pcb.traces.map(t => t.layer)).size > 1) add('layer', 'Tracks on both layers: a milled board has one copper side', S.board.w / 2, S.board.h / 2);
+      for (const c of cs) {
+        const ps = padsOf(c, idx).filter(p => !p.drill); let pitch = Infinity;
+        for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) pitch = Math.min(pitch, Math.hypot(ps[i].x - ps[j].x, ps[i].y - ps[j].y));
+        if (pitch < 1.2 && ps.length > 2) add('pad', `${c.ref}: pin pitch ${pitch.toFixed(2)} mm — too fine to mill reliably (use SOIC 1.27 mm or bigger)`, c.pcb.x, c.pcb.y, 'warning');
+        const small = ps.filter(p => Math.min(p.w, p.h) < 0.6); if (ps.length <= 2 && small.length) add('pad', `${c.ref}: pads ${Math.min(...small.map(p => Math.min(p.w, p.h))).toFixed(2)} mm — use 0805 / 1206 parts for a milled board`, c.pcb.x, c.pcb.y, 'warning');
+      }
+    }
     for (const v of S.pcb.vias) {
       objs.push({ s: { k: 'circ', c: [v.x, v.y], r: v.d / 2 }, net: v.net || '~v' + S.pcb.vias.indexOf(v), layers: ['F', 'B'], what: `via ${v.net || '(no net)'}`, drill: v.drill, ring: (v.d - v.drill) / 2, x: v.x, y: v.y });
       if (v.drill < R.minViaDrill - 1e-6) add('via', `Via drill ${v.drill} < ${R.minViaDrill} mm`, v.x, v.y);

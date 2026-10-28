@@ -2,12 +2,12 @@
 // the copper, one drill file per bit size, the outline cut with holding tabs (holes bigger than the end mill are
 // milled in the same file). The geometry comes from the design itself, drawn the same way as the copper Gerber —
 // pours, their clearances, the edge band and keep-outs included — on a fine grid; the isolation rings are the
-// contours of that copper's distance field. X0 Y0 = lower-left corner of the job, Z0 = copper surface.
+// contours of that copper's distance field. X0 Y0 = lower-left corner of the PCB (or of the job), Z0 = copper surface.
 const Cnc = (() => {
   const DEF = {
     iso_dia: 0.15, iso_depth: 0.08, iso_passes: 2, iso_overlap: 0.3, iso_feed: 120, plunge_feed: 60,
     drill_feed: 40, cut_dia: 2, cut_step: 0.3, cut_feed: 100, tabs: 4, tab_width: 2, tab_height: 0.5,
-    spindle: 1000, safe_z: 5, travel_z: 1, origin: 'job', mirror: 'auto', board_thick: 0, resolution: 0.02, layer: '',
+    spindle: 1000, safe_z: 5, travel_z: 1, origin: 'board', drill_bits: [0.8, 1.0], widen_feed: 30, widen_step: 0.4, mirror: 'auto', board_thick: 0, resolution: 0.02, layer: '',
   };
   const MAX_CELLS = 6e6;
   // local copies: inside the MCP server's vm every global lookup in a hot loop is slow
@@ -161,7 +161,7 @@ const Cnc = (() => {
   const n3 = v => { const s = (Math.abs(v) < 5e-4 ? 0 : v).toFixed(3).replace(/\.?0+$/, ''); return s === '-0' ? '0' : s; };
   const ascii = s => String(s).replace(/[^\x20-\x7e]/g, '?').replace(/[()]/g, '');
   function gfile(title, o, lines) {
-    return [`(CircuitPilot CNC - ${ascii(title)})`, '(X0 Y0 = lower-left corner of the job, Z0 = copper surface, mm)',
+    return [`(CircuitPilot CNC - ${ascii(title)})`, `(X0 Y0 = lower-left corner of the ${o.origin === 'job' ? 'job' : 'PCB'}, Z0 = copper surface, mm)`,
       'G21 G90 G94', `G0 Z${n3(o.safe_z)}`, `M3 S${o.spindle}`, 'G4 P3', ...lines,
       `G0 Z${n3(o.safe_z)}`, 'M5', 'G0 X0 Y0', 'M2', ''].join('\n');
   }
@@ -189,6 +189,7 @@ const Cnc = (() => {
     if (mirror === null) mirror = layer === 'B' || !smd.length;
     if (layer === 'F' && smd.length && tht.length && !mirror) warnings.push('SMD and through-hole parts on the top copper: not mirrored (SMD sits on the copper), so the through-hole parts are also soldered on the copper side, leads not through the board');
     const thick = o.board_thick > 0 ? o.board_thick : Pcb.boardThickness();
+    if (!R.cnc) warnings.push('Design rules are not "CNC milling - 3018" (set_design_rules {preset: "cnc3018"}, or Rules in the PCB tab): tracks, gaps and rings may be too fine to mill safely');
     if (R.clearance < o.iso_dia + 0.05) warnings.push(`Design clearance ${R.clearance} mm is under the V-bit cut (${o.iso_dia} mm) + 0.05: copper that close is not separated — a finer V-bit (smaller iso_dia) or wider clearance (set_design_rules {preset: "home"}: 0.4 mm)`);
 
     // ---- raster of the copper (same order as the Gerber: pours, their clearances, then all copper) ----
@@ -240,6 +241,14 @@ const Cnc = (() => {
     const holes = [...tht.map(p => ({ x: p.x, y: p.y, d: p.drill })), ...(S.pcb.vias || []).map(v => ({ x: v.x, y: v.y, d: v.drill })), ...(S.pcb.holes || []).map(h => ({ x: h.x, y: h.y, d: h.d }))]
       .map(h => ({ d: +h.d.toFixed(2), p: T([h.x, h.y]) }));
     const millAt = o.cut_dia + 0.1, drilled = holes.filter(h => h.d < millAt), milled = holes.filter(h => h.d >= millAt);
+    // each hole gets the smallest bit that is not too small (0.05 mm tolerance); bigger than every bit → drilled with the
+    // biggest, then widened with it in a small circle, in steps
+    let bitSet = (Array.isArray(o.drill_bits) ? o.drill_bits : String(o.drill_bits).split(/[\s,;]+/)).map(Number).filter(b => b > 0).sort((a, b) => a - b);
+    if (!bitSet.length) bitSet = DEF.drill_bits.slice();
+    for (const h of drilled) { const b = bitSet.find(q => q >= h.d - 0.05); h.bit = b || bitSet[bitSet.length - 1]; h.widen = !b; }
+    const up = drilled.filter(h => h.bit > h.d + 0.05), wide = drilled.filter(h => h.widen);
+    if (up.length) warnings.push(`${up.length} hole${up.length > 1 ? 's' : ''} of ${[...new Set(up.map(h => h.d))].join(' / ')} mm drilled at ${[...new Set(up.map(h => h.bit))].join(' / ')} mm (no smaller bit)`);
+    if (wide.length) warnings.push(`${wide.length} hole${wide.length > 1 ? 's' : ''} of ${[...new Set(wide.map(h => h.d))].join(' / ')} mm: drilled with the ${bitSet[bitSet.length - 1]} mm bit, then widened in a small circle (slow, ${o.widen_feed} mm/min). If the bit chatters, stop and widen those by hand`);
     const order = (pts, from = [0, 0]) => { const left = pts.slice(), out = []; let c = from; while (left.length) { let b = 0, bd = Infinity; left.forEach((h, i) => { const d = Math.hypot(h.p[0] - c[0], h.p[1] - c[1]); if (d < bd) { bd = d; b = i; } }); c = left[b].p; out.push(left.splice(b, 1)[0]); } return out; };
 
     // ---- outline: the end mill's centre path, cut_dia/2 outside the board ----
@@ -283,13 +292,21 @@ const Cnc = (() => {
     });
     files['1_isolation.nc'] = gfile(`${name} - isolation, V-bit ${o.iso_dia} mm at ${o.iso_depth} mm deep, ${passes.length} pass${passes.length > 1 ? 'es' : ''}`, o, iso);
     // 2: one file per drill size
-    const sizes = [...new Set(drilled.map(h => h.d))].sort((a, b) => a - b), dz = -(thick + 0.2);
+    const sizes = [...new Set(drilled.map(h => h.bit))].sort((a, b) => a - b), dz = -(thick + 0.2);
+    const wz = Array.from({ length: Math.max(1, Math.ceil(-dz / o.widen_step - 1e-9)) }, (_, i) => -Math.min(-dz, (i + 1) * o.widen_step));
     for (const d of sizes) {
-      const hs = order(drilled.filter(h => h.d === d)), L = [];
-      for (const h of hs) { L.push(`G0 X${n3(h.p[0])} Y${n3(h.p[1])}`, `G0 Z${n3(o.travel_z)}`, `G1 Z${n3(dz)} F${o.drill_feed}`, `G0 Z${n3(o.travel_z)}`); }
-      const fn = `2_drill_${d.toFixed(2)}mm.nc`;
-      files[fn] = gfile(`${name} - drill ${d.toFixed(2)} mm, ${hs.length} hole${hs.length > 1 ? 's' : ''}, ${n3(-dz)} mm deep`, o, L);
-      info.drills.push({ file: fn, bit_mm: d, holes: hs.length });
+      const hs = order(drilled.filter(h => h.bit === d)), L = [];
+      for (const h of hs) L.push(`G0 X${n3(h.p[0])} Y${n3(h.p[1])}`, `G0 Z${n3(o.travel_z)}`, `G1 Z${n3(dz)} F${o.drill_feed}`, `G0 Z${n3(o.travel_z)}`);
+      // widened holes: a circle of the missing radius, a step deeper each turn
+      for (const h of hs.filter(q => q.widen)) {
+        const r = (h.d - d) / 2, sx = h.p[0] + r;
+        L.push(`(widen to ${h.d} mm)`, `G0 X${n3(sx)} Y${n3(h.p[1])}`);
+        for (const z of wz) L.push(`G1 Z${n3(z)} F${o.drill_feed}`, `G2 X${n3(sx)} Y${n3(h.p[1])} I${n3(-r)} J0 F${o.widen_feed}`);
+        L.push(`G0 Z${n3(o.travel_z)}`);
+      }
+      const nw = hs.filter(q => q.widen).length, fn = `2_drill_${d.toFixed(2)}mm.nc`;
+      files[fn] = gfile(`${name} - drill ${d.toFixed(2)} mm, ${hs.length} hole${hs.length > 1 ? 's' : ''}${nw ? ` (${nw} widened)` : ''}, ${n3(-dz)} mm deep`, o, L);
+      info.drills.push({ file: fn, bit_mm: d, holes: hs.length, widened: nw || undefined });
     }
     // 3: big holes (helix), then the outline with tabs, step by step down to the board thickness + 0.1
     const total = thick + 0.1, steps = Math.max(1, Math.ceil(total / o.cut_step - 1e-9)), tabTop = -(total - o.tab_height), C = [];
@@ -324,37 +341,39 @@ const Cnc = (() => {
     files['3_cutout.nc'] = gfile(`${name} - ${milled.length ? 'holes over ' + n3(millAt) + ' mm and ' : ''}outline, end mill ${o.cut_dia} mm, ${steps} passes of ${o.cut_step} mm, ${nt} tabs`, o, C);
 
     // ---- preview + notes ----
-    const jw = W + 2 * off, jh = H + 2 * off, pad = 2, vb = [-pad, -pad, jw + 2 * pad, jh + 2 * pad];
-    const sy = y => jh - y, d = l => 'M' + l.map(q => `${q[0].toFixed(3)} ${sy(q[1]).toFixed(3)}`).join('L') + 'Z';
+    const jw = W + 2 * o.cut_dia, jh = H + 2 * o.cut_dia, x0 = off - o.cut_dia, top = off + H + o.cut_dia, pad = 2, vb = [x0 - pad, -pad, jw + 2 * pad, jh + 2 * pad];
+    const sy = y => top - y, d = l => 'M' + l.map(q => `${q[0].toFixed(3)} ${sy(q[1]).toFixed(3)}`).join('L') + 'Z';
     const svg = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.join(' ')}" width="${(vb[2] * 8).toFixed(0)}" height="${(vb[3] * 8).toFixed(0)}">`,
-      `<rect x="${-pad}" y="${-pad}" width="${vb[2]}" height="${vb[3]}" fill="#1b1d22"/>`,
-      `<rect x="0" y="0" width="${jw.toFixed(3)}" height="${jh.toFixed(3)}" fill="none" stroke="#555" stroke-width="0.1" stroke-dasharray="0.6 0.4"/>`,
+      `<rect x="${vb[0]}" y="${-pad}" width="${vb[2]}" height="${vb[3]}" fill="#1b1d22"/>`,
+      `<rect x="${x0}" y="0" width="${jw.toFixed(3)}" height="${jh.toFixed(3)}" fill="none" stroke="#555" stroke-width="0.1" stroke-dasharray="0.6 0.4"/>`,
       `<path d="${d(outline.map(T))}" fill="#b87333"/>`,
       ...passes.map((ls, k) => `<path d="${ls.map(d).join('')}" fill="none" stroke="${k ? '#7fb3ff' : '#2f7fff'}" stroke-width="${o.iso_dia}" stroke-linejoin="round" opacity="0.95"/>`),
       `<path d="${d(cut)}" fill="none" stroke="#e5484d" stroke-width="${o.cut_dia}" opacity="0.35"/>`,
       ...tabs.map(([a, b]) => { const m = (a + b) / 2; let i = s.findIndex(v => v >= m); i = Math.max(1, i); const t = (m - s[i - 1]) / ((s[i] - s[i - 1]) || 1), x = ring[i - 1][0] + t * (ring[i][0] - ring[i - 1][0]), y = ring[i - 1][1] + t * (ring[i][1] - ring[i - 1][1]); return `<circle cx="${x.toFixed(3)}" cy="${sy(y).toFixed(3)}" r="${(o.tab_width / 2).toFixed(2)}" fill="#ffd166"/>`; }),
       ...holes.map(h => `<circle cx="${h.p[0].toFixed(3)}" cy="${sy(h.p[1]).toFixed(3)}" r="${(h.d / 2).toFixed(3)}" fill="#111"/>`),
-      `<circle cx="0" cy="${jh.toFixed(3)}" r="0.6" fill="#3ddc84"/><text x="0.9" y="${(jh - 0.6).toFixed(3)}" font-size="1.6" fill="#3ddc84" font-family="sans-serif">X0 Y0</text>`,
+      `<circle cx="0" cy="${top.toFixed(3)}" r="0.6" fill="#3ddc84"/><text x="0.9" y="${(top - 0.6).toFixed(3)}" font-size="1.6" fill="#3ddc84" font-family="sans-serif">X0 Y0</text>`,
       '</svg>'];
     files['preview.svg'] = svg.join('\n') + '\n';
-    const mins = (isoLen / fz + passes.flat().length * (o.iso_depth / o.plunge_feed) + Lc * steps / o.cut_feed + drilled.length * (thick + 0.2) / o.drill_feed * 2 + milled.reduce((a, h) => a + Math.PI * (h.d - o.cut_dia) * steps / o.cut_feed, 0)) * 1.15;
+    const mins = (isoLen / fz + passes.flat().length * (o.iso_depth / o.plunge_feed) + Lc * steps / o.cut_feed + drilled.length * (thick + 0.2) / o.drill_feed * 2 + wide.reduce((a, h) => a + Math.PI * (h.d - h.bit) * wz.length / o.widen_feed, 0) + milled.reduce((a, h) => a + Math.PI * (h.d - o.cut_dia) * steps / o.cut_feed, 0)) * 1.15;
     const fl = Object.keys(files).filter(f => f.endsWith('.nc'));
     Object.assign(info, {
       layer: layer === 'F' ? 'top' : 'bottom', mirrored: mirror, board_mm: [+W.toFixed(2), +H.toFixed(2)], job_mm: [+jw.toFixed(2), +jh.toFixed(2)],
-      origin: o.origin === 'board' ? 'X0 Y0 = lower-left board corner (the cutout starts at negative X / Y)' : 'X0 Y0 = lower-left corner of the job: every move is at X ≥ 0, Y ≥ 0',
+      origin: o.origin === 'job' ? 'X0 Y0 = lower-left corner of the job: every move is at X ≥ 0, Y ≥ 0' : `X0 Y0 = lower-left corner of the PCB; the cutout reaches ${o.cut_dia} mm left of and below it`,
       isolation: { passes: passes.length, rings, length_mm: Math.round(isoLen), v_bit_mm: o.iso_dia, depth_mm: o.iso_depth },
       milled_holes: milled.length, cutout: { end_mill_mm: o.cut_dia, depth_mm: +total.toFixed(2), passes: steps, tabs: nt },
       board_thickness_mm: thick, est_minutes: Math.ceil(mins), files: fl, warnings, grid_mm: +g.toFixed(4),
     });
-    const bits = [`V-bit 20-30 deg, ${o.iso_dia} mm wide at ${o.iso_depth} mm deep  ->  1_isolation.nc`, ...info.drills.map(q => `${q.bit_mm.toFixed(2)} mm drill (${q.holes} holes)  ->  ${q.file}`), `${o.cut_dia} mm flat end mill  ->  3_cutout.nc${milled.length ? ` (also mills the ${milled.length} hole${milled.length > 1 ? 's' : ''} of ${n3(millAt)} mm and more)` : ''}`];
+    const bitList = [`V-bit 20-30 deg, ${o.iso_dia} mm wide at ${o.iso_depth} mm deep  ->  1_isolation.nc`, ...info.drills.map(q => `${q.bit_mm.toFixed(2)} mm drill (${q.holes} holes${q.widened ? `, ${q.widened} widened` : ''})  ->  ${q.file}`), `${o.cut_dia} mm flat end mill  ->  3_cutout.nc${milled.length ? ` (also mills the ${milled.length} hole${milled.length > 1 ? 's' : ''} of ${n3(millAt)} mm and more)` : ''}`];
     files['README-cnc.txt'] = [`${name} - CNC milling files (GRBL, e.g. CNC 3018 Pro)`, '',
-      `Board ${info.board_mm.join(' x ')} mm, job ${info.job_mm.join(' x ')} mm (the copper sheet must reach this far right and up from X0 Y0).`,
+      o.origin === 'job' ? `Board ${info.board_mm.join(' x ')} mm, job ${info.job_mm.join(' x ')} mm (the copper sheet must reach this far right and up from X0 Y0).`
+        : `Board ${info.board_mm.join(' x ')} mm. From X0 Y0 the copper sheet must reach ${n3(W + o.cut_dia + 1)} mm right and ${n3(H + o.cut_dia + 1)} mm up, and ${n3(o.cut_dia + 1)} mm left and down (cutout).`,
       `Copper milled: ${info.layer} layer, ${mirror ? 'MIRRORED (copper side up on the machine, parts go on the other side)' : 'not mirrored (parts on the copper side)'}.`,
       `${info.origin}. Z0 = copper surface. About ${info.est_minutes} min of cutting.`, '',
-      'Bits and files, in this order (change the bit, set ONLY Z0 again, never X0 / Y0):', ...bits.map((b, i) => `  ${i + 1}. ${b}`), '',
+      'Bits and files, in this order (change the bit, set ONLY Z0 again, never X0 / Y0):', ...bitList.map((b, i) => `  ${i + 1}. ${b}`), '',
       'Setup:',
       '  1. Double-sided tape over the whole back of the copper board, on a flat sacrificial board, edges along X / Y, clamps outside the job.',
-      '  2. Jog the V-bit to the lower-left corner of the copper sheet (1-2 mm inside the edge): X0, Y0.',
+      o.origin === 'job' ? '  2. Jog the V-bit to the lower-left corner of the copper sheet (1-2 mm inside the edge): X0, Y0.'
+        : `  2. Jog the V-bit to where the PCB's lower-left corner goes, at least ${n3(o.cut_dia + 1)} mm in from the sheet's left and bottom edges: X0, Y0.`,
       '  3. Z0: paper between bit and copper, step down 0.01 mm until it drags, take the paper away, 0.01 mm more, Z0.',
       '  4. First time: set Z0 5 mm higher and run 1_isolation.nc in the air to check the moves.',
       '  5. Not flat? Candle -> Heightmap with a probe clip (the files have no height compensation).',

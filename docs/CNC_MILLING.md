@@ -10,13 +10,13 @@ CircuitPilot writes the G-code itself: no FlatCAM, no Gerber conversion step.
 | File | Bit | What |
 |---|---|---|
 | `1_isolation.nc` | V-bit 20–30° | Rings around the copper at `iso_dia/2`, then `+ iso_dia·(1 − overlap)` for each extra pass, at `−iso_depth` |
-| `2_drill_<d>mm.nc` | drill `<d>` | One file per hole size (pads, vias, mounting holes), nearest-neighbour order, to `−(thickness + 0.2)` |
+| `2_drill_<d>mm.nc` | drill `<d>` | One file per bit you have (`drill_bits`, default 0.8 / 1.0 mm): each hole gets the smallest bit that fits; holes bigger than every bit and smaller than the end mill are drilled, then widened in a small circle, 0.4 mm deeper per turn at 30 mm/min |
 | `3_cutout.nc` | flat end mill | Holes ≥ end mill + 0.1 mm milled as circles (G2), then the outline at `cut_dia/2` outside the board, `cut_step` per pass to `−(thickness + 0.1)`, with tabs |
 | `preview.svg` | | Copper sheet, isolation (blue), cutout (red), tabs (yellow), holes, X0 Y0 (green) |
 | `README-cnc.txt` | | Bit order, job size, set-up steps, warnings |
 
 Every file: `G21 G90 G94`, `G0 Z5`, `M3 S1000`, `G4 P3` … `G0 Z5`, `M5`, `G0 X0 Y0`, `M2`.
-**X0 Y0 = lower-left corner of the job** (all moves at X, Y ≥ 0; `origin: "board"` puts it on the board corner instead).
+**X0 Y0 = lower-left corner of the PCB** (default). The cutout reaches `cut_dia` (2 mm) left of and below it, so set X0 Y0 at least 3 mm inside the sheet edge. `origin: "job"` puts X0 Y0 on the job corner instead (every move at X, Y ≥ 0).
 **Z0 = copper surface.**
 
 ## Settings (defaults)
@@ -32,7 +32,8 @@ Every file: `G21 G90 G94`, `G0 Z5`, `M3 S1000`, `G4 P3` … `G0 Z5`, `M5`, `G0 X
 | `board_thick` | design (1.6) | mm |
 | `spindle` | 1000 | `S` value (GRBL `$30=1000` → full speed) |
 | `mirror` | auto | auto = mirrored for bottom copper, or top copper with through-hole parts only (the parts go on the other side); `off` for SMD on the copper side |
-| `origin` | job | `job` or `board` |
+| `origin` | board | `board` (PCB corner) or `job` |
+| `drill_bits` | [0.8, 1.0] | the drill bits you have |
 | `layer` | auto | the copper side with the tracks |
 
 ## How it works
@@ -56,20 +57,29 @@ Every file: `G21 G90 G94`, `G0 Z5`, `M3 S1000`, `G4 P3` … `G0 Z5`, `M5`, `G0 X
 
 Code: [`js/cnc.js`](../js/cnc.js).
 
-## Design rules for a millable board
+## Design rules: preset `cnc3018` (⚙ Rules → CNC milling — 3018)
 
-- **⚙ Rules → Home etching / CNC milling (1 layer)**:
-  - 0.4 mm tracks and gaps (0.3 minimum with a fine V-bit);
-  - 1 mm from the edge;
-  - holes ≥ 0.6 mm.
-- **Through-hole parts**: copper on the bottom of the finished board. Mirror stays on (auto).
-- **SMD on a single-sided board**: the parts sit on the copper, so mirror is off (auto when the top copper has SMD pads).
-  - Use 0805 / 1206 and SOIC or bigger.
-  - QFN and 0.5 mm pitch are not realistic on a 3018.
-- **One copper side only**: tracks on both layers are refused. Re-route on one layer, or use wire jumpers.
-  - Vias are drilled, but each needs a wire link.
-- **Auto-size on one layer**: if the packed board does not route, it is made 25 % bigger and routed again (up to twice).
-- **GND pour**: less copper to remove, but long isolation rings. Without a pour, the rest of the copper stays, unconnected.
+| Rule | Value | Why |
+|---|---|---|
+| Layers | 1 | one copper side |
+| Track width | 0.5 mm, power nets 1.0 mm, never under 0.4 | the V-bit eats the edges; thin tracks lift when soldering |
+| Clearance (tracks, pads, vias) | 0.4 mm | groove (~0.15 mm, more where the board is not flat) + ~0.1 mm machine play |
+| Pour clearance | 0.6 mm | the isolation passes fully separate the pour |
+| Copper to edge | 1.5 mm | 2 mm end mill, tabs, burr |
+| Smallest hole | 0.8 mm | 0.6 mm bits break on a 3018 |
+| Hole to hole | 1.0 mm | drill wander |
+| Ring around a through-hole pad | ≥ 0.35 mm (warning) | unplated pads lift, the drill can be off centre |
+| Smallest pour piece | 2 mm² | slivers peel off |
+| Track corners | 45° | the V-bit cannot reach sharp inside corners |
+| Vias | DRC error | nothing to join on a 1-sided board: use a wire jumper |
+| Tracks on both layers | DRC error | |
+| Pin pitch under 1.2 mm | DRC warning | SOIC 1.27 mm or bigger |
+| Pads under 0.6 mm (0603 and smaller) | DRC warning | use 0805 / 1206 |
+
+- Through-hole parts: copper on the bottom of the finished board → mirror on (auto).
+- SMD on a single-sided board: the parts sit on the copper → not mirrored (auto when the top copper has SMD pads).
+- Auto-size on one layer: if the packed board does not route, it is made 25 % bigger and routed again (twice at most).
+- The `home` preset stays for chemical etching (0.4 mm tracks).
 
 ## Running the job (Candle or any GRBL sender, 115200 baud)
 

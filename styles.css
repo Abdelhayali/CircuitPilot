@@ -572,3 +572,27 @@ body.web .as-tabs .tag.webonly { display: inline; }
 .enc-check .ck-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; } .enc-check .ck-head .mini-btn { margin-left: auto; }
 .enc-check .ck-list { margin: 4px 0; padding-left: 16px; } .enc-check .ck-list li { cursor: pointer; margin: 2px 0; } .enc-check .ck-list li:hover { text-decoration: underline; }
 .enc-check li.bad { color: var(--bad, #e5534b); } .enc-check li.warn { color: var(--warn, #d29922); }
+/* Design editor (Tinkercad style) */
+.enc-design { position: absolute; left: 10px; top: 40px; width: min(330px, calc(100% - 20px)); max-height: calc(100% - 50px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; z-index: 6; box-shadow: 0 6px 20px rgba(0, 0, 0, .25); }
+.enc-design .ed-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; } .enc-design .ed-head select { margin-left: auto; padding: 2px 4px; font-size: 12px; }
+.enc-design .ed-head .seg button { padding: 2px 8px; font-size: 14px; }
+.enc-design .ed-sec { border-top: 1px solid var(--line); padding: 4px 0; } .enc-design summary { cursor: pointer; font-weight: 600; margin: 2px 0 4px; }
+.enc-design .ed-add { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.enc-design .ed-add button { display: flex; align-items: center; gap: 5px; padding: 3px 6px; font-size: 11px; text-align: left; white-space: nowrap; overflow: hidden; }
+.enc-design .ed-add button span { font-size: 15px; width: 16px; text-align: center; color: #e8a33d; }
+.enc-design .row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin: 4px 0; } .enc-design .row select { flex: 1; min-width: 0; }
+.enc-design .ed-list { list-style: none; margin: 0; padding: 0; max-height: 150px; overflow: auto; }
+.enc-design .ed-list li { display: flex; align-items: center; gap: 5px; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.enc-design .ed-list li:hover { background: var(--panel2); } .enc-design .ed-list li.on { background: color-mix(in srgb, var(--accent) 25%, transparent); } .enc-design .ed-list li.off { opacity: .5; }
+.enc-design .ed-list .ic { width: 14px; text-align: center; } .enc-design .ed-list .tag { margin-left: auto; font-size: 10px; padding: 0 5px; border-radius: 8px; }
+.enc-design .tag.solid { background: #e8a33d33; color: #e8a33d; } .enc-design .tag.hole { background: #9aa4b233; color: var(--muted); }
+.enc-design label { display: flex; flex-direction: column; gap: 2px; margin: 3px 0; color: var(--muted); } .enc-design label input, .enc-design label select { color: var(--text); }
+.enc-design .ed-grid { display: grid; grid-template-columns: 62px repeat(3, 1fr); gap: 3px; align-items: center; margin: 4px 0; } .enc-design .ed-grid span { color: var(--muted); }
+.enc-design input[type=number] { width: 100%; min-width: 0; padding: 3px 5px; }
+.enc-design .row input[type=number] { width: 44px; }
+.enc-design .ed-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 6px; } .enc-design .ed-grid2 .wide { grid-column: 1 / -1; }
+.enc-design input[type=color] { padding: 0; height: 24px; width: 100%; }
+.enc-design .ed-sh { display: flex; margin: 4px 0; } .enc-design .ed-sh button { flex: 1; } .enc-design .ed-sh button.on.hole { background: #5b6573; color: #fff; }
+.enc-design .ed-align { display: grid; grid-template-columns: 18px repeat(3, 1fr); gap: 3px; align-items: center; margin: 4px 0; }
+.enc-design .ed-actions { display: flex; flex-wrap: wrap; gap: 4px; border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; } .enc-design .ed-actions button { padding: 3px 7px; font-size: 11px; }
+.enc-design .ed-keys { margin-top: 4px; line-height: 1.4; }

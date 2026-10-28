@@ -324,17 +324,19 @@ const Enclosure = (() => {
     standoffHeight: 5.0, standoffDiameter: 6.0, screwHole: 2.5, lidFit: 0.3, lipHeight: 3.0, lipWidth: 1.2,
     vents: true, ventWidth: 1.6, ventLength: 18, ventSpacing: 3.5, autoConnectorCutouts: true, autoLidHoles: true,
     cutouts: [], partHeights: {}, explode: 12,
-    battery: '', batteryPlace: 'under', process: 'mjf', partBodies: {},
+    battery: '', batteryPlace: 'under', process: 'mjf', partBodies: {}, shapes: [],
     // the project's manufacturing rules (F18): stricter defaults the enclosure tools apply — minWall, fit, minRidge, minPart [a, b, c]
     rules: {},   // process: mjf | sls | sla | fdm — the manufacturability check's limits   // loose cell in the box (see batteries()): under the board, beside it (+X) or above the parts
   };
-  const params = () => Object.assign({}, DEFAULTS, Model.S.enclosure || {}, { partBodies: Object.assign({}, (Model.S.enclosure || {}).partBodies || {}), rules: Object.assign({}, (Model.S.enclosure || {}).rules || {}), cutouts: ((Model.S.enclosure || {}).cutouts || []).slice(), partHeights: Object.assign({}, (Model.S.enclosure || {}).partHeights || {}) });
+  const params = () => Object.assign({}, DEFAULTS, Model.S.enclosure || {}, { partBodies: Object.assign({}, (Model.S.enclosure || {}).partBodies || {}), rules: Object.assign({}, (Model.S.enclosure || {}).rules || {}), cutouts: ((Model.S.enclosure || {}).cutouts || []).slice(), partHeights: Object.assign({}, (Model.S.enclosure || {}).partHeights || {}), shapes: JSON.parse(JSON.stringify((Model.S.enclosure || {}).shapes || [])) });
   function setParams(u = {}) {
     const S = Model.S, cur = Object.assign({}, S.enclosure || {});
     for (const [k, v] of Object.entries(u)) {
       // mode: 'box' = this parametric box, 'custom' = free-form 3D script (shape3d.js) stored in .script
       if (k === 'mode') { if (!['box', 'custom'].includes(v)) throw new Error('mode must be "box" or "custom"'); cur.mode = v; continue; }
       if (k === 'script') { cur.script = String(v || ''); continue; }
+      // design shapes placed by hand (Design editor, Tinkercad style): applied on top of the script's parts
+      if (k === 'shapes') { if (!Array.isArray(v)) throw new Error('shapes must be a list of {type, pos, size, …}'); cur.shapes = JSON.parse(JSON.stringify(v)); continue; }
       if (k === 'battery') { if (v) battery(v); cur.battery = !v ? '' : typeof v === 'object' ? v : battery(v).id === 'custom' ? v : battery(v).id; continue; }
       if (k === 'process') { if (!['mjf', 'sls', 'sla', 'fdm'].includes(v)) throw new Error('process must be mjf, sls, sla or fdm'); cur.process = v; continue; }
       if (k === 'batteryPlace') { if (!['under', 'beside', 'above'].includes(v)) throw new Error('batteryPlace must be under, beside or above'); cur.batteryPlace = v; continue; }

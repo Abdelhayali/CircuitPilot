@@ -1039,7 +1039,7 @@ const Shape3D = (() => {
       files['adhesive/README-adhesive.txt'] = [`${o.base || 'design'} — skin adhesive`, '', 'PDF: a 1:1 template. Print at 100 % ("Actual size"), check the 50 mm line with a ruler, stick the tape (e.g. 3M 2476P double-sided medical tape) on the paper and cut along the line.',
         'DXF: the same outline for a die-cutting / laser-cutting service (cut lines only).', ''].join('\n');
     }
-    if (svc === 'all') { if (r.scad) files[`${base}-enclosure.scad`] = r.scad; if (o.script) files[`${base}-enclosure-script.js`] = o.script; }
+    if (svc === 'all') { if (r.scad) files[`${base}-enclosure.scad`] = r.scad; if (o.script) files[`${base}-enclosure-script.js`] = o.script; if (o.shapes && o.shapes.length) files[`${base}-design-shapes.json`] = JSON.stringify(o.shapes, null, 1); }
     return { files, warnings: warn };
   }
   // the parametric box (Enclosure.build) through the same check: moved into script coordinates (origin = board centre,
@@ -1066,6 +1066,7 @@ CONTEXT: pcb = {w, h, thickness, shape:'round'|'ellipse'|'rect'|'rounded'|'polyg
     2D booleans (fast kernel): union2d(...s), difference2d(a, ...b), intersection2d(...s) → a region (several outlines, holes) with .offset(r, {join}) .translate .rotate .scale .mirror .extrude .bounds .area
     text2d('ECG', {size, stroke, minRidge}) → text as a region; engrave(shape, region | 'TEXT', {at:[x,y,zFace], depth, face:'top'|'bottom', minRidge (default rules.minRidge: closes ridges thinner than it), name}) → shape with the groove
     2D methods: .translate([x,y]) .rotate(deg) .scale(s|[sx,sy]) .mirror([x,y]) .offset(r) (outward > 0) .bounds .area .extrude(h,{center,scale}) .revolve({angle,fn})
+DESIGN SHAPES (set_enclosure {shapes}, or the ✎ Design editor): hand-placed boxes, cylinders, text, connector holes, bosses … applied after the script — solids join a part (target) or become their own part, holes cut every printed part (or one). They are not in this script.
 3D: cube([x,y,z],{center}), roundedBox([x,y,z], r, {center:true}) (all edges rounded — great for pods), cylinder({h, r|d, r1, r2, center, fn}),
     sphere(r|{r|d, fn}), torus({R, r}), extrude(shape2d, h, {center, scale}) (linear extrude, scale tapers the top),
     revolve(shape2d, {angle=360, fn}) (profile in X=radius / Y=height plane swept around Z — bands, rings, domes, curved straps),
@@ -1349,6 +1350,110 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     return { pcb: { w: r(w), h: r(h), thickness: L.P.pcbThickness, shape, radius: r(Math.min(w, h) / 2), center: [0, 0], outline: L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), holes: L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts }, origin: [ox, oy, L.pcbZ] };
   }
 
+  // ---------- Design: shapes placed by hand (Tinkercad style) on top of the script's parts ----------
+  // item: {id, type, name, pos: [x, y, z] (centre of its box), size: [x, y, z], rot: [ax, ay, az] (degrees, X then Y then Z),
+  // hole (cuts instead of adding), target ('new' = its own part, 'all' = every printed part, or a part name), color,
+  // mirror: [bx, by, bz], scale (groups), r (corner / edge radius), sides, top (cone top / bottom ratio), wall (tube), text, n (slots),
+  // cell (honeycomb), array: {n: [nx, ny, nz], step: [dx, dy, dz]}, children (group: solids united, holes cut out), hidden}
+  const DENSITY = { mjf: 1.01, sls: 0.95, sla: 1.18, fdm: 1.24 };
+  const DESIGN = {
+    types: {
+      box: { name: 'Box', size: [20, 20, 10] }, roundbox: { name: 'Rounded box', size: [20, 20, 10], r: 2 },
+      cylinder: { name: 'Cylinder', size: [12, 12, 10] }, cone: { name: 'Cone', size: [14, 14, 12], top: 0 },
+      sphere: { name: 'Sphere', size: [14, 14, 14] }, hemisphere: { name: 'Half sphere', size: [16, 16, 8] },
+      torus: { name: 'Torus', size: [20, 20, 4] }, tube: { name: 'Tube', size: [14, 14, 10], wall: 1.6 },
+      wedge: { name: 'Wedge', size: [20, 12, 10] }, pyramid: { name: 'Pyramid', size: [16, 16, 12] },
+      prism: { name: 'Prism', size: [14, 14, 10], sides: 6 }, stadium: { name: 'Slot (stadium)', size: [10, 6, 4] },
+      text: { name: 'Text', size: [30, 8, 1], text: 'TEXT' }, slots: { name: 'Vent slots', size: [24, 14, 10], n: 5, hole: true },
+      honeycomb: { name: 'Honeycomb grille', size: [30, 20, 10], cell: 4, hole: true },
+    },
+    // ready parts: holes sized for real connectors / LEDs, screw bosses, clips — a group can be ungrouped and edited
+    presets: {
+      usbc: { name: 'USB-C opening', type: 'stadium', size: [9.6, 12, 3.8], hole: true },
+      microusb: { name: 'Micro-USB opening', type: 'stadium', size: [8.4, 12, 3.4], hole: true },
+      led3: { name: 'LED 3 mm hole', type: 'cylinder', size: [3.2, 3.2, 12], hole: true },
+      led5: { name: 'LED 5 mm hole', type: 'cylinder', size: [5.2, 5.2, 12], hole: true },
+      lightpipe: { name: 'Light pipe Ø2', type: 'cylinder', size: [2.2, 2.2, 12], hole: true },
+      button: { name: 'Button hole Ø6', type: 'cylinder', size: [6.4, 6.4, 12], hole: true },
+      jack35: { name: '3.5 mm jack hole', type: 'cylinder', size: [6.4, 12, 6.4], rot: [90, 0, 0], hole: true },
+      screw_m2: { name: 'Screw hole M2', type: 'cylinder', size: [2.3, 2.3, 20], hole: true },
+      screw_m3: { name: 'Screw hole M3', type: 'cylinder', size: [3.3, 3.3, 20], hole: true },
+      boss_m2: { name: 'Boss M2 insert', type: 'group', size: [6.4, 6.4, 6], children: [{ type: 'cylinder', size: [6.4, 6.4, 6], pos: [0, 0, 0] }, { type: 'cylinder', size: [3.2, 3.2, 4.5], pos: [0, 0, 0.8], hole: true }] },
+      boss_m3: { name: 'Boss M3 insert', type: 'group', size: [8, 8, 7], children: [{ type: 'cylinder', size: [8, 8, 7], pos: [0, 0, 0] }, { type: 'cylinder', size: [4, 4, 5.5], pos: [0, 0, 0.8], hole: true }] },
+      standoff: { name: 'PCB standoff M2', type: 'group', size: [5, 5, 4], children: [{ type: 'cylinder', size: [5, 5, 4], pos: [0, 0, 0] }, { type: 'cylinder', size: [1.7, 1.7, 4.2], pos: [0, 0, 0], hole: true }] },
+      rib: { name: 'Stiffening rib', type: 'box', size: [20, 1.2, 6] },
+      snap: { name: 'Snap-fit hook', type: 'group', size: [6, 3.2, 8], children: [{ type: 'box', size: [6, 1.4, 8], pos: [0, -0.9, 0] }, { type: 'wedge', size: [6, 1.8, 2.4], pos: [0, 0.7, 2.8], rot: [0, 0, 0] }] },
+      strap: { name: 'Strap slot 22 mm', type: 'stadium', size: [23, 3, 20], rot: [90, 0, 0], hole: true },
+      magnet: { name: 'Magnet pocket 6×2', type: 'cylinder', size: [6.2, 6.2, 2.2], hole: true },
+      label: { name: 'Engraved label', type: 'text', size: [24, 5, 0.6], text: 'NODE-01', hole: true },
+    },
+  };
+  function applyDesign(items, parts, lib, intended, logs) {
+    const V = (v, d) => Array.isArray(v) && v.length === 3 ? v.map((x, i) => Number.isFinite(+x) ? +x : d[i]) : d.slice();
+    // the primitive of an item, centred on [0, 0, 0] in its size box
+    function prim(it) {
+      const t = it.type, [x, y, z] = V(it.size, (DESIGN.types[t] || {}).size || [10, 10, 10]).map(v => Math.max(0.05, v)), fn = it.sides ? Math.max(3, Math.round(it.sides)) : undefined;
+      switch (t) {
+        case 'box': return cube([x, y, z], { center: true });
+        case 'roundbox': return roundedBox([x, y, z], Math.max(0, +it.r || 0), { center: true });
+        case 'cylinder': case 'prism': return cylinder({ d: x, h: z, center: true, fn: t === 'prism' ? (fn || 6) : fn }).scale([1, y / x, 1]);
+        case 'cone': return cylinder({ d1: x, d2: Math.max(0, Math.min(1, +it.top || 0)) * x, h: z, center: true, fn }).scale([1, y / x, 1]);
+        case 'sphere': return sphere({ d: x, fn }).scale([1, y / x, z / x]);
+        case 'hemisphere': return intersection(sphere({ d: x, fn }), cube([x + 2, x + 2, x / 2 + 1]).translate([-x / 2 - 1, -x / 2 - 1, 0])).scale([1, y / x, 2 * z / x]).translate([0, 0, -z / 2]);
+        case 'torus': { const r = Math.min(z, x / 2 - 0.01) / 2; return torus({ R: x / 2 - r, r, fn }).scale([1, y / x, z / (2 * r)]); }
+        case 'tube': { const w = Math.max(0.2, Math.min(+it.wall || 1.6, x / 2 - 0.1, y / 2 - 0.1)); return difference(cylinder({ d: x, h: z, center: true, fn }).scale([1, y / x, 1]), cylinder({ d: x - 2 * w, h: z + 1, center: true, fn }).scale([1, (y - 2 * w) / (x - 2 * w), 1])); }
+        case 'wedge': return extrude(api2.polygon([[-x / 2, -z / 2], [x / 2, -z / 2], [-x / 2, z / 2]]), y, { center: true }).rotate([90, 0, 0]);
+        case 'pyramid': return cylinder({ r1: Math.SQRT1_2, r2: 0, h: z, center: true, fn: 4 }).rotate([0, 0, 45]).scale([x, y, 1]);
+        case 'stadium': { const r = Math.min(x, z) / 2 - 1e-3; return extrude(api2.roundedRect(x, z, r), y, { center: true }).rotate([90, 0, 0]); }
+        case 'text': {
+          const t2 = lib.text(String(it.text || 'TEXT'), { size: y * 0.8, depth: z }), b = t2.bounds;
+          const k = Math.min(x / Math.max(0.1, b.size[0]), 1e3); return t2.translate([-(b.min[0] + b.max[0]) / 2, -(b.min[1] + b.max[1]) / 2, -z / 2]).scale([Math.min(1, k), Math.min(1, k), 1]);
+        }
+        case 'slots': { const n = Math.max(1, Math.round(+it.n || 5)), pitch = x / n, w = Math.max(0.6, pitch * 0.5); return union(Array.from({ length: n }, (_, i) => roundedBox([w, y, z], Math.min(w / 2 - 0.01, 1), { center: true }).translate([-x / 2 + pitch * (i + 0.5), 0, 0]))); }
+        case 'honeycomb': return lib.honeycomb(x, y, { cell: +it.cell || 4, h: z, at: [0, 0, 0] });
+        case 'group': return build(it.children || []);
+        default: throw new Error(`design shape "${it.name || it.id}": unknown type ${t}`);
+      }
+    }
+    // an item in place: mirror, rotate (X, Y, Z), move; copies from its array
+    function placed(it) {
+      let sh = prim(it); const m = V(it.mirror, [0, 0, 0]);
+      for (let k = 0; k < 3; k++) if (m[k]) sh = sh.mirror([k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0]);
+      if (it.scale) { const k = V(it.scale, [1, 1, 1]).map(v => Math.max(0.01, Math.abs(v))); if (k.some(v => v !== 1)) sh = sh.scale(k); }
+      const r = V(it.rot, [0, 0, 0]); if (r.some(v => v)) sh = sh.rotate(r);
+      sh = sh.translate(V(it.pos, [0, 0, 0]));
+      const a = it.array; if (a && a.n) { const n = V(a.n, [1, 1, 1]).map(v => Math.max(1, Math.min(50, Math.round(v)))), st = V(a.step, [10, 10, 10]), L = [];
+        for (let i = 0; i < n[0]; i++) for (let j = 0; j < n[1]; j++) for (let k = 0; k < n[2]; k++) L.push(sh.translate([st[0] * i, st[1] * j, st[2] * k]));
+        if (L.length > 1) sh = union(L); }
+      return sh;
+    }
+    // a list (a group's children): solids united, holes cut out of them
+    function build(list) {
+      const on = list.filter(c => !c.hidden), sol = on.filter(c => !c.hole).map(placed), hol = on.filter(c => c.hole).map(placed);
+      if (!sol.length) { if (!hol.length) throw new Error('an empty group'); return union(hol); }
+      return hol.length ? difference(union(sol), ...hol) : union(sol);
+    }
+    const byName = n => parts.find(p => p.name === n), printed = parts.filter(p => p.kind === 'print'), add = new Map(), cut = new Map(), mine = [];
+    for (const it of items) {
+      if (!it || it.hidden) continue;
+      let sh; try { sh = placed(it); } catch (e) { throw new Error(`design shape "${it.name || it.type}": ${e.message}`); }
+      const tg = it.target || (it.hole ? 'all' : 'new');
+      if (it.hole) {
+        const L = tg === 'all' ? null : byName(tg); if (tg !== 'all' && !L) { logs.push(`design hole "${it.name || it.type}": no part "${tg}" — cuts every part`); }
+        cut.set(it, L ? [L] : null);
+        const [x, y, z] = V(it.pos, [0, 0, 0]), rr = Math.hypot(...V(it.size, [10, 10, 10])) / 2 + 3;
+        for (const side of ['left', 'right', 'front', 'back', 'top', 'bottom']) intended.push({ side, at: [x, y, z], what: `${it.name || it.type} (design hole)`, r: rr });
+        Object.defineProperty(it, '_sh', { value: sh, configurable: true });
+        continue;
+      }
+      const L = tg === 'new' ? null : byName(tg);
+      if (L) { if (!add.has(L)) add.set(L, []); add.get(L).push(sh); }
+      else { if (tg !== 'new') logs.push(`design shape "${it.name || it.type}": no part "${tg}" — made its own part`); const p = { name: String(it.name || it.type).replace(/[^\w.-]+/g, '_'), shape: sh, color: it.color || '#e8a33d', explode: null, print: null, kind: 'print', noPrint: false, sheet: null, design: true };
+        let n = p.name, k = 2; while (parts.some(q => q.name === n)) n = p.name + '_' + k++; p.name = n; parts.push(p); mine.push(p); }
+    }
+    for (const [p, L] of add) p.shape = union(p.shape, ...L);
+    for (const [it, L] of cut) for (const p of (L || printed.concat(mine))) p.shape = difference(p.shape, it._sh);
+  }
   function run(code, ctx = {}, opts = {}) {
     // fast kernel unless asked for the BSP one (or it is not loaded); a kernel failure retries once with the BSP
     if (MF && opts.kernel !== 'bsp') { try { return run1(code, ctx, Object.assign({}, opts, { kernel: 'manifold' })); } catch (e) { if (!e.kernel) throw e; } }
@@ -1796,6 +1901,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       ret = fn(...names.map(k => lib[k]), { log: lib.log, warn: lib.log, error: lib.log });
       if (!parts.length && ret instanceof Shape) lib.part('model', ret);
       if (!parts.length) throw new Error('The script made no parts — call part("name", shape) (or return a shape).');
+      if (opts.shapes && opts.shapes.length) applyDesign(opts.shapes, parts, lib, intended, logs);
       for (const p of parts) {
         if (MK) {
           p.m = evalM(p.shape.node);
@@ -1974,7 +2080,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
         let zmin = Infinity; for (const pl of p.polys) for (const v of pl.v) zmin = Math.min(zmin, rot(v).z);
         tf = v => { const r = rot(v); return new V(r.x, r.y, r.z - zmin); };
       } else tf = v => new V(v.x, v.y, v.z - b[2]);
-      const r = { name: p.name, kind: p.kind, loose, color: p.color || null, explode: p.explode, bbox: b.map(v => +v.toFixed(2)), size_mm: [b[3] - b[0], b[4] - b[1], b[5] - b[2]].map(v => +v.toFixed(2)), volume_cm3: +(volumeOf(p.polys) / 1000).toFixed(2), triangles: tris.length, open_edges: open, pieces };
+      const r = { name: p.name, kind: p.kind, loose, design: p.design || undefined, color: p.color || null, explode: p.explode, bbox: b.map(v => +v.toFixed(2)), size_mm: [b[3] - b[0], b[4] - b[1], b[5] - b[2]].map(v => +v.toFixed(2)), volume_cm3: +(volumeOf(p.polys) / 1000).toFixed(2), triangles: tris.length, open_edges: open, pieces };
       if (opts.keepPolys) r.polys = p.polys;
       if (p.thick && opts.mesh !== false) { r.thick = p.thick; r.samples = p.samples; }   // wall thickness (the viewer's heatmap)
       if (p.adhesive && p.flat) { r.flat = p.flat; r.adhesive = true; if (opts.step) { r.dxf = dxfOf(p.flat); r.pdf = pdfOfFlat(p.name, p.flat, 'Adhesive (e.g. 3M 2476P): cut along the line.'); } }
@@ -1999,6 +2105,6 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       .concat(parts.map(p => `${p.color ? `color("${p.color}") ` : ''}${p.explode ? `translate(${fv(p.explode)}) ` : ''}${p.name.replace(/[^\w]/g, '_')}();`)).join('\n') + '\n';
     return { parts: out, scad, logs, report, extras: extras.map(x => Object.assign({}, x)), kernel: MK ? 'manifold' : 'bsp', ms: Date.now() - t0 };
   }
-  return { dfmCheck, checkBox, PROCESSES, exportPack, stepOfPolys, stepOfSheet, dxfOf, profiles: P, run, context, useManifold, get fast() { return !!MF; }, HELP, EXAMPLES, TEMPLATES, PARAMS, fromTemplate, recipe, Shape, Shape2D };
+  return { DESIGN, DENSITY, dfmCheck, checkBox, PROCESSES, exportPack, stepOfPolys, stepOfSheet, dxfOf, profiles: P, run, context, useManifold, get fast() { return !!MF; }, HELP, EXAMPLES, TEMPLATES, PARAMS, fromTemplate, recipe, Shape, Shape2D };
 })();
 if (typeof module !== 'undefined') module.exports = Shape3D;

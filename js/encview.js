@@ -3,7 +3,7 @@
 const EncView = (() => {
   const $ = s => document.querySelector(s);
   const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
-  const WORKER = 'js/shape-worker.js?v=202610281300';
+  const WORKER = 'js/shape-worker.js?v=202610290200';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
   function loadThree() {
@@ -45,7 +45,8 @@ const EncView = (() => {
     $('#encLid').onclick = () => { ui.lid = !ui.lid; $('#encLid').classList.toggle('on', ui.lid); place(); };
     $('#encPcb').onclick = () => { ui.pcb = !ui.pcb; $('#encPcb').classList.toggle('on', ui.pcb); place(); };
     $('#encXray').onclick = () => { ui.xray = !ui.xray; $('#encXray').classList.toggle('on', ui.xray); place(); };
-    $('#encThick').onclick = () => { ui.thick = !ui.thick; $('#encThick').classList.toggle('on', ui.thick); if (ui.thick) boxThickness(); place(); };
+    $('#encThick').onclick = () => { ui.thick = !ui.thick; $('#encThick').classList.toggle('on', ui.thick); if (ui.thick) { boxThickness(); ui.over = false; $('#encOverhang').classList.remove('on'); } place(); };
+    $('#encOverhang').onclick = () => { ui.over = !ui.over; $('#encOverhang').classList.toggle('on', ui.over); if (ui.over) { ui.thick = false; $('#encThick').classList.remove('on'); } place(); };
     $('#encSection').onclick = () => { ui.section = ui.section ? null : 'x'; $('#encSection').classList.toggle('on', !!ui.section); place(); };
     $('#encRender').onclick = renderDialog;
     $('#encCheck').onclick = () => checkDesign();
@@ -62,7 +63,8 @@ const EncView = (() => {
       })().then(ok => ok && App.toast('STL files saved to Downloads — on JLC3DP click “Add 3D files”, upload them and pick a material (SLA resin for fine detail, PA12 nylon or TPU for wearables)', 20000));
     };
     ['encLid', 'encPcb'].forEach(id => $('#' + id).classList.add('on'));
-    Model.subscribe(kind => { if (kind === 'move') return; dirty = true; if (active) { clearTimeout(timer); timer = setTimeout(() => rebuild(false), 500); } });
+    $('#encDesign').onclick = () => EncDesign.toggle();
+    Model.subscribe(kind => { if (kind === 'move') return; if (window.EncDesign) EncDesign.reload(); dirty = true; if (active) { clearTimeout(timer); timer = setTimeout(() => rebuild(false), 500); } });
   }
   async function show() {
     active = true;
@@ -91,8 +93,8 @@ const EncView = (() => {
     // orbit / pan / zoom
     const el = renderer.domElement; let drag = null;
     el.addEventListener('contextmenu', e => e.preventDefault());
-    el.addEventListener('mousedown', e => { drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, pan: e.button !== 0 || e.shiftKey }; });
-    window.addEventListener('mouseup', e => { if (drag && ui.measure && e.button === 0 && e.target === el && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 4) pick(e); drag = null; });
+    el.addEventListener('mousedown', e => { if (window.EncDesign && EncDesign.busy()) { drag = null; return; } drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, pan: e.button !== 0 || e.shiftKey }; });
+    window.addEventListener('mouseup', e => { if (drag && e.button === 0 && e.target === el && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 4) { if (ui.measure) pick(e); else if (window.EncDesign && EncDesign.on) EncDesign.click(e); } drag = null; });
     window.addEventListener('mousemove', e => {
       if (!drag || !active) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
@@ -159,14 +161,32 @@ const EncView = (() => {
   function applyThickness() {
     const list = ui.built && ui.built.custom ? (meshes.parts || []) : [meshes.base, meshes.lid].filter(Boolean);
     for (const m of list) {
-      const smp = m.userData.samples, on = !!(ui.thick && smp);
-      if (on && !m.userData.heatGeo) m.userData.heatGeo = heatGeometry(m, smp, ui.wallMin || 1);
+      const smp = m.userData.samples, heat = !!(ui.thick && smp), over = !heat && !!ui.over, on = heat || over;
       if (!m.userData.plainGeo) m.userData.plainGeo = m.geometry;
-      const g = on ? m.userData.heatGeo : m.userData.plainGeo;
+      if (heat && !m.userData.heatGeo) m.userData.heatGeo = heatGeometry(m, smp, ui.wallMin || 1);
+      if (over && !m.userData.overGeo) m.userData.overGeo = overhangGeometry(m.userData.plainGeo, m.userData.print);
+      const g = heat ? m.userData.heatGeo : over ? m.userData.overGeo : m.userData.plainGeo;
       if (m.geometry !== g) { m.geometry = g; for (const c of m.children) if (c.userData.cap) c.geometry = g; }
       if (m.userData.baseColor == null) m.userData.baseColor = m.material.color.getHex();
       m.material.vertexColors = on; m.material.color.setHex(on ? 0xffffff : m.userData.baseColor); m.material.needsUpdate = true;
     }
+  }
+  // overhangs as the part sits on the printer (its print rotation): faces looking down steeper than 45° need supports
+  // (FDM, SLA) — red; 30–45° orange; the faces on the bed are fine. MJF / SLS print without supports.
+  function overhangGeometry(geo, print) {
+    const T = window.THREE, src = geo.attributes.position.array, n = src.length / 3, M = new T.Matrix4();
+    if (print && print.rotate) M.makeRotationFromEuler(new T.Euler(...print.rotate.map(d => (+d || 0) * Math.PI / 180), 'ZYX'));
+    const P = new Float32Array(src.length), v = new T.Vector3(); let zmin = Infinity;
+    for (let i = 0; i < n; i++) { v.fromArray(src, i * 3).applyMatrix4(M); v.toArray(P, i * 3); zmin = Math.min(zmin, v.z); }
+    const col = new Float32Array(src.length), a = new T.Vector3(), b = new T.Vector3(), c = new T.Vector3(), grey = [0.72, 0.75, 0.78];
+    for (let i = 0; i < n; i += 3) {
+      a.fromArray(P, i * 3); b.fromArray(P, i * 3 + 3); c.fromArray(P, i * 3 + 6);
+      const nz = b.clone().sub(a).cross(c.clone().sub(a)).normalize().z, bed = Math.max(a.z, b.z, c.z) < zmin + 0.3;
+      const k = bed ? grey : nz < -Math.SQRT1_2 ? [0.9, 0.22, 0.21] : nz < -0.5 ? [0.98, 0.55, 0.0] : grey;
+      for (let j = 0; j < 3; j++) col.set(k, (i + j) * 3);
+    }
+    const g = new T.BufferGeometry(); g.setAttribute('position', geo.attributes.position); g.setAttribute('normal', geo.attributes.normal); g.setAttribute('color', new T.BufferAttribute(col, 3));
+    ui.overArea = null; return g;
   }
   // the box has no thickness data from its build: run the check once when the heatmap is asked for
   function boxThickness() {
@@ -266,7 +286,7 @@ const EncView = (() => {
   function scriptCtx() { try { return Shape3D.context(Enclosure.layout()); } catch (e) { return { pcb: null }; } }
   // build a script (cached: the same script on the same board is not rebuilt)
   function runScript(code, extra = {}) {
-    const ctx = scriptCtx(), o = Object.assign({ timeLimitMs: 110000, process: Enclosure.params().process, rules: Enclosure.params().rules }, extra), key = code + '\u0000' + JSON.stringify(ctx) + JSON.stringify(o);
+    const ctx = scriptCtx(), o = Object.assign({ timeLimitMs: 110000, process: Enclosure.params().process, rules: Enclosure.params().rules, shapes: Enclosure.params().shapes }, extra), key = code + '\u0000' + JSON.stringify(ctx) + JSON.stringify(o);
     if (lastRun && lastRun.key === key) return lastRun.p;
     const id = ++seq;
     const p = new Promise((res, rej) => {
@@ -311,7 +331,7 @@ const EncView = (() => {
     else if (c && c.err) h = `<div class="bad">⚠ ${esc(c.err.message)}</div>` + (c.err.logs && c.err.logs.length ? `<pre>${esc(c.err.logs.join('\n'))}</pre>` : '');
     else if (r) {
       h = `<div class="good">✓ ${r.parts.length} part${r.parts.length > 1 ? 's' : ''} in ${(r.ms / 1000).toFixed(1)} s</div>` +
-        `<table class="pins">${r.parts.map(p => `<tr><td>${esc(p.name)}</td><td>${p.size_mm.map(v => v.toFixed(1)).join(' × ')} mm</td><td>${p.volume_cm3} cm³</td><td>${p.open_edges ? '<span class="muted" title="small mesh gaps — slicers repair them">≈ closed</span>' : 'watertight'}</td></tr>`).join('')}</table>` +
+        `<table class="pins">${r.parts.map(p => `<tr><td>${esc(p.name)}</td><td>${p.size_mm.map(v => v.toFixed(1)).join(' × ')} mm</td><td>${p.volume_cm3} cm³</td><td title="weight from the volume (${p.kind === 'metal' ? 'stainless steel' : Enclosure.params().process.toUpperCase()})">${weight(p)}</td><td>${p.open_edges ? '<span class="muted" title="small mesh gaps — slicers repair them">≈ closed</span>' : 'watertight'}</td></tr>`).join('')}</table>` +
         (r.report.collisions.length ? `<div class="bad">⚠ Collides with the board: ${r.report.collisions.map(x => `${esc(x.part)} ↔ ${esc(x.with)} (${x.overlap_mm3} mm³)`).join(', ')}</div>` : '') +
         ((r.report.outside || []).length ? `<div class="bad">⚠ Not inside the enclosure: ${r.report.outside.map(esc).join(', ')}</div>` : '') +
         (c.ctx.pcb && !r.report.collisions.length && !(r.report.outside || []).length ? '<div class="good">✓ Fit check: the board and every part are inside, no collisions.</div>' : '') +
@@ -349,12 +369,16 @@ const EncView = (() => {
       cam.tx = (b[0] + b[3]) / 2; cam.ty = (b[1] + b[4]) / 2; cam.tz = (b[2] + b[5]) / 2; cam.r = Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2]) * 2.6; ui.fitted = true;
     }
     resize(); place();
+    if (window.EncDesign) EncDesign.refresh();
     if (active) App.renderAll();
   }
+  // weight from the volume: printed density of the chosen process, stainless steel for plates
+  const grams = p => p.kind === 'reference' ? 0 : p.volume_cm3 * (p.kind === 'metal' ? 7.93 : (Shape3D.DENSITY[Enclosure.params().process] || 1.01));
+  const weight = p => p.kind === 'reference' ? '' : `≈ ${grams(p) < 10 ? grams(p).toFixed(1) : Math.round(grams(p))} g`;
   function infoCustom() {
     const c = ui.custom, r = c && c.r;
     const bat = r && (r.extras || []).find(x => x.kind === 'battery');
-    $('#encInfo').innerHTML = r ? `<b>Custom 3D</b> · ${r.parts.map(p => `${esc(p.name)} ${p.size_mm.map(v => v.toFixed(1)).join('×')} mm`).join(' · ')}${bat ? ` · 🔋 ${esc(bat.name)} ${bat.mAh} mAh` : ''}${r.report.collisions.length ? ' · <span class="bad">⚠ collisions</span>' : ''} · <span class="muted">built in ${(r.ms / 1000).toFixed(1)} s</span><br><span class="muted">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom · ask the AI to change the design</span>`
+    $('#encInfo').innerHTML = r ? `<b>Custom 3D</b> · ${r.parts.map(p => `${esc(p.name)} ${p.size_mm.map(v => v.toFixed(1)).join('×')} mm`).join(' · ')}${bat ? ` · 🔋 ${esc(bat.name)} ${bat.mAh} mAh` : ''} · ≈ ${r.parts.reduce((a, p) => a + grams(p), 0).toFixed(1)} g${r.report.collisions.length ? ' · <span class="bad">⚠ collisions</span>' : ''} · <span class="muted">built in ${(r.ms / 1000).toFixed(1)} s</span><br><span class="muted">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom · ask the AI to change the design</span>`
       : `<b>Custom 3D</b> · ${ui.running ? 'building…' : 'no model yet'}`;
   }
   function rebuild(fit) {
@@ -497,7 +521,7 @@ const EncView = (() => {
       const w = new Worker(WORKER), t = setTimeout(() => { w.terminate(); rej(new Error('high-resolution build took longer than 6 minutes')); }, 360000);
       w.onmessage = e => { clearTimeout(t); w.terminate(); e.data.ok ? res(e.data.r) : rej(new Error(e.data.error)); };
       w.onerror = e => { clearTimeout(t); w.terminate(); rej(new Error(e.message || 'worker error')); };
-      w.postMessage({ id: 1, code, ctx: scriptCtx(), opts: { quality: 'high', mesh: false, check: false, step: true, timeLimitMs: 340000 } });
+      w.postMessage({ id: 1, code, ctx: scriptCtx(), opts: { quality: 'high', mesh: false, check: false, step: true, timeLimitMs: 340000, shapes: Enclosure.params().shapes } });
     });
   }
   async function exportCustom(kind) {
@@ -514,7 +538,7 @@ const EncView = (() => {
     }
     // print parts (STL + STEP) for JLC3DP, sheet parts (DXF + STEP + a panel) for JLCCNC, a README with the order settings each
     const base = (Model.S.name || 'design').replace(/[^\w.-]+/g, '_'), proc = Enclosure.params().process;
-    const pack = svc => Shape3D.exportPack(r, { base, service: svc, process: proc, script: Enclosure.script(), pcb: scriptCtx().pcb }).files;
+    const pack = svc => Shape3D.exportPack(r, { base, service: svc, process: proc, script: Enclosure.script(), shapes: Enclosure.params().shapes, pcb: scriptCtx().pcb }).files;
     const printed = r.parts.filter(p => (p.kind || 'print') === 'print');
     if (kind === 'stl') { for (const p of printed) App.download(`${base}-${p.name}.stl`, new Blob([p.stl], { type: 'model/stl' })); }
     else if (kind === 'scad') App.download(base + '-enclosure.scad', r.scad, 'text/plain');
@@ -647,7 +671,8 @@ const EncView = (() => {
     const a = D && ui.built ? `<b>${D.size.map(mm).join(' × ')} mm</b>${D.wall ? ' · ' + thk('wall', D.wall) : ''}${D.floor ? ' · ' + thk('floor', D.floor) : ''}${D.lid ? ' · ' + thk('lid', D.lid) : ''} mm${[D.wall, D.floor, D.lid].some(m => m && !m.exact) ? ' <span class="muted" title="≈ = estimated from a few rays; ✓ Check measures every face">(≈ estimated)</span>' : ''}` : '';
     const b = ui.measure ? `<div class="encruler">📏 ${ui.pendingA ? 'click the second point' : 'click a point on the model'}${last ? ` · last: <b>${mm(last.b.distanceTo(last.a))} mm</b>` : ''} · corners snap · Esc clears</div>` : '';
     const c = ui.thick ? `<div class="encruler"><span style="color:#e53935">■</span> under ${ui.wallMin || 1} mm · <span style="color:#fb8c00">■</span> under ${((ui.wallMin || 1) * 1.5).toFixed(1)} · <span style="color:#fdd835">■</span> under ${((ui.wallMin || 1) * 2).toFixed(1)} mm (${({ mjf: 'MJF', sls: 'SLS', sla: 'SLA', fdm: 'FDM' })[Enclosure.params().process] || 'MJF'} minimum wall)</div>` : '';
-    el.innerHTML = a + b + c; el.style.display = a || b || c ? 'block' : 'none';
+    const o = ui.over && !ui.thick ? `<div class="encruler"><span style="color:#e53935">■</span> overhang steeper than 45° (supports on FDM / SLA) · <span style="color:#fb8c00">■</span> 30–45° · as each part sits on the printer${['mjf', 'sls'].includes(Enclosure.params().process) ? ' — MJF / SLS need no supports' : ''}</div>` : '';
+    el.innerHTML = a + b + c + o; el.style.display = a || b || c || o ? 'block' : 'none';
   }
   function setMeasure(on) {
     ui.measure = on; ui.pendingA = null; if (!on) ui.rulers = [];
@@ -788,7 +813,9 @@ const EncView = (() => {
   async function exportFiles() {
     if (Enclosure.mode() !== 'custom') return Enclosure.exportFiles().files;
     const r = await buildHQ(Enclosure.script()), base = (Model.S.name || 'design').replace(/[^\w.-]+/g, '_');
-    return Shape3D.exportPack(r, { base, service: 'all', process: Enclosure.params().process, script: Enclosure.script(), pcb: scriptCtx().pcb }).files;
+    return Shape3D.exportPack(r, { base, service: 'all', process: Enclosure.params().process, script: Enclosure.script(), shapes: Enclosure.params().shapes, pcb: scriptCtx().pcb }).files;
   }
-  return { init, show, hide, props, ui, rebuild: () => rebuild(true), invalidate: () => { dirty = true; }, runScript, snapshot, renderDialog, exportFiles };
+  // the scene for the Design editor (encdesign.js)
+  const _v = () => ({ scene, root, camera, renderer, cam, wrap, ui, meshes, draw, active: () => active });
+  return { _v, init, show, hide, props, ui, rebuild: () => rebuild(true), invalidate: () => { dirty = true; }, runScript, snapshot, renderDialog, exportFiles };
 })();

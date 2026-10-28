@@ -16,6 +16,7 @@
 // Long tools (routing, placement, export) run as background jobs: they answer within ~40 s, else job_status.
 // It talks to the running server.py, so projects changed here appear live in the browser.
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import http from 'node:http';
 import { Worker } from 'node:worker_threads';
@@ -58,7 +59,35 @@ Object.assign(Engine.env, {
   ui: () => { },
   // screenshots (view_design): drawn by the CircuitPilot tab open in the browser, relayed by server.py
   render: args => renderSerial(currentId, args),   // view_design
+  readGerberZip: async f => readGerberZip(f),
 });
+// the files of a zip (stored or deflated), from its central directory
+function unzip(buf) {
+  const out = {}; let e = buf.length - 22; while (e >= 0 && buf.readUInt32LE(e) !== 0x06054b50) e--;
+  if (e < 0) throw new Error('not a zip file');
+  let q = buf.readUInt32LE(e + 16); const n = buf.readUInt16LE(e + 10);
+  for (let i = 0; i < n; i++) {
+    const method = buf.readUInt16LE(q + 10), csize = buf.readUInt32LE(q + 20), nl = buf.readUInt16LE(q + 28), xl = buf.readUInt16LE(q + 30), cl = buf.readUInt16LE(q + 32), off = buf.readUInt32LE(q + 42), name = buf.toString('utf8', q + 46, q + 46 + nl);
+    const lnl = buf.readUInt16LE(off + 26), lxl = buf.readUInt16LE(off + 28), data = buf.subarray(off + 30 + lnl + lxl, off + 30 + lnl + lxl + csize);
+    if (!name.endsWith('/')) out[name] = method === 8 ? zlib.inflateRawSync(data) : Buffer.from(data);
+    q += 46 + nl + xl + cl;
+  }
+  return out;
+}
+function readGerberZip(f) {
+  const buf = fs.readFileSync(path.resolve(f)), files = unzip(buf), names = Object.keys(files);
+  // the outline: .GKO / .GM1 / Edge_Cuts / outline; its coordinates in the file's own format (FS, MO)
+  const ol = names.find(n => /\.(gko|gm1|gml)$|edge[_.-]?cuts|outline|board.?outline/i.test(n));
+  let size = [0, 0];
+  if (ol) {
+    const t = files[ol].toString('latin1'), fs_ = t.match(/%FS[LT]?A?X(\d)(\d)Y(\d)(\d)\*%/), inch = /%MOIN\*%/.test(t), dec = fs_ ? +fs_[2] : 6, k = (inch ? 25.4 : 1) / 10 ** dec;
+    const xs = [], ys = []; let x = 0, y = 0;
+    for (const m of t.matchAll(/(?:X(-?\d+))?(?:Y(-?\d+))?(?:I-?\d+)?(?:J-?\d+)?D0?[123]\*/g)) { if (m[1] != null) x = +m[1] * k; if (m[2] != null) y = +m[2] * k; xs.push(x); ys.push(y); }
+    if (xs.length) size = [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+  }
+  const layers = Math.max(1, names.filter(n => /\.(gtl|gbl|g\d+l?|gl\d)$|[-_.](f|b|in\d+)[_.]cu\b/i.test(n)).length);
+  return { data: new Uint8Array(buf), size: size.map(v => +v.toFixed(2)), layers: layers > 2 ? layers : 2, files: names };
+}
 
 // ---------- make sure the CircuitPilot app is running (Claude Desktop / Claude Code only start this MCP server) ----------
 async function ping() {
@@ -340,6 +369,7 @@ const EXTRA = [
   { name: 'copy_project', description: 'Copy a project (default: the current one) to a new project, e.g. before trying a big change or to start a variant. The copy becomes current unless open: false.', input_schema: { type: 'object', properties: { name: { type: 'string', description: 'name of the copy (default "<name> (copy)")' }, open: { type: 'boolean' } } } },
   { name: 'list_project_versions', description: 'Earlier saved states of a project (default: the current one). Kept automatically: about every 10 minutes while it is edited, whenever many parts disappear in one save, before a restore and when it is deleted. Without a project: also lists deleted projects that can be restored.', input_schema: { type: 'object', properties: {} } },
   { name: 'restore_project_version', description: 'Make an earlier state of a project current again (version from list_project_versions). The state it replaces is kept as a version too. Also brings back a deleted project (project = its id).', input_schema: { type: 'object', required: ['version'], properties: { version: { type: 'number' } } } },
+  { name: 'export_electrodes', description: 'The electrode() plates as gold (ENIG) PCB electrodes for JLCPCB (as: "pcb", default): one 0.6 mm board with all plates joined by mouse-bite tabs — gold over the whole skin side (mask open, vias tented), a solder pad on the back over each pod wire hole, true-arc outline — Gerbers + drill files + a zip for upload + an order README (ENIG 2U", Remove Mark, Single PCB) + an assembly guide picture. as: "sheet": the stainless sheet-metal set (all plates as one part on 5 mm bars + snip guide). projects: more projects whose plates go into the same board / part (e.g. the wrist and the chest designs in one order). Then jlcpcb_quote {gerber_zip} prices the gold board.', input_schema: { type: 'object', properties: { as: { type: 'string', enum: ['pcb', 'sheet'] }, projects: { type: 'array', items: { type: 'string' }, description: 'more project ids / names to merge' }, thickness: { type: 'number' }, out_dir: { type: 'string', description: 'folder (default Documents/CircuitPilot exports/<project>-electrodes)' } } } },
   { name: 'copy_block', description: 'Copy a circuit block (group of parts: schematic, PCB layout, tracks inside the block) within the current project or into another one (to_project). Power nets and keep_nets stay connected, wiring inside the block gets fresh nets, nets to outside parts are left off.', input_schema: { type: 'object', required: ['refs'], properties: { refs: { type: 'array', items: { type: 'string' } }, to_project: { type: 'string', description: 'target project id or exact name (default: the same project)' }, keep_nets: { type: 'array', items: { type: 'string' } }, suffix: { type: 'string' }, sch_offset: { type: 'array', items: { type: 'number' } }, pcb_offset: { type: 'array', items: { type: 'number' } }, place: { type: 'string', enum: ['next', 'free', 'none'] }, sheet: { type: 'number' }, near: {} } } },
 ];
 // every tool takes `project`: the call works on that project (it becomes the current one) — no guessing after a restart
@@ -351,6 +381,10 @@ const TOOLS = [...EXTRA, ...Engine.TOOLS.filter(t => !EXTRA.some(x => x.name ===
 const NO_PROJECT = new Set(['search_parts', 'web_search', 'web_fetch', 'list_my_parts', 'enclosure_script_help', 'list_batteries']);
 const RO = new Set(Engine.TOOLS.filter(t => t.ro).map(t => t.name));
 
+// the code this server runs vs. the files on disk: an update while it runs is not in its tool list — say so
+const CODE_FILES = ['js/engine.js', 'js/shape3d.js', 'mcp/circuitpilot-mcp.mjs'].map(f => path.join(ROOT, f)), mtime = f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
+const CODE_AT_START = CODE_FILES.map(mtime);
+const outdated = () => CODE_FILES.some((f, i) => mtime(f) > CODE_AT_START[i] + 1000);
 async function callTool(name, input = {}) {
   if (input.project != null && input.project !== '' && !NO_PROJECT_ARG.has(name)) {
     const ref = input.project; input = Object.assign({}, input); delete input.project;
@@ -516,19 +550,41 @@ async function callTool(name, input = {}) {
       if (d.errors && !input.force) return { exported: false, drc: d.summary, errors: d.violations.filter(v => v.severity === 'error').slice(0, 20).map(v => v.msg), hint: 'Fix these (route_pcb, optimize_pcb, place_footprint) or call again with force: true' };
       const files = Pcb.gerbers(), dir = path.resolve(String(input.out_dir || ''));
       fs.mkdirSync(dir, { recursive: true });
-      for (const [n, txt] of Object.entries(files)) fs.writeFileSync(path.join(dir, n), txt);
+      for (const [n, txt] of Object.entries(files)) { const f = path.join(dir, n); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, txt); }
       const vias = Pcb.viaSummary();
       fs.writeFileSync(path.join(dir, 'ORDER-NOTES.txt'), `${Model.S.name || 'Board'}: ${Model.S.board.w} x ${Model.S.board.h} mm, ${Pcb.rules().layers} layers\n${vias}\nDRC: ${d.summary}\n`);
       const zipPath = path.join(dir, (Model.S.name || 'board').replace(/[^\w.-]+/g, '_') + '-gerbers.zip');
       fs.writeFileSync(zipPath, Buffer.from(await ctx.makeZip(files).arrayBuffer()));
       return { exported: true, drc: d.summary, vias, warnings: d.violations.filter(v => v.severity !== 'error').slice(0, 10).map(v => v.msg), folder: dir, files: Object.keys(files), zip: zipPath };
     });
+    case 'export_electrodes': return withProject(async () => {
+      const list = Engine.plates(), from = [Model.S.name || currentId];
+      // the other projects' plates (their own 3D scripts), merged into the same board / part
+      const keep = Model.snapshot();
+      try {
+        for (const ref of input.projects || []) {
+          const pj = await resolveProject(ref); if (!pj) throw new Error(`No project "${ref}"`);
+          Model.load(await api('GET', '/api/projects/' + pj.id));
+          const more = Engine.plates(); if (!more.length) throw new Error(`Project "${pj.name}" has no electrode plates`);
+          list.push(...more.map(q => Object.assign(q, { name: (pj.name || pj.id).replace(/[^\w.-]+/g, '_').slice(0, 20) + '_' + q.name }))); from.push(pj.name || pj.id);
+        }
+      } finally { Model.load(JSON.parse(keep)); }
+      if (!list.length) throw new Error('No electrode plates — electrode({…}) in the 3D script makes them');
+      const { files, info } = Engine.electrodeFiles(list, { as: input.as, thickness: input.thickness, name: from.length > 1 ? from.join('+') : from[0] });
+      const base = (from.length > 1 ? from.join('+') : from[0]).replace(/[^\w.+-]+/g, '_');
+      const dir = path.resolve(String(input.out_dir || path.join(os.homedir(), 'Documents', 'CircuitPilot exports', base + '-electrodes')));
+      fs.mkdirSync(dir, { recursive: true });
+      for (const [n, d] of Object.entries(files)) { const f = path.join(dir, n); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, d instanceof Uint8Array ? Buffer.from(d) : d); }
+      let zip = null;
+      if ((input.as || 'pcb') === 'pcb') { const g = Object.fromEntries(Object.entries(files).filter(([n]) => /\.(G\w\w|DRL)$/i.test(n))); zip = path.join(dir, base + '-gold-electrodes-gerbers.zip'); fs.writeFileSync(zip, Buffer.from(await ctx.makeZip(g).arrayBuffer())); }
+      return Object.assign({ folder: dir, files: Object.keys(files), gerber_zip: zip || undefined, projects: from, next: zip ? `jlcpcb_quote {gerber_zip: "${zip.replace(/\\/g, '/')}", finish: 2, thickness: ${input.thickness || 0.6}} prices it` : undefined }, info);
+    }, false);
     case 'export_enclosure': return withProject(async () => {
       const dir = path.resolve(String(input.out_dir || ''));
       // custom: print parts (STL + STEP), sheet parts (DXF + STEP + panel), README per service; box: STL + STEP + .scad
       const { files, info } = ctx.Engine.enclosureFiles({ service: input.for || 'all' });
       fs.mkdirSync(dir, { recursive: true });
-      for (const [n, data] of Object.entries(files)) fs.writeFileSync(path.join(dir, n), data instanceof Uint8Array ? Buffer.from(data) : data);
+      for (const [n, data] of Object.entries(files)) { const f = path.join(dir, n); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, data instanceof Uint8Array ? Buffer.from(data) : data); }
       const zipPath = path.join(dir, (Model.S.name || 'board').replace(/[^\w.-]+/g, '_') + '-enclosure.zip');
       fs.writeFileSync(zipPath, Buffer.from(await ctx.makeZip(files).arrayBuffer()));
       return { folder: dir, files: Object.keys(files), zip: zipPath, mode: info.mode || 'box', outer_mm: info.outer_mm, parts: info.parts, collisions: info.collisions, cutouts: (info.cutouts || []).length, warnings: info.warnings, note: 'Order: the README-*.txt next to the files has the settings for each service (JLC3DP prints, JLCCNC sheet parts).' };
@@ -611,7 +667,8 @@ function startStdio() {
             const { __image, ...rest } = out;
             return reply({ content: [{ type: 'image', data: __image.data, mimeType: __image.mime }, { type: 'text', text: JSON.stringify(rest, null, 1) }] });
           }
-          return reply({ content: [{ type: 'text', text: typeof out === 'string' ? out : JSON.stringify(out, null, 1) }] });
+          const stale = outdated() ? [{ type: 'text', text: 'Note: CircuitPilot was updated after this tool server started — its tool list (and code) is the old one. Reconnect / restart the CircuitPilot MCP server to get the new tools and options.' }] : [];
+          return reply({ content: [{ type: 'text', text: typeof out === 'string' ? out : JSON.stringify(out, null, 1) }, ...stale] });
         } catch (e) { return reply({ content: [{ type: 'text', text: 'Error: ' + e.message }], isError: true }); }
       }
       default: return fail(-32601, 'Method not found: ' + method);

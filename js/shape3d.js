@@ -580,7 +580,7 @@ const Shape3D = (() => {
     // samples: about one per (spacing)² mm² of surface, at most `cap` in all
     const area = Ts.reduce((a, T) => { let s = 0; for (let i = 0; i < T.length / 9; i++) s += triNormal(T, i)[3]; return a + s; }, 0);
     const sp = MathL.max(o.spacing || 0.6, MathL.sqrt(area / (o.cap || 20000)));
-    const thin = [], gaps = [], fitMin = new Map();
+    const thin = [], gaps = [], lips = [], fitMin = new Map();
     printed.forEach((p, j) => {
       const T = Ts[j], B = Bs[j], nT = T.length / 9, orig = Fs[j].orig, thick = new Float32Array(K().triangles(p.polys).length).fill(INF);
       // sharp edges (the faces turn by 70° or more), on a 1 mm grid: a short ray next to one is a rim or a corner, not a thin wall
@@ -615,7 +615,12 @@ const Shape3D = (() => {
           const h = cast(B, [x - nx * 1e-5, y - ny * 1e-5, z - nz * 1e-5], [-nx, -ny, -nz], 1e-6, -1, false, 4);   // thicker than 4 mm: fine
           if (h) {
             const hn = triNormal(T, h.i);
-            if (hn[0] * nx + hn[1] * ny + hn[2] * nz < -0.5 && !(h.t < P.wall && nearSharp(x, y, z))) { thick[oIdx[i]] = MathL.min(thick[oIdx[i]], h.t); smp.push(x, y, z, h.t, nx, ny, nz); if (h.t < P.wall) thin.push({ part: p.name, v: h.t, area: A / m, at: [x, y, z] }); }
+            if (hn[0] * nx + hn[1] * ny + hn[2] * nz < -0.5) {
+              // next to a sharp edge a short ray may be a corner — kept apart as an "edge lip" (a strip of them is real: where a
+              // curved underside meets an end cut, the print service flags it as a thin wall)
+              thick[oIdx[i]] = MathL.min(thick[oIdx[i]], h.t); smp.push(x, y, z, h.t, nx, ny, nz);
+              if (h.t < P.wall) { const ns = nearSharp(x, y, z); if (!ns || h.t >= 0.08) (ns ? lips : thin).push({ part: p.name, v: h.t, area: A / m, at: [x, y, z] }); }
+            }
           }
           // out into the air: a narrow slit inside one part (fuses / traps powder), or the clearance to another part
           const g = cast(BA, [x + nx * 1e-5, y + ny * 1e-5, z + nz * 1e-5], [nx, ny, nz], 1e-6, -1, false, MathL.max(P.gap, P.fit) * 1.5);
@@ -643,6 +648,12 @@ const Shape3D = (() => {
       }
       res.knife_edges.push(...clusters(knives, 1.0).filter(c => c.area > 0.3).map(c => ({ part: c.part, angle_deg: +c.min.toFixed(0), length_mm: +c.area.toFixed(1), at: c.at })));
     });
+    // a near-edge sample next to an ordinary thin wall is that wall's edge (already reported): dropped, not a lip
+    { const g = new Map(), k = (x, y, z) => MathL.floor(x / 1.5) + ',' + MathL.floor(y / 1.5) + ',' + MathL.floor(z / 1.5);
+      for (const t of thin) g.set(t.part + k(...t.at), true);
+      for (let i = lips.length - 1; i >= 0; i--) { const l = lips[i], [x, y, z] = l.at; let near = false;
+        for (let a = -1; a <= 1 && !near; a++) for (let b = -1; b <= 1 && !near; b++) for (let c = -1; c <= 1 && !near; c++) near = g.has(l.part + k(x + a * 1.5, y + b * 1.5, z + c * 1.5));
+        if (near) lips.splice(i, 1); } }
     const tc = clusters(thin, 1.5).filter(c => c.area > 0.05).sort((a, b) => a.min - b.min);
     // the feature each thin spot belongs to (engraving, recess, rib …), and what to change
     const featOf = at => (o.features || []).find(ft => ft.box && at[0] >= ft.box[0] - 1 && at[0] <= ft.box[3] + 1 && at[1] >= ft.box[1] - 1 && at[1] <= ft.box[4] + 1 && at[2] >= ft.box[2] - 1 && at[2] <= ft.box[5] + 1);
@@ -656,6 +667,8 @@ const Shape3D = (() => {
       }
       return out;
     });
+    // lips: strips along an edge (≥ 2 mm² together); a lone corner sample is not one
+    res.edge_lips = clusters(lips, 1.5).filter(c => c.area >= 2).sort((a, b) => a.min - b.min).map(c => ({ part: c.part, min_mm: +c.min.toFixed(2), area_mm2: +c.area.toFixed(1), at: c.at.map(v => +v.toFixed(2)) }));
     res.narrow_gaps = clusters(gaps, 1.5).filter(c => c.area > 0.05).map(c => ({ part: c.part, gap_mm: +c.min.toFixed(2), area_mm2: +c.area.toFixed(1), at: c.at }));
     // F8: the service's smallest printable part (sorted sizes against the process box)
     res.too_small = [];
@@ -752,13 +765,29 @@ const Shape3D = (() => {
     sweep: s => { let d = s.ccw ? s.a1 - s.a0 : s.a0 - s.a1; while (d <= 1e-12) d += TAU; return Math.min(d, TAU); },
     len: s => s.t === 'L' ? Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) : s.r * P.sweep(s),
     rect(w, h, r = 0, cx = 0, cy = 0) {
-      r = Math.max(0, Math.min(r, w / 2 - 1e-6, h / 2 - 1e-6)); const x0 = cx - w / 2, x1 = cx + w / 2, y0 = cy - h / 2, y1 = cy + h / 2, L = [], q = Math.PI / 2;
+      // a pill (r within 0.05 mm of half the short side) is exactly two half circles and two straights: no 0.002 mm lines
+      r = Math.max(0, Math.min(r, w / 2, h / 2)); if (Math.min(w, h) / 2 - r < 0.05) r = Math.min(w, h) / 2;
+      if (r > 0 && Math.abs(w - h) < 1e-9 && r >= w / 2 - 1e-9) return P.circle(r, cx, cy); const x0 = cx - w / 2, x1 = cx + w / 2, y0 = cy - h / 2, y1 = cy + h / 2, L = [], q = Math.PI / 2;
       if (r < 1e-6) return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map((a, i, A) => ({ t: 'L', a, b: A[(i + 1) % 4] }));
       L.push({ t: 'L', a: [x0 + r, y0], b: [x1 - r, y0] }, { t: 'A', c: [x1 - r, y0 + r], r, a0: -q, a1: 0, ccw: true });
       L.push({ t: 'L', a: [x1, y0 + r], b: [x1, y1 - r] }, { t: 'A', c: [x1 - r, y1 - r], r, a0: 0, a1: q, ccw: true });
       L.push({ t: 'L', a: [x1 - r, y1], b: [x0 + r, y1] }, { t: 'A', c: [x0 + r, y1 - r], r, a0: q, a1: 2 * q, ccw: true });
       L.push({ t: 'L', a: [x0, y1 - r], b: [x0, y0 + r] }, { t: 'A', c: [x0 + r, y0 + r], r, a0: 2 * q, a1: 3 * q, ccw: true });
-      return L;
+      return P.clean(L);
+    },
+    // drop segments shorter than 0.01 mm (they make zero-length DXF lines and sliver STEP faces); lines take the previous end
+    clean(L) {
+      const out = L.filter(s => P.len(s) >= 0.01); if (!out.length) return L.slice();
+      for (let i = 0; i < out.length; i++) { const s = out[i], prev = P.pt(out[(i - 1 + out.length) % out.length], true); if (s.t === 'L' && Math.hypot(s.a[0] - prev[0], s.a[1] - prev[1]) > 0) out[i] = { t: 'L', a: prev.slice(), b: s.b }; }
+      return out;
+    },
+    // the widest gap between one segment's end and the next one's start (0 = the loop closes)
+    gapOf(L, closed = true) { let g = 0; for (let i = 0; i < L.length - (closed ? 0 : 1); i++) { const a = P.pt(L[i], true), b = P.pt(L[(i + 1) % L.length], false); g = Math.max(g, Math.hypot(a[0] - b[0], a[1] - b[1])); } return g; },
+    // the point `d` along a loop (wraps)
+    at(L, d) {
+      const total = L.reduce((a, s) => a + P.len(s), 0); d = total ? ((d % total) + total) % total : 0;
+      for (const s of L) { const l = P.len(s); if (d <= l + 1e-12) { if (s.t === 'L') { const f = l ? d / l : 0; return [s.a[0] + (s.b[0] - s.a[0]) * f, s.a[1] + (s.b[1] - s.a[1]) * f]; } const a = s.a0 + (s.ccw ? 1 : -1) * d / s.r; return [s.c[0] + s.r * Math.cos(a), s.c[1] + s.r * Math.sin(a)]; } d -= l; }
+      return P.pt(L[L.length - 1], true);
     },
     circle: (r, cx = 0, cy = 0) => [{ t: 'A', c: [cx, cy], r, a0: Math.PI, a1: Math.PI + TAU, ccw: true }],   // starts at its leftmost point (a bridge goes there)
     poly: pts => pts.map((a, i) => ({ t: 'L', a: a.slice(), b: pts[(i + 1) % pts.length].slice() })),
@@ -798,10 +827,20 @@ const Shape3D = (() => {
       });
       return out;
     },
-    bounds(L) { const q = P.points(L, 0.5); return [Math.min(...q.map(p => p[0])), Math.min(...q.map(p => p[1])), Math.max(...q.map(p => p[0])), Math.max(...q.map(p => p[1]))]; },
+    // exact: segment ends plus the arcs' extreme points (0°, 90°, 180°, 270°) they pass
+    bounds(L) {
+      const q = [];
+      for (const sg of L) { q.push(P.pt(sg, false), P.pt(sg, true)); if (sg.t === 'A') { const sw = P.sweep(sg); for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; let d = sg.ccw ? a - sg.a0 : sg.a0 - a; d = ((d % TAU) + TAU) % TAU; if (d <= sw + 1e-12) q.push([sg.c[0] + sg.r * Math.cos(a), sg.c[1] + sg.r * Math.sin(a)]); } } }
+      return [Math.min(...q.map(p => p[0])), Math.min(...q.map(p => p[1])), Math.max(...q.map(p => p[0])), Math.max(...q.map(p => p[1]))];
+    },
   };
+  // every contour cleaned (no sub-0.01 mm segments) and closed — a cut line that does not close is refused by the shop
+  function closedLoops(loops) {
+    return loops.map((L, i) => { const c = P.clean(L), g = P.gapOf(c); if (g > 1e-3) throw new Error(`flat outline ${i + 1} does not close (gap ${g.toFixed(3)} mm)`); return c; });
+  }
   // DXF R12, cut lines only: LINE, ARC (always counter-clockwise from start to end), CIRCLE
   function dxfOfProfiles(loops, open = []) {
+    loops = closedLoops(loops); open = open.map(P.clean);
     const L = ['0', 'SECTION', '2', 'HEADER', '9', '$ACADVER', '1', 'AC1009', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES'];
     const n = v => (+v).toFixed(5), deg = a => { let d = a * 180 / Math.PI % 360; if (d < 0) d += 360; return d.toFixed(6); };
     for (const chain of loops.concat(open)) for (const s of chain) {
@@ -815,6 +854,7 @@ const Shape3D = (() => {
   // STEP AP214 B-rep of a flat part: the loops (outer ccw, holes cw) extruded by t — flat faces, cylindrical faces for the
   // arcs and real circle / line edges, like a CAD program writes it (small file, quoted automatically)
   function stepOfProfiles(name, loops, t) {
+    loops = closedLoops(loops);
     const L = [], add = e => { L.push(e); return '#' + L.length; }, num = stepNum, dir = (x, y, z) => add(`DIRECTION('',(${[x, y, z].map(num).join(',')}))`);
     const cp = (x, y, z) => add(`CARTESIAN_POINT('',(${[x, y, z].map(num).join(',')}))`);
     const place = (o, z, x) => add(`AXIS2_PLACEMENT_3D('',${o},${z},${x})`);
@@ -857,17 +897,23 @@ const Shape3D = (() => {
     return stepFile(name, L);
   }
   // a 1:1 printable template (A4 portrait PDF, vector lines): the outline centred, a 50 mm check line, how to print it
-  function pdfOfFlat(name, flat, note = '') {
-    const pt = v => (v * 72 / 25.4).toFixed(2), W = 210, H = 297, pts = flat.loops.map(L => P.points(L, 0.2)), xs = pts.flat().map(q => q[0]), ys = pts.flat().map(q => q[1]);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2, ox = W / 2 - cx, oy = H / 2 + 10 - cy;
+  function pdfOfFlat(name, flat, note = '', marks = []) {
+    const W = 210, H = 297, pts = flat.loops.map(L => P.points(L, 0.2)), xs = pts.flat().map(q => q[0]), ys = pts.flat().map(q => q[1]);
+    // 1:1 when it fits (170 x 220 mm); bigger parts are scaled down and say so (the 50 mm line is then not a check)
+    const k = Math.min(1, 170 / Math.max(1e-6, Math.max(...xs) - Math.min(...xs)), 220 / Math.max(1e-6, Math.max(...ys) - Math.min(...ys)));
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2, ox = W / 2 - cx * k, oy = H / 2 + 10 - cy * k;
+    const pt = v => (v * 72 / 25.4).toFixed(2), X = v => pt(v * k + ox), Y = v => pt(v * k + oy);
+    if (k < 1) note = `SCALED ${Math.round(k * 100)} % (does not fit the page). ` + note;
     const asc = t => String(t).replace(/[^\x20-\x7e]/g, '-').replace(/([()\\])/g, '\\$1');
     const c = ['0 0 0 RG 0.4 w'];
-    for (const l of pts) c.push(l.map((q, i) => `${pt(q[0] + ox)} ${pt(q[1] + oy)} ${i ? 'l' : 'm'}`).join(' ') + ' h S');
-    for (const l of flat.open || []) { const q = P.points(l, 0.2).concat([P.pt(l[l.length - 1], true)]); c.push(q.map((v, i) => `${pt(v[0] + ox)} ${pt(v[1] + oy)} ${i ? 'l' : 'm'}`).join(' ') + ' S'); }
+    for (const l of pts) c.push(l.map((q, i) => `${X(q[0])} ${Y(q[1])} ${i ? 'l' : 'm'}`).join(' ') + ' h S');
+    for (const l of flat.open || []) { const q = P.points(l, 0.2).concat([P.pt(l[l.length - 1], true)]); c.push(q.map((v, i) => `${X(v[0])} ${Y(v[1])} ${i ? 'l' : 'm'}`).join(' ') + ' S'); }
+    if (marks.length) { c.push('0.85 0.1 0.1 RG 0.8 w [2 1.5] 0 d'); for (const [a, b] of marks) c.push(`${X(a[0])} ${Y(a[1])} m ${X(b[0])} ${Y(b[1])} l S`); c.push('[] 0 d 0 0 0 RG'); }
     c.push(`1 w ${pt(20)} ${pt(25)} m ${pt(70)} ${pt(25)} l S ${pt(20)} ${pt(23)} m ${pt(20)} ${pt(27)} l S ${pt(70)} ${pt(23)} m ${pt(70)} ${pt(27)} l S`);
     const txt = (x, y, sz, t) => c.push(`BT /F1 ${sz} Tf ${pt(x)} ${pt(y)} Td (${asc(t)}) Tj ET`);
     txt(20, H - 20, 14, name); txt(20, H - 27, 9, `${(Math.max(...xs) - Math.min(...xs)).toFixed(1)} x ${(Math.max(...ys) - Math.min(...ys)).toFixed(1)} mm, 1:1 template. ${note}`);
     txt(20, 30, 9, '50 mm check line: print at 100 % ("Actual size", no "Fit to page"), then measure this line.'); txt(20, 18, 8, 'CircuitPilot');
+    if (marks.length) txt(20, 37, 9, 'Red dashes: snip here (tin snips / side cutters), then file the stubs flush.');
     const stream = c.join('\n'), objs = ['<</Type/Catalog/Pages 2 0 R>>', '<</Type/Pages/Kids[3 0 R]/Count 1>>', `<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${pt(W)} ${pt(H)}]/Resources<</Font<</F1 5 0 R>>>>/Contents 4 0 R>>`, `<</Length ${stream.length}>>\nstream\n${stream}\nendstream`, '<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>'];
     let out = '%PDF-1.4\n';
     const off = [];
@@ -973,23 +1019,176 @@ const Shape3D = (() => {
     }
     return best ? best.d : 0;
   }
-  // all sheet parts on one panel: in a row inside a frame, each held by two bridges (one file = one order line).
-  // DXF: the cut lines (outline with two gaps, holes, tab cuts). STEP: the sheet with kerf-wide slots along them.
-  function sheetPanel(flats, t, o = {}) {
-    const gap = o.gap ?? 3, margin = o.margin ?? 4, bridge = o.bridge ?? 0.6, kerf = o.kerf ?? 0.2;
-    let x = margin, H = 0;
-    const placed = flats.map(f => { const b = P.bounds(f.loops[0]), d = [x - b[0], margin - b[1]]; x += b[2] - b[0] + gap; H = Math.max(H, b[3] - b[1]); return { f, d }; });
-    const W = x - gap + margin; H += 2 * margin;
-    const frame = P.rect(W, H, 0, W / 2, H / 2), dxfLoops = [frame], dxfOpen = [], stepLoops = [frame];
-    for (const { f, d } of placed) {
-      const mv = L => P.move(L, d[0], d[1]), outer = mv(f.loops[0]), total = outer.reduce((a, s) => a + P.len(s), 0);
-      const dl = extremeAt(outer, -1), dr = extremeAt(outer, 1), half = bridge / 2;
-      const c1 = P.chain(outer, dl + half, dr - half), c2 = P.chain(outer, dr + half, dl - half + (dl - half < dr + half ? total : 0));
-      const holes = f.loops.slice(1).map(mv), cuts = (f.open || []).map(mv);
-      dxfOpen.push(c1, c2, ...cuts); dxfLoops.push(...holes);
-      stepLoops.push(slotLoop(c1, kerf), slotLoop(c2, kerf), ...holes, ...cuts.map(c => slotLoop(c, kerf)));
+  // how much of a loop to cut away around distance d where a bar joins it, so the bar is at least w wide (chord ≥ w)
+  function barGap(L, d, w, total) {
+    let h = w / 2;
+    while (h < total / 4) { const a = P.at(L, d - h), b = P.at(L, d + h); if (Math.hypot(a[0] - b[0], a[1] - b[1]) >= w - 1e-6) return h; h += 0.05; }
+    return h;
+  }
+  const chainW = (L, total, a, b) => { a = ((a % total) + total) % total; b = ((b % total) + total) % total; if (b <= a + 1e-9) b += total; return P.chain(L, a, b); };
+  // all plates as ONE part: in a row, each joined to the next by a straight bar ≥ 5 mm wide (JLCCNC refuses webs and
+  // bridges under 5 mm, and prices tiny separate plates unevenly). The plates are snipped off at the marked lines.
+  // Returns the flat part (exact lines / arcs), its size, the bars and the snip lines.
+  function joinedSheet(flats, t, o = {}) {
+    const bar = o.bar ?? 5, gap = o.gap ?? 6, n = flats.length, rd = v => Math.round(v * 100) / 100;
+    let x = 0;
+    const pl = flats.map((f, i) => {
+      const b = P.bounds(f.loops[0]), d = [rd(x - b[0]), rd(-(b[1] + b[3]) / 2)]; x = rd(x + (b[2] - b[0]) + gap);
+      const mv = L => P.move(L, d[0], d[1]), L = P.clean(mv(f.loops[0])), total = L.reduce((a, q) => a + P.len(q), 0), dl = extremeAt(L, -1), dr = extremeAt(L, 1);
+      return { L, total, dl, dr, d, hl: i > 0 ? barGap(L, dl, bar, total) : 0, hr: i < n - 1 ? barGap(L, dr, bar, total) : 0, holes: f.loops.slice(1).map(mv), open: (f.open || []).map(mv) };
+    });
+    const loop = [], end = () => P.pt(loop[loop.length - 1], true), join = b => { const a = end(); if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 1e-6) loop.push({ t: 'L', a, b: b.slice() }); };
+    const push = C => { if (loop.length) join(P.pt(C[0], false)); loop.push(...C); };
+    const bars = [], snips = [];
+    if (n === 1) loop.push(...pl[0].L);
+    else {
+      const tops = [];
+      pl.forEach((q, i) => {
+        if (i < n - 1) { push(chainW(q.L, q.total, q.dl + q.hl, q.dr - q.hr)); tops.push(chainW(q.L, q.total, q.dr + q.hr, q.dl - q.hl)); }
+        else push(chainW(q.L, q.total, q.dl + q.hl, q.dl - q.hl));
+      });
+      for (let i = n - 2; i >= 0; i--) push(tops[i]);
+      join(P.pt(loop[0], false));
+      for (let i = 0; i < n - 1; i++) {
+        const A = pl[i], B = pl[i + 1], aD = P.at(A.L, A.dr - A.hr), aU = P.at(A.L, A.dr + A.hr), bD = P.at(B.L, B.dl + B.hl), bU = P.at(B.L, B.dl - B.hl);
+        const ux = (bD[0] + bU[0] - aD[0] - aU[0]) / 2, uy = (bD[1] + bU[1] - aD[1] - aU[1]) / 2, ul = Math.hypot(ux, uy) || 1, u = [ux / ul, uy / ul], m = o.snipAt ?? 0.6;
+        bars.push({ width_mm: rd(Math.min(Math.hypot(aU[0] - aD[0], aU[1] - aD[1]), Math.hypot(bU[0] - bD[0], bU[1] - bD[1]))), length_mm: rd(ul) });
+        snips.push([[aD[0] + u[0] * m, aD[1] + u[1] * m], [aU[0] + u[0] * m, aU[1] + u[1] * m]], [[bD[0] - u[0] * m, bD[1] - u[1] * m], [bU[0] - u[0] * m, bU[1] - u[1] * m]]);
+      }
     }
-    return { dxf: dxfOfProfiles(dxfLoops, dxfOpen), step: stepOfProfiles('panel', stepLoops, t), size: [W, H] };
+    const loops = [loop, ...pl.flatMap(q => q.holes)], open = pl.flatMap(q => q.open), bb = P.bounds(loop);
+    return { loops, open, size: [rd(bb[2] - bb[0]), rd(bb[3] - bb[1])], bars, snips, offsets: pl.map(q => q.d), chords: pl.map(q => ({ dl: q.dl, dr: q.dr, hl: q.hl, hr: q.hr, L: q.L })) };
+  }
+  // what a laser-cutting shop checks on a flat part: material webs (between cuts) ≥ web mm, slots / holes ≥ the sheet
+  // thickness, no tiny segments, every contour closed. From points every 0.25 mm along every cut.
+  function sheetCheck(flat, t = 0.5, o = {}) {
+    const web = o.web ?? 5, rd = v => +v.toFixed(2), res = { web_min_mm: null, slot_min_mm: null, tiny_segments: 0, open_contours: 0, issues: [] };
+    flat.loops.forEach(L => { res.tiny_segments += L.filter(q => P.len(q) < 0.01).length; if (P.gapOf(L) > 1e-3) res.open_contours++; });
+    const S = [], tot = [], nl = flat.loops.length;
+    const add = (C, ci) => { let pos = 0; for (const q of C) { const l = P.len(q), k = Math.max(1, Math.ceil(l / 0.25)); for (let j = 0; j < k; j++) S.push({ p: P.at([q], l * j / k), c: ci, d: pos + l * j / k }); pos += l; } tot[ci] = pos; };
+    flat.loops.forEach((L, i) => add(L, i)); (flat.open || []).forEach((C, j) => { add(C, nl + j); const e = P.pt(C[C.length - 1], true); S.push({ p: e, c: nl + j, d: tot[nl + j] }); });
+    const Lp = flat.loops.map(L => P.points(L, 0.2)), inMat = q => pointIn(q, Lp[0]) && !Lp.slice(1).some(h => pointIn(q, h));
+    const R = Math.max(web, t), cell = R, grid = new Map(), key = (i, j) => i + ',' + j;
+    S.forEach((s, i) => { const k = key(Math.floor(s.p[0] / cell), Math.floor(s.p[1] / cell)); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); });
+    let wmin = null, smin = null;
+    S.forEach((A, i) => {
+      const gx = Math.floor(A.p[0] / cell), gy = Math.floor(A.p[1] / cell);
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const j of grid.get(key(gx + a, gy + b)) || []) {
+        if (j <= i) continue; const B = S[j], dist = Math.hypot(A.p[0] - B.p[0], A.p[1] - B.p[1]); if (dist >= R || dist < 1e-6) continue;
+        if (A.c === B.c) { const dd = Math.abs(A.d - B.d), along = A.c < nl ? Math.min(dd, tot[A.c] - dd) : dd; if (along < dist * 2 + 0.6) continue; }   // neighbours along the same cut
+        const m = [(A.p[0] + B.p[0]) / 2, (A.p[1] + B.p[1]) / 2];
+        if (inMat(m)) { if (dist < web && (!wmin || dist < wmin.v)) wmin = { v: dist, at: m }; }
+        else if (dist < t && (!smin || dist < smin.v)) smin = { v: dist, at: m };
+      }
+    });
+    if ((flat.open || []).length) smin = { v: o.kerf ?? 0.2, at: P.pt(flat.open[0][0], false) };   // an open cut is one laser line: a kerf-wide slot
+    if (wmin) { res.web_min_mm = rd(wmin.v); res.issues.push(`material web ${rd(wmin.v)} mm at (${wmin.at.map(rd).join(', ')}) — JLCCNC needs ≥ ${web} mm between cuts (bridges, tabs and strips included)`); }
+    if (smin) { res.slot_min_mm = rd(smin.v); res.issues.push(`slot ${rd(smin.v)} mm at (${smin.at.map(rd).join(', ')}) is narrower than the ${t} mm sheet — laser slots / holes must be at least the sheet thickness`); }
+    if (res.tiny_segments) res.issues.push(`${res.tiny_segments} outline segment(s) under 0.01 mm`);
+    if (res.open_contours) res.issues.push(`${res.open_contours} contour(s) do not close`);
+    return res;
+  }
+  // ---------- assembly guide: one picture per plate (where the wire joins, how it sits), the joined part with its snip
+  // lines, and — when a plate changed since the last export — the old outline over the new one and whether it still fits
+  function assemblyGuide(plates, joined, previous = {}, title = 'design') {
+    const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])), rd = v => (+v).toFixed(1);
+    const path = (L, k, ox, oy) => { const q = P.points(L, 0.1); return q.map((v, i) => `${i ? 'L' : 'M'}${(ox + v[0] * k).toFixed(2)},${(oy - v[1] * k).toFixed(2)}`).join('') + 'Z'; };
+    const cw = 300, ch = 260, cols = Math.min(3, Math.max(1, plates.length)), out = [];
+    let y0 = 70;
+    out.push(`<text x="20" y="32" font-size="20" font-weight="600">${esc(title)} — electrode plates: assembly guide</text>`,
+      `<text x="20" y="54" font-size="13" fill="#555">Orange dot: the wire joins the BACK of the plate here, over the pod's wire hole. Dashed grey: the plate as last exported (when it changed).</text>`);
+    if (joined && joined.loops) {
+      const b = P.bounds(joined.loops[0]), w = b[2] - b[0], h = b[3] - b[1], k = Math.min(880 / Math.max(1, w), 160 / Math.max(1, h)), ox = 20 - b[0] * k, oy = y0 + 10 + b[3] * k;
+      out.push(`<text x="20" y="${y0}" font-size="15" font-weight="600">1. Snip the plates out of the joined part (${rd(joined.size[0])} × ${rd(joined.size[1])} mm) at the red lines, then file the stubs flush</text>`);
+      out.push(`<path d="${joined.loops.map(L => path(L, k, ox, oy)).join('')}" fill="#d9dde3" stroke="#222" stroke-width="1" fill-rule="evenodd"/>`);
+      joined.snips.forEach(([a, c], i) => out.push(`<line x1="${(ox + a[0] * k).toFixed(1)}" y1="${(oy - a[1] * k).toFixed(1)}" x2="${(ox + c[0] * k).toFixed(1)}" y2="${(oy - c[1] * k).toFixed(1)}" stroke="#d11" stroke-width="2.5" stroke-dasharray="5 3"/><text x="${(ox + (a[0] + c[0]) / 2 * k).toFixed(1)}" y="${(oy - Math.max(a[1], c[1]) * k - 6).toFixed(1)}" font-size="11" fill="#d11" text-anchor="middle">✂${i + 1}</text>`));
+      y0 += h * k + 50;
+    }
+    out.push(`<text x="20" y="${y0}" font-size="15" font-weight="600">${joined ? '2' : '1'}. Each plate (seen from the back, the side that goes into the pod)</text>`);
+    y0 += 14;
+    plates.forEach((pl, i) => {
+      const cx = 20 + (i % cols) * cw, cy = y0 + Math.floor(i / cols) * ch, L = pl.flat.loops[0], b = P.bounds(L), old = previous[pl.name];
+      const ob = old ? P.bounds(old.loops[0]) : b, wB = Math.max(b[2], ob[2]) - Math.min(b[0], ob[0]), hB = Math.max(b[3], ob[3]) - Math.min(b[1], ob[1]);
+      const k = Math.min((cw - 40) / Math.max(1, wB), (ch - 90) / Math.max(1, hB)), ox = cx + cw / 2 - 10, oy = cy + 30 + (ch - 90) / 2;
+      // back view: x mirrored
+      const mir = L2 => P.map(L2, q => [-q[0], q[1]], 0).map(sg => sg.t === 'A' ? Object.assign({}, sg, { a0: Math.PI - sg.a0, a1: Math.PI - sg.a1, ccw: !sg.ccw }) : sg);
+      out.push(`<rect x="${cx}" y="${cy}" width="${cw - 20}" height="${ch - 20}" rx="8" fill="#fafbfc" stroke="#ccd"/>`, `<text x="${cx + 10}" y="${cy + 20}" font-size="14" font-weight="600">${esc(pl.name)}</text>`);
+      out.push(`<path d="${pl.flat.loops.map(Lq => path(mir(Lq), k, ox, oy)).join('')}" fill="#c9ccd1" stroke="#333" stroke-width="1.2" fill-rule="evenodd"/>`);
+      let note = `${rd(b[2] - b[0])} × ${rd(b[3] - b[1])} mm`;
+      if (old && JSON.stringify(old.loops) !== JSON.stringify(pl.flat.loops)) {
+        out.push(`<path d="${path(mir(old.loops[0]), k, ox, oy)}" fill="none" stroke="#777" stroke-width="1.4" stroke-dasharray="4 3"/>`);
+        const dw = (ob[2] - ob[0]) - (b[2] - b[0]), dh = (ob[3] - ob[1]) - (b[3] - b[1]);
+        note = `changed: old ${rd(ob[2] - ob[0])} × ${rd(ob[3] - ob[1])} → new ${note}. ` + (dw <= 0.3 && dh <= 0.3 ? 'The old plate still fits the new recess (it is no bigger).' : `The old plate is ${rd(Math.max(dw, 0))} / ${rd(Math.max(dh, 0))} mm too big: file it down to the solid line.`);
+      }
+      if (pl.hole) { const hx = ox - pl.hole.at[0] * k, hy = oy - pl.hole.at[1] * k; out.push(`<circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="${Math.max(4, pl.hole.d / 2 * k).toFixed(1)}" fill="#f39c12" stroke="#a85d00"/><text x="${(hx + 10).toFixed(1)}" y="${(hy - 8).toFixed(1)}" font-size="11" fill="#a85d00">wire joins here</text>`); }
+      out.push(`<foreignObject x="${cx + 8}" y="${cy + ch - 62}" width="${cw - 36}" height="44"><div xmlns="http://www.w3.org/1999/xhtml" style="font:11px sans-serif;color:#333">${esc(note)}${pl.face === 'top' ? ' · top (finger) plate' : ' · skin plate'}</div></foreignObject>`);
+    });
+    const H = y0 + Math.ceil(plates.length / cols) * ch + 70;
+    out.push(`<text x="20" y="${H - 40}" font-size="12" fill="#333">${joined ? '3' : '2'}. Join the wire on the back over the hole (gold PCB: solder; stainless: crimp tab + rivet, spot weld or conductive epoxy), feed it through the hole, press the plate into its recess (a drop of flexible glue).</text>`);
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(940, cols * cw + 40)}" height="${H}" viewBox="0 0 ${Math.max(940, cols * cw + 40)} ${H}" font-family="sans-serif"><rect width="100%" height="100%" fill="#fff"/>${out.join('')}</svg>`;
+  }
+  // ---------- gold (ENIG) PCB electrodes: the plates as one 0.6 mm PCB, joined by mouse-bite tabs ----------
+  // Top: copper over the whole plate (0.3 mm back from the edge), mask open (gold on the skin), vias tented by mask dots.
+  // Bottom: one pad over the pod's wire hole (solder the wire there), the rest bare FR-4 (insulated from the pod).
+  // plates: [{name, flat, hole: {at: [dx, dy], d}}]; o: {name, thickness = 0.6, tab = 5, gap = 2, edge = 0.3}
+  function electrodePcb(plates, o = {}) {
+    if (!plates.length) throw new Error('no electrode plates (electrode({…}) in the 3D script makes them)');
+    const name = String(o.name || 'electrodes').replace(/[^\w.-]+/g, '_'), edge = o.edge ?? 0.3, th = o.thickness ?? 0.6, rd = v => +(+v).toFixed(2);
+    const J = joinedSheet(plates.map(p => p.flat), th, { bar: o.tab ?? 5, gap: o.gap ?? 2, snipAt: 0 });
+    const c6 = v => Math.round(v * 1e6), XY = q => `X${c6(q[0])}Y${c6(q[1])}`;
+    const head = (fn, extra = []) => ['G04 CircuitPilot gold electrodes: ' + fn + '*', '%FSLAX46Y46*%', '%MOMM*%', '%LPD*%', 'G01*', ...extra];
+    const region = (L, pts) => { L.push('G36*'); pts.forEach((q, i) => L.push(`${XY(q)}D0${i ? 1 : 2}*`)); L.push(`${XY(pts[0])}D01*`, 'G37*'); };
+    // inset a closed point ring by k (mitre; the plates are convex or gently curved)
+    const inset = (pts, k) => { const n = pts.length, ar = K().area(pts) > 0 ? 1 : -1; return pts.map((q, i) => {
+      const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n], n1 = [(q[1] - a[1]), -(q[0] - a[0])], n2 = [(b[1] - q[1]), -(b[0] - q[0])], l1 = Math.hypot(...n1) || 1, l2 = Math.hypot(...n2) || 1;
+      const m = [n1[0] / l1 + n2[0] / l2, n1[1] / l1 + n2[1] / l2], ml = Math.hypot(...m) || 1, c = Math.max(0.3, (n1[0] / l1 * m[0] + n1[1] / l1 * m[1]) / ml);
+      return [q[0] - ar * m[0] / ml * k / c, q[1] - ar * m[1] / ml * k / c]; }); };
+    const ring = L => { const q = P.points(L, 0.1); const out = [q[0]]; for (const v of q.slice(1)) if (Math.hypot(v[0] - out[out.length - 1][0], v[1] - out[out.length - 1][1]) > 0.02) out.push(v); return out; };
+    const via = 0.3, viaPad = 0.6, holes = [], bites = [];
+    const top = head('top copper (skin side, ENIG)'), bot = head('bottom copper (wire pads)', ['%ADD11C,0.600*%']), tsm = head('top solder mask (open over the plates; vias tented)', ['%ADD12C,0.800*%']), bsm = head('bottom solder mask (wire pads open)'), gko = head('board outline', ['%ADD10C,0.100*%', 'D10*', 'G75*']);
+    const pads = [];
+    plates.forEach((pl, i) => {
+      const d = J.offsets[i], L = P.move(pl.flat.loops[0], d[0], d[1]), cu = inset(ring(L), edge);
+      region(top, cu); region(tsm, inset(ring(L), Math.max(0, edge - 0.05)));
+      const h = pl.hole || { at: [0, 0], d: 1.6 }, c = [d[0] + h.at[0], d[1] + h.at[1]], pr = Math.max(1.5, (h.d + 1.4) / 2);
+      pads.push({ name: pl.name, at: c.map(rd), d_mm: rd(2 * pr) });
+      const circ = (L2, r) => region(L2, Array.from({ length: 64 }, (_, k) => [c[0] + r * Math.cos(k * Math.PI / 32), c[1] + r * Math.sin(k * Math.PI / 32)]));
+      circ(bot, pr); circ(bsm, pr + 0.05);
+      // 4 vias in the pad join it to the skin copper
+      for (let k = 0; k < 4; k++) { const a = Math.PI / 4 + k * Math.PI / 2, q = [c[0] + (pr - 0.5) * Math.cos(a), c[1] + (pr - 0.5) * Math.sin(a)]; holes.push(q); bot.push('D11*', `${XY(q)}D03*`); }
+    });
+    // tented on the skin side: mask dots over the vias (clear polarity = no opening there)
+    tsm.push('%LPC*%', 'D12*', ...holes.map(q => `${XY(q)}D03*`), '%LPD*%');
+    // outline with true arcs
+    for (const L of J.loops) {
+      gko.push(`${XY(P.pt(L[0], false))}D02*`);
+      for (const sg of L) {
+        if (sg.t === 'L') { gko.push('G01*', `${XY(sg.b)}D01*`); continue; }
+        const sw = P.sweep(sg), parts = sw > Math.PI ? 2 : 1;
+        for (let k = 1; k <= parts; k++) { const a0 = sg.a0 + (sg.ccw ? 1 : -1) * sw * (k - 1) / parts, a1 = sg.a0 + (sg.ccw ? 1 : -1) * sw * k / parts, st = [sg.c[0] + sg.r * Math.cos(a0), sg.c[1] + sg.r * Math.sin(a0)], en = [sg.c[0] + sg.r * Math.cos(a1), sg.c[1] + sg.r * Math.sin(a1)];
+          gko.push(sg.ccw ? 'G03*' : 'G02*', `${XY(en)}I${c6(sg.c[0] - st[0])}J${c6(sg.c[1] - st[1])}D01*`); }
+      }
+    }
+    // mouse bites: Ø0.5 holes at 0.8 mm along each tab's joint, on the plate edge (they break clean, little to file)
+    for (const [a, b] of J.snips) { const u = [b[0] - a[0], b[1] - a[1]], l = Math.hypot(...u), n = Math.max(2, Math.floor(l / 0.8)); for (let k = 0; k <= n; k++) bites.push([a[0] + u[0] * k / n, a[1] + u[1] * k / n]); }
+    for (const L of [top, bot, tsm, bsm, gko]) L.push('M02*');
+    const drl = (rows, tool) => ['M48', 'METRIC,TZ', `T1C${tool.toFixed(3)}`, '%', 'T1', ...rows.map(q => `X${q[0].toFixed(3)}Y${q[1].toFixed(3)}`), 'M30'].join('\n') + '\n';
+    const files = {
+      [`${name}.GTL`]: top.join('\n') + '\n', [`${name}.GBL`]: bot.join('\n') + '\n', [`${name}.GTS`]: tsm.join('\n') + '\n', [`${name}.GBS`]: bsm.join('\n') + '\n',
+      [`${name}.GKO`]: gko.join('\n') + '\n', [`${name}-PTH.DRL`]: drl(holes, via), [`${name}-NPTH.DRL`]: drl(bites, 0.5),
+    };
+    const readme = [`${name} — gold-plated (ENIG) PCB skin electrodes, ${plates.length} plate${plates.length > 1 ? 's' : ''} in one ${J.size.join(' x ')} mm board`, '',
+      'Order at JLCPCB (jlcpcb.com) — upload the Gerber zip:',
+      `  Layers: 2.  Dimensions: ${J.size.join(' x ')} mm.  PCB qty: as many sets as you want.`,
+      `  Delivery format: Single PCB (the plates are already joined by mouse-bite tabs — not "panel by JLCPCB").`,
+      `  PCB thickness: ${th} mm.  Surface finish: ENIG, gold thickness 2U" (skin contact; HASL is not for skin).`,
+      '  Mark on PCB: Remove Mark (no order number on the skin side).  Silkscreen: none (no file).  Via covering: Tented.',
+      '  Solder mask: any colour (it only shows on the back).', '',
+      'Each plate: the whole top (skin side) is gold; the back is bare except a round pad over the pod\'s wire hole — solder the wire there, feed it through the hole, press the plate into its recess.',
+      ...pads.map(q => `  ${q.name}: wire pad Ø${q.d_mm} mm at (${q.at.join(', ')}) on the board`), '',
+      'Snip the tabs at the mouse-bite rows (side cutters) and sand the edge smooth: skin touches it.', ''];
+    files['README-gold-electrodes.txt'] = readme.join('\n');
+    return { files, size: J.size, pads, plates: plates.length, guide: assemblyGuide(plates, J, {}, name) };
   }
   // ---------- order packs: the files each service takes, with a README of the order settings ----------
   // r: a run() result built with {step: true}; o: {base, service: 'all' | 'jlc3dp' | 'jlccnc', process, script, scad, pcb}
@@ -1015,23 +1214,33 @@ const Shape3D = (() => {
         '  Material: PA12-HP Nylon (general), or PA11-HP for parts worn on the skin all day (tougher, a little flexible)',
         '  Colour: Black.  Surface: Dyeing (even black, hides powder marks).  If painted: "Exterior only", so the lid fit stays as designed.',
         `  Walls: minimum ${P.wall} mm for this process; fits are designed with ${P.fit} mm clearance (tolerance about ±${P.fit} mm).`,
+        '', 'Resin or nylon?',
+        '  Nylon (MJF PA12 / PA11): matte, slightly grainy grey-black; tough and a little flexible (clips and lids do not crack); fine on skin all day (PA11 best). JLC warns on walls under 1.2 mm and refuses under 1.0 mm.',
+        '  Resin (SLA): smooth, sharp detail and text; stiffer and more brittle (thin clips snap); standard resins are not made for long skin contact. JLC warns on walls under 0.8 mm.',
+        '  JLC resins: LEDO 6060 (tough, the one to wear for testing), Black resin (looks best: display models, photos).',
+        '  JLC\'s wall heatmap: red = too thin (fix it); yellow (about 0.5-1.2 mm) is a caution only and fine for small areas such as edges and text.',
         ...(warn.length ? ['', 'Warnings:', ...warn.map(w => '  - ' + w)] : []), ''].join('\n');
     }
     if (svc !== 'jlc3dp' && metal.length) {
       for (const p of metal) { if (p.dxf) files[`${dir.metal}${base}-${p.name}.dxf`] = p.dxf; if (p.step) files[`${dir.metal}${base}-${p.name}.step`] = p.step; }
-      const pn = r.report && r.report.panel;
-      if (pn) { files[`${dir.metal}${base}-plates-panel.dxf`] = pn.dxf; if (pn.step) files[`${dir.metal}${base}-plates-panel.step`] = pn.step; }
-      const t = metal[0].sheet_mm || 0.5;
+      const pn = r.report && r.report.joined, t = metal[0].sheet_mm || 0.5;
+      if (pn) { files[`${dir.metal}${base}-plates-joined.dxf`] = pn.dxf; files[`${dir.metal}${base}-plates-joined.step`] = pn.step; files[`${dir.metal}${base}-plates-joined-snip-guide.pdf`] = pn.pdf; }
+      const tabbed = metal.filter(p => p.flat && (p.flat.open || []).length);
       files[`${dir.metal}README-JLCCNC.txt`] = [`${o.base || 'design'} — flat metal parts (JLCCNC sheet metal, jlccnc.com)`, '',
-        'Each part has a STEP and a DXF with the same name (JLCCNC wants both; zip them per part). The DXF has cut lines only.',
-        pn ? `Cheaper: order the panel (${base}-plates-panel, ${pn.size.map(v => v.toFixed(1)).join(' x ')} mm) as ONE part — every plate is held by two 0.6 mm bridges; snap them out and file the stubs.` : '', '',
+        pn ? `ORDER THIS: ${base}-plates-joined (STEP + DXF, ${pn.size.join(' x ')} mm) as ONE part, quantity = sets you want. Every plate is joined to the next by a ${pn.bars.length ? Math.min(...pn.bars.map(b => b.width_mm)) : 5} mm bar (JLCCNC refuses bridges / webs under 5 mm, and prices tiny separate plates unevenly — one may come back as "Manual Quote"). Snip the bars at the red dashes of the snip-guide PDF and file the stubs flush.`
+          : 'Each part has a STEP and a DXF with the same name (JLCCNC wants both). The DXF has cut lines only.',
+        pn ? 'The single plates (one STEP + DXF each) are here too, if you prefer them separately.' : '', '',
         ...metal.map(p => `  ${p.name}: ${p.size_mm.slice(0, 2).join(' x ')} mm, ${t} mm sheet`), '',
         'Order settings:',
         `  Process: Sheet metal — laser cutting only (no bending: the plates are flat, they follow the curve when pressed into their recess)`,
-        `  Material: Stainless steel 304 (316 for long skin contact), thickness ${t} mm`,
-        '  Finish: Brushing, or none.  NO powder coating, anodizing or painting (it insulates the electrodes).  No threads, no hardware.',
-        '  Remark for the order: "Laser cut only. Keep the 0.6 mm bridges and the U-shaped tab cuts exactly as drawn. Cut every line; there are no bend lines."',
+        `  Material: Stainless steel 304 (316 for long skin contact), thickness ${t} mm — the site starts on Aluminium 5052: CHANGE IT to stainless 304`,
+        t < 1 ? `  Finish: none (JLCCNC brushes only sheet 1.0 mm and thicker). NO powder coating, anodizing or painting (it insulates the electrodes). No threads, no hardware.`
+          : '  Finish: Brushing, or none. NO powder coating, anodizing or painting (it insulates the electrodes). No threads, no hardware.',
+        '  Remark for the order: "Laser cut only. Cut every line; there are no bend lines."',
+        '', 'Wire: join it on the BACK of each plate, over the wire hole of the pod — stainless does not take normal solder: use a crimped ring / tab under a rivet, spot welding, or conductive epoxy (or order gold-plated PCB electrodes, which solder easily).',
+        ...(tabbed.length ? [`  Note: ${tabbed.map(p => p.name).join(', ')} still have a lanced wire tab; its strip and slot are under JLCCNC's 5 mm / thickness rules — remove tab:{} for an automatic quote.`] : []),
         ...(warn.length ? ['', 'Warnings:', ...warn.map(w => '  - ' + w)] : []), ''].join('\n');
+      if (o.guide !== false) files[`${dir.metal}${base}-assembly-guide.svg`] = assemblyGuide(metal, pn, o.previous || {}, base);
     }
     const tape = r.parts.filter(p => p.adhesive);
     if (svc === 'all' && tape.length) {
@@ -1097,8 +1306,9 @@ ENCLOSURE KIT (use these — the board then always fits):
     text('LABEL', {size=5, depth=0.6, stroke, align:'center'|'left'|'right', mirror}) → flat 3D text (A-Z 0-9 - . / + : # …) on XY z 0…depth: subtract to engrave, union to emboss
     honeycomb(w, l, {cell=4, wall=1.2, h=20, at:[x,y,z]}) → hexagon grille cutter;  screwBoss({x, y, z0, h, screw:'M2'|'M2.5'|'M3', insert}) → {add, cut} (heat-set insert or self-tap)
     electrode({name, at:[x,y], shape:'rect'|'circle', w, h, r | d, rotate, z (flat skin side) | curve:{R, axisZ, along:'y'|'x', y0}, plateT=0.5, proud=0.1,
-      clearance=0.15, hole=1.6 (wire hole behind it), tab:{w,l} (lanced U-tab over the hole)}) → {cut}: subtract cut from the body; the plate becomes a 'metal'
-      part (DXF + STEP + a panel of all plates with break-off bridges); electrodes closer than 5 mm are reported (sweat bridges them)
+      clearance=0.15, hole=1.6 (wire hole behind it), holeAt:[dx,dy], face:'bottom' (skin, default) | 'top' (finger / lid plate), minGap=5 (0 = no spacing check)}) → {cut}:
+      subtract cut from the body; the plate becomes a 'metal' part (DXF + STEP, all plates as one part joined by 5 mm bars + a snip guide, or gold PCB electrodes);
+      plates on the same face closer than minGap are reported (sweat bridges them). The wire joins the back of the plate over the hole (no lanced tab: JLCCNC refuses it)
     wireChannel(a, b, d=1.2) → a round channel to cut; radialEnds(shape, {axisZ, angle=30, along:'y', y0}) → end faces square to a wrist curve (no knife-edge tails)
     strapLugs({…, barHole: 1.3 (spring-bar tip hole), contact: true (wire channel from a bar hole into the case: strap as ground)})
     splitLid(shell, e, zSplit, {fit, lipW, lipH, inner, joint: 'rabbet' (stepped joint, flush inside), region: shape2d (lid only inside it)})
@@ -1659,7 +1869,11 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
           const tall = pcb.parts.filter(p => p.side === 'top' && pcb.thickness + p.h > zSplit - lh - 0.3).concat(B && bz > zSplit - lh - 0.3 ? [{ ref: 'battery', x0: B.box ? B.box[0] : B.x0, y0: B.box ? B.box[1] : B.y0, x1: B.box ? B.box[3] : B.x1, y1: B.box ? B.box[4] : B.y1, h: bz - pcb.thickness }] : []);
           if (tall.length) {
             const v0 = MK ? evalM(lip.node).volume() : null;
-            lip = difference(lip, ...tall.map(p => cube([p.x1 - p.x0 + 0.8, p.y1 - p.y0 + 0.8, 40]).translate([p.x0 - 0.4, p.y0 - 0.4, -10])));
+            // a part near the wall: the notch runs out through the wall side of the lip (else a thin strip of lip stays
+            // between the notch and the wall — an "edge lip" the print service flags)
+            const near = lw + fit + 1.5, ex = e.cx - e.w / 2, ey = e.cy - e.l / 2, fx = e.cx + e.w / 2, fy = e.cy + e.l / 2;
+            lip = difference(lip, ...tall.map(p => { const x0 = p.x0 - 0.4 - (p.x0 - ex < near ? 20 : 0), y0 = p.y0 - 0.4 - (p.y0 - ey < near ? 20 : 0), x1 = p.x1 + 0.4 + (fx - p.x1 < near ? 20 : 0), y1 = p.y1 + 0.4 + (fy - p.y1 < near ? 20 : 0);
+              return cube([x1 - x0, y1 - y0, 40]).translate([x0, y0, -10]); }));
             const v1 = MK ? evalM(lip.node).volume() : null;
             if (v0 && v1 < v0 * 0.4) kitWarn.push(`splitLid: tall parts ${tall.map(p => p.ref).join(', ')} reach above the split, so ${Math.round((1 - v1 / v0) * 100)}% of the lid lip was cut away${v1 < 1 ? ' (no lip left)' : ''} — the lid has little to locate it. Raise the split (zSplit above ${(pcb.thickness + Math.max(...tall.map(p => p.h))).toFixed(1)}), use a lower lipH, or joint: 'rabbet'`);
           }
@@ -1782,20 +1996,21 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       if (!segs.length) throw new Error('text2d(): nothing to write');
       let reg = bool2('union', segs);
       const mr = o.minRidge ?? 0; if (mr > 0) reg = reg.offset(mr / 2).offset(-mr / 2);
-      return reg;
+      // hairline slits (letters that nearly touch, stroke joints) are cut away: no 0.02 mm gaps in the text
+      return reg.offset(-0.06).offset(0.06);
     };
     // cut a 2D shape / region / text into the face at o.at = [x, y, zFace] (top face: into -z; o.face 'bottom': into +z), depth deep.
     // minRidge (default: the project rule) closes ridges between the grooves narrower than it.
     K2.engrave = (shape, what, o = {}) => {
       const depth = num(o.depth ?? 0.6, 'depth'), [x, y, z] = o.at ? vec3(o.at, 'at') : [0, 0, 0], mr = o.minRidge ?? rules.minRidge;
       let reg = typeof what === 'string' ? K2.text2d(what, { size: o.size ?? 4 }) : what; if (!is2(reg)) throw new Error('engrave(): give a 2D shape, a region or a string');
-      if (mr > 0 && MK) reg = (reg instanceof Region2D ? reg : bool2('union', [reg])).offset(mr / 2).offset(-mr / 2);
+      if (mr > 0 && MK) reg = (reg instanceof Region2D ? reg : bool2('union', [reg])).offset(mr / 2).offset(-mr / 2).offset(-0.06).offset(0.06);
       const cut = extrude(reg, depth + 0.02).translate([x, y, o.face === 'bottom' ? z - 0.02 : z - depth]);
       features.push({ kind: 'engraving', name: o.name || (typeof what === 'string' ? what : ''), node: cut.node, depth });
       return difference(shape, cut);
     };
     K2.text = (str, o = {}) => {
-      if (MK) { const reg = K2.text2d(str, o); return extrude(reg, num(o.depth ?? 0.6, 'depth')); }
+      if (MK) { const reg = K2.text2d(str, Object.assign({ minRidge: rules.minRidge }, o)); return extrude(reg, num(o.depth ?? 0.6, 'depth')); }
       const size = num(o.size ?? 5, 'size'), depth = num(o.depth ?? 0.6, 'depth'), sw = Math.max(0.3, num(o.stroke ?? Math.max(0.4, size * 0.14), 'stroke')), r = sw / 2;
       const lines = StrokeFont.strokeText(String(str), 0, 0, size, o.align === 'left' ? 'start' : o.align === 'right' ? 'end' : 'middle', !!o.mirror), segs = [];
       const dot = api2.circle(r, { fn: 10 });
@@ -1847,25 +2062,40 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
         flat.open.push(c);
       }
       const fp = s2.translate([x, y]), fpC = s2.offset(clr).translate([x, y]), prism = s => extrude(s, 1000).translate([0, 0, -500]);
+      // face: 'bottom' (skin side, default: the plate looks down) or 'top' (a finger / lid plate: it looks up)
+      const face = o.face === 'top' ? 'top' : 'bottom', hx = x + (o.holeAt ? o.holeAt[0] : 0), hy = y + (o.holeAt ? o.holeAt[1] : 0);
       let plate, pocket, zIn;
-      if (o.curve) {   // the skin side follows a cylinder (wrist): {R, axisZ, along: 'y' (strap along Y, axis along X) | 'x', y0 / x0 = axis position}
+      if (o.curve && face === 'top') {   // a convex top following a cylinder (axis below): the plate is the outer skin of it
+        const R = num(o.curve.R, 'curve.R'), az = num(o.curve.axisZ, 'curve.axisZ'), along = o.curve.along || 'y', c0 = along === 'y' ? (o.curve.y0 || 0) : (o.curve.x0 || 0);
+        const cyl = r => (along === 'y' ? cylinder({ r, h: 1000, center: true, fn: 192 }).rotate([0, 90, 0]).translate([0, c0, az]) : cylinder({ r, h: 1000, center: true, fn: 192 }).rotate([90, 0, 0]).translate([c0, 0, az]));
+        plate = intersection(prism(fp), difference(cyl(R + proud), cyl(R + proud - plateT))).trim([0, 0, 1], az);
+        pocket = intersection(prism(fpC), difference(cyl(R + 20), cyl(R + proud - plateT - 0.05))).trim([0, 0, 1], az);
+        const d = along === 'y' ? hy - c0 : hx - c0, Rp = R + proud - plateT; zIn = az + Math.sqrt(Math.max(0, Rp * Rp - d * d));
+      } else if (face === 'top') {   // flat top at z: the plate stands proud of it by `proud`
+        plate = extrude(fp, plateT).translate([0, 0, z + proud - plateT]);
+        pocket = extrude(fpC, plateT - proud + 0.05 + 5).translate([0, 0, z + proud - plateT - 0.05]);
+        zIn = z + proud - plateT;
+      } else if (o.curve) {   // the skin side follows a cylinder (wrist): {R, axisZ, along: 'y' (strap along Y, axis along X) | 'x', y0 / x0 = axis position}
         const R = num(o.curve.R, 'curve.R'), az = num(o.curve.axisZ, 'curve.axisZ'), along = o.curve.along || 'y', c0 = along === 'y' ? (o.curve.y0 || 0) : (o.curve.x0 || 0);
         const cyl = r => (along === 'y' ? cylinder({ r, h: 1000, center: true, fn: 192 }).rotate([0, 90, 0]).translate([0, c0, az]) : cylinder({ r, h: 1000, center: true, fn: 192 }).rotate([90, 0, 0]).translate([c0, 0, az]));
         // only the skin side of the cylinder (above its axis: the body sits on the wrist)
         plate = intersection(prism(fp), difference(cyl(R - proud + plateT), cyl(R - proud))).trim([0, 0, 1], az);
         pocket = intersection(prism(fpC), cyl(R - proud + plateT + 0.05)).trim([0, 0, 1], az);
-        const d = along === 'y' ? y - c0 : x - c0, Rp = R - proud + plateT; zIn = az + Math.sqrt(Math.max(0, Rp * Rp - d * d));
+        const d = along === 'y' ? hy - c0 : hx - c0, Rp = R - proud + plateT; zIn = az + Math.sqrt(Math.max(0, Rp * Rp - d * d));
       } else {   // flat skin side at z (the plate stands proud of it by `proud`)
         plate = extrude(fp, plateT).translate([0, 0, z - proud]);
         pocket = extrude(fpC, plateT - proud + 0.05 + 5).translate([0, 0, z - 5]);
         zIn = z - proud + plateT;
       }
-      const wire = hole > 0 ? cylinder({ d: hole, h: (o.through ?? 4) + 0.05 }).translate([x + (o.holeAt ? o.holeAt[0] : 0), y + (o.holeAt ? o.holeAt[1] : 0), zIn - 0.05]) : null;
+      // the wire hole starts 0.5 mm inside the recess: in a curved recess the ceiling drops toward the hole's edge, and a
+      // hole started at the centre's height leaves a knife-edge sliver there
+      const thr = o.through ?? 4, wire = hole > 0 ? (face === 'top' ? cylinder({ d: hole, h: thr + 0.5 }).translate([hx, hy, zIn + 0.5 - thr - 0.5]) : cylinder({ d: hole, h: thr + 0.5 }).translate([hx, hy, zIn - 0.5])) : null;
       const cut = wire ? union(pocket, wire) : pocket;
       lib.part(name, plate, { kind: 'metal', thickness: plateT, color: o.color || '#c9ccd1', explode: o.explode || [0, 0, -8] });
-      parts[parts.length - 1].flat = flat;
-      electrodes.push({ name, pts: fp.pts, at: [x, y], min: o.minGap ?? 5 });
-      if (wire) intended.push({ side: 'bottom', at: [x, y, z], what: `${name} wire hole (under the plate)`, r: 4 });
+      Object.assign(parts[parts.length - 1], { flat, face, hole: hole > 0 ? { at: o.holeAt ? [+o.holeAt[0], +o.holeAt[1]] : [0, 0], d: hole } : null });
+      if (o.tab) kitWarn.push(`electrode ${name}: the lanced wire tab (strip and slot under 5 mm / the sheet thickness) makes JLCCNC refuse or hand-quote the part — leave tab out and join the wire on the back over the hole`);
+      electrodes.push({ name, pts: fp.pts, at: [x, y], min: o.minGap ?? 5, face, z: zIn });
+      if (wire) intended.push({ side: face, at: [hx, hy, zIn], what: `${name} wire hole (${face === 'top' ? 'under' : 'behind'} the plate)`, r: 4 });
       return { cut, plate, name, flat, outline: fp };
     };
     // adhesive for skin tape (e.g. 3M 2476P): the underside outline shrunk by inset, minus windows (electrodes) grown by
@@ -2043,6 +2273,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
         const d = report.dfm = dfmCheck(parts, { process: opts.process, rules, features: fts, pcb, expected: expected.concat(intended), cap: opts.dfmCap || 8000, openPts: opts.dfmOpenPts || 2500, spacing: opts.dfmSpacing, timeMs: Math.min(8000, Math.max(1500, budget - Date.now() - 500)) }), R = d.rules, f = v => v.map(x => (+x).toFixed(1)).join(', ');
         if (d.thin.length) report.warnings.push(`${R.name}: ${d.thin.length} area${d.thin.length > 1 ? 's' : ''} thinner than ${R.wall} mm — thinnest ${d.thin[0].min_mm} mm in "${d.thin[0].part}" at (${f(d.thin[0].at)})${d.thin[0].feature ? ` under ${d.thin[0].feature}: ${d.thin[0].fix}` : ''}`);
         for (const x of d.too_small) report.warnings.push(`part "${x.part}" is ${x.size_mm.join(' × ')} mm — smaller than the ${R.name} minimum ${x.min_mm.join(' × ')} mm (JLC3DP refuses it): make it at least ${x.min_mm[0]} mm thick, or print it in SLA`);
+        if ((d.edge_lips || []).length) report.warnings.push(`${d.edge_lips.length} edge lip${d.edge_lips.length > 1 ? 's' : ''} (thin strips along an open edge — print services flag them as thin walls) — thinnest ${d.edge_lips[0].min_mm} mm, ${d.edge_lips[0].area_mm2} mm² in "${d.edge_lips[0].part}" at (${d.edge_lips[0].at.join(', ')}): round or thicken that edge`);
         if (d.knife_edges.length) report.warnings.push(`${d.knife_edges.length} knife edge${d.knife_edges.length > 1 ? 's' : ''} (faces meeting below 30°, they break or fail to print) — first in "${d.knife_edges[0].part}" at (${f(d.knife_edges[0].at)})`);
         if (d.narrow_gaps.length) report.warnings.push(`${d.narrow_gaps.length} slit${d.narrow_gaps.length > 1 ? 's' : ''} narrower than ${R.gap} mm inside one part (they fuse shut) — first at (${f(d.narrow_gaps[0].at)})`);
         for (const x of d.fit.filter(x => !x.ok)) report.warnings.push(`${x.parts}: clearance ${x.clearance_mm} mm at (${f(x.at)}) is below the ${R.fit} mm ${R.name} needs — the parts may not fit together`);
@@ -2084,17 +2315,25 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       if (opts.keepPolys) r.polys = p.polys;
       if (p.thick && opts.mesh !== false) { r.thick = p.thick; r.samples = p.samples; }   // wall thickness (the viewer's heatmap)
       if (p.adhesive && p.flat) { r.flat = p.flat; r.adhesive = true; if (opts.step) { r.dxf = dxfOf(p.flat); r.pdf = pdfOfFlat(p.name, p.flat, 'Adhesive (e.g. 3M 2476P): cut along the line.'); } }
-      if (p.kind === 'metal') { const fl = flatOf(p); if (fl) { r.flat = fl; r.sheet_mm = p.sheet || null; if (opts.step) { r.dxf = dxfOf(fl); r.step = stepOfSheet(p.name, fl, p.sheet || 0.5); } } }
+      if (p.kind === 'metal') { const fl = flatOf(p); if (p.hole !== undefined) { r.hole = p.hole; r.face = p.face; } if (fl) { r.flat = fl; r.sheet_mm = p.sheet || null; if (opts.step) { r.dxf = dxfOf(fl); r.step = stepOfSheet(p.name, fl, p.sheet || 0.5); } } }
       else if (opts.step) r.step = stepOfPolys(p.name, p.polys);
       if (opts.mesh !== false) Object.assign(r, K().meshArrays(p.polys));
       if (opts.stl !== false) r.stl = K().stl(p.polys, p.name, tf);
       return r;
     });
     const sheets = out.filter(p => p.flat && p.kind === 'metal');   // the panel is for the metal parts (not the adhesive)
-    if (opts.step && sheets.length) { try { report.panel = sheetPanel(sheets.map(p => p.flat), sheets[0].sheet_mm || 0.5); } catch (e) { report.warnings.push('sheet panel: ' + e.message); } }
+    for (const p of sheets) { p.check = sheetCheck(p.flat, p.sheet_mm || 0.5); if (p.check.issues.length) report.warnings.push(`sheet part "${p.name}": ${p.check.issues.join('; ')}`); }
+    if (opts.step && sheets.length > 1) { try {
+      const t = sheets[0].sheet_mm || 0.5, J = joinedSheet(sheets.map(p => p.flat), t), fl = { loops: J.loops, open: J.open };
+      report.joined = Object.assign(J, { dxf: dxfOfProfiles(J.loops, J.open), step: stepOfProfiles('plates-joined', J.loops.concat(J.open.map(c => slotLoop(c, 0.2))), t), pdf: pdfOfFlat('plates-joined (snip guide)', fl, `${t} mm stainless; snip at the red dashes.`, J.snips), check: sheetCheck(fl, t) });
+      delete report.joined.chords;
+    } catch (e) { report.warnings.push('joined sheet part: ' + e.message); } }
     // skin electrodes closer than ~5 mm get bridged by sweat
     for (let i = 0; i < electrodes.length; i++) for (let j = i + 1; j < electrodes.length; j++) {
-      const A = electrodes[i], B = electrodes[j], d = polyGap(A.pts, B.pts), lim = Math.max(A.min, B.min);
+      const A = electrodes[i], B = electrodes[j];
+      // only plates on the same face (a lid plate over the skin plates is not bridged by sweat); minGap: 0 turns it off
+      if (A.face !== B.face || !A.min || !B.min || Math.abs(A.z - B.z) > 6) continue;
+      const d = polyGap(A.pts, B.pts), lim = Math.max(A.min, B.min);
       if (d < lim) report.warnings.push(`electrodes ${A.name} and ${B.name} are ${d.toFixed(1)} mm apart — sweat bridges gaps under about ${lim} mm (move them apart)`);
     }
     report.floating = out.filter(p => p.pieces > 1 && p.kind === 'print').map(p => ({ part: p.name, pieces: p.pieces, loose: p.loose }));
@@ -2105,6 +2344,6 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       .concat(parts.map(p => `${p.color ? `color("${p.color}") ` : ''}${p.explode ? `translate(${fv(p.explode)}) ` : ''}${p.name.replace(/[^\w]/g, '_')}();`)).join('\n') + '\n';
     return { parts: out, scad, logs, report, extras: extras.map(x => Object.assign({}, x)), kernel: MK ? 'manifold' : 'bsp', ms: Date.now() - t0 };
   }
-  return { DESIGN, DENSITY, dfmCheck, checkBox, PROCESSES, exportPack, stepOfPolys, stepOfSheet, dxfOf, profiles: P, run, context, useManifold, get fast() { return !!MF; }, HELP, EXAMPLES, TEMPLATES, PARAMS, fromTemplate, recipe, Shape, Shape2D };
+  return { DESIGN, DENSITY, joinedSheet, sheetCheck, electrodePcb, assemblyGuide, dxfOfProfiles, stepOfProfiles, pdfOfFlat, dfmCheck, checkBox, PROCESSES, exportPack, stepOfPolys, stepOfSheet, dxfOf, profiles: P, run, context, useManifold, get fast() { return !!MF; }, HELP, EXAMPLES, TEMPLATES, PARAMS, fromTemplate, recipe, Shape, Shape2D };
 })();
 if (typeof module !== 'undefined') module.exports = Shape3D;

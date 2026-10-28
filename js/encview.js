@@ -3,7 +3,7 @@
 const EncView = (() => {
   const $ = s => document.querySelector(s);
   const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
-  const WORKER = 'js/shape-worker.js?v=202610290200';
+  const WORKER = 'js/shape-worker.js?v=202610290300';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
   function loadThree() {
@@ -53,7 +53,7 @@ const EncView = (() => {
     $('#encDims').onclick = () => { ui.showDims = !ui.showDims; $('#encDims').classList.toggle('on', ui.showDims); drawOverlay(); draw(); };
     $('#encMeasure').onclick = () => setMeasure(!ui.measure);
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && active && ui.measure) { if (ui.pendingA || ui.rulers.length) { ui.pendingA = null; ui.rulers = []; drawOverlay(); draw(); dimText(); } else setMeasure(false); } });
-    $('#encStl').onclick = () => exportAll('stl'); $('#encScad').onclick = () => exportAll('scad'); $('#encZip').onclick = () => exportAll('zip'); $('#encMetal').onclick = () => exportAll('metal');
+    $('#encStl').onclick = () => exportAll('stl'); $('#encScad').onclick = () => exportAll('scad'); $('#encZip').onclick = () => exportAll('zip'); $('#encMetal').onclick = () => exportAll('metal'); $('#encGold').onclick = () => exportAll('gold');
     $('#encOrder').onclick = () => {
       // open the quote page inside the click (popup blockers), then build + download the STLs
       window.open('https://jlc3dp.com/3d-printing-quote', '_blank', 'noopener');
@@ -538,10 +538,22 @@ const EncView = (() => {
     }
     // print parts (STL + STEP) for JLC3DP, sheet parts (DXF + STEP + a panel) for JLCCNC, a README with the order settings each
     const base = (Model.S.name || 'design').replace(/[^\w.-]+/g, '_'), proc = Enclosure.params().process;
-    const pack = svc => Shape3D.exportPack(r, { base, service: svc, process: proc, script: Enclosure.script(), shapes: Enclosure.params().shapes, pcb: scriptCtx().pcb }).files;
+    const prevPlates = (Model.S.enclosure || {}).platesExported || {};
+    const pack = svc => { const f = Shape3D.exportPack(r, { base, service: svc, process: proc, script: Enclosure.script(), shapes: Enclosure.params().shapes, pcb: scriptCtx().pcb, previous: prevPlates }).files;
+      // remember the plates as ordered: the next assembly guide draws what changed since
+      const m = r.parts.filter(p => p.kind === 'metal' && p.flat); if (m.length && svc !== 'jlc3dp') Model.S.enclosure = Object.assign({}, Model.S.enclosure, { platesExported: Object.fromEntries(m.map(p => [p.name, { loops: p.flat.loops }])) });
+      return f; };
     const printed = r.parts.filter(p => (p.kind || 'print') === 'print');
     if (kind === 'stl') { for (const p of printed) App.download(`${base}-${p.name}.stl`, new Blob([p.stl], { type: 'model/stl' })); }
     else if (kind === 'scad') App.download(base + '-enclosure.scad', r.scad, 'text/plain');
+    else if (kind === 'gold') {
+      const pl = r.parts.filter(p => p.kind === 'metal' && p.flat).map(p => ({ name: p.name, flat: p.flat, hole: p.hole, face: p.face }));
+      if (!pl.length) { App.toast('This design has no electrode plates (electrode({…}) in the script)'); return false; }
+      try { const E = Shape3D.electrodePcb(pl, { name: base + '-electrodes' }), g = Object.fromEntries(Object.entries(E.files).filter(([n]) => /\.(G\w\w|DRL)$/i.test(n)));
+        App.download(base + '-gold-electrodes.zip', makeZip(Object.assign({ [base + '-electrodes-gerbers.zip']: new Uint8Array(await makeZip(g).arrayBuffer()) }, E.files, { [base + '-electrodes-assembly-guide.svg']: E.guide })));
+        App.toast(`Gold PCB electrodes: ${pl.length} plates on one ${E.size.join(' × ')} mm board — upload the inner Gerber zip at JLCPCB (README: ENIG 2U", 0.6 mm, Remove Mark, Single PCB)`, 12000); return true; }
+      catch (e) { App.toast(e.message); return false; }
+    }
     else if (kind === 'metal') { if (!r.parts.some(p => p.kind === 'metal')) { App.toast('This design has no sheet-metal parts (electrode plates…)'); return false; } App.download(base + '-sheet-metal-JLCCNC.zip', makeZip(pack('jlccnc'))); }
     else App.download(base + '-enclosure.zip', makeZip(pack('all')));
     App.toast(`Exported ${r.parts.length} part${r.parts.length > 1 ? 's' : ''}${r !== prev ? ` · high resolution (${r.parts.reduce((a, p) => a + p.triangles, 0).toLocaleString()} triangles)` : ''}`, 6000);
@@ -771,6 +783,7 @@ const EncView = (() => {
     const f = v => v.map(x => (+x).toFixed(1)).join(', '), rows = [];
     for (const x of d.too_small || []) rows.push(['bad', `“${x.part}” is ${x.size_mm.join(' × ')} mm — below the ${d.rules.name} minimum ${x.min_mm.join(' × ')} mm`, null]);
     for (const x of d.thin) rows.push(['bad', `Thin ${x.min_mm} mm in “${x.part}”${x.feature ? ` under ${esc(x.feature)} — ${esc(x.fix)}` : ''} (${x.area_mm2} mm²)`, x.at]);
+    for (const x of d.edge_lips || []) rows.push(['bad', `Edge lip ${x.min_mm} mm in “${x.part}” (${x.area_mm2} mm² strip along an open edge) — the print service flags it as a thin wall: round or thicken that edge`, x.at]);
     for (const x of d.knife_edges) rows.push(['bad', `Knife edge ${x.angle_deg}° in “${x.part}”, ${x.length_mm} mm long`, x.at]);
     for (const x of d.narrow_gaps) rows.push(['warn', `Slit ${x.gap_mm} mm in “${x.part}” (fuses shut below ${d.rules.gap} mm)`, x.at]);
     for (const x of d.fit) if (!x.ok) rows.push(['warn', `${x.parts}: clearance ${x.clearance_mm} mm, ${d.rules.name} needs ${d.rules.fit}`, x.at]);

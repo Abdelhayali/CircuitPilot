@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610290200">
+<link rel="stylesheet" href="styles.css?v=202610290300">
 </head>
 <body>
 <header id="top">
@@ -96,7 +96,8 @@
         <button id="encStl" class="primary" title="One STL per printed part (oriented for printing)">STL ⤓</button>
         <button id="encScad" title="Parametric OpenSCAD source">OpenSCAD ⤓</button>
         <button id="encZip" title="Everything to order: printed parts (STL + STEP, JLC3DP), sheet-metal parts (DXF + STEP + panel, JLCCNC), a README with the order settings each, OpenSCAD and the script">All (.zip) ⤓</button>
-        <button id="encMetal" title="Sheet-metal parts (electrode plates…) for JLCCNC: DXF cut lines + STEP with the same name per part, one panel of all plates with break-off bridges, order settings">Sheet metal ⤓</button>
+        <button id="encMetal" title="Sheet-metal parts (electrode plates…) for JLCCNC: DXF (true arcs) + STEP per part, all plates as one part on 5 mm bars with a snip guide, an assembly guide, order settings">Sheet metal ⤓</button>
+        <button id="encGold" title="The electrode plates as gold-plated (ENIG) PCB electrodes for JLCPCB: Gerbers of one 0.6 mm board with all plates on mouse-bite tabs, gold skin side, a solder pad on the back over each wire hole, order README and assembly guide">Gold PCB ⤓</button>
         <button id="encOrder" class="primary" title="One click: download high-resolution STLs and open the JLC3DP 3D-printing quote page">Order 3D print ↗</button>
       </div>
       <div id="docTools" class="tools hidden">
@@ -372,37 +373,37 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610290200"></script>
-<script src="js/static-backend.js?v=202610290200"></script>
-<script src="js/lib.js?v=202610290200"></script>
-<script src="js/view.js?v=202610290200"></script>
-<script src="js/model.js?v=202610290200"></script>
-<script src="js/schematic.js?v=202610290200"></script>
-<script src="js/strokefont.js?v=202610290200"></script>
-<script src="js/pcb.js?v=202610290200"></script>
-<script src="js/pcbview.js?v=202610290200"></script>
-<script src="js/enclosure.js?v=202610290200"></script>
-<script src="js/shape3d.js?v=202610290200"></script>
-<script src="js/easyeda.js?v=202610290200"></script>
-<script src="js/libpanel.js?v=202610290200"></script>
-<script src="js/openlib.js?v=202610290200"></script>
-<script src="js/kicad.js?v=202610290200"></script>
-<script src="js/easyedapro.js?v=202610290200"></script>
-<script src="js/encview.js?v=202610290200"></script>
-<script src="js/encdesign.js?v=202610290200"></script>
-<script src="js/docview.js?v=202610290200"></script>
-<script src="js/pcb3d.js?v=202610290200"></script>
-<script src="js/blocks.js?v=202610290200"></script>
-<script src="js/engine.js?v=202610290200"></script>
-<script src="js/ai.js?v=202610290200"></script>
-<script src="js/exports.js?v=202610290200"></script>
-<script src="js/pcbpdf.js?v=202610290200"></script>
-<script src="js/folder.js?v=202610290200"></script>
-<script src="js/projects.js?v=202610290200"></script>
-<script src="js/cloud.js?v=202610290200"></script>
-<script src="js/editor.js?v=202610290200"></script>
-<script src="js/jlcorder.js?v=202610290200"></script>
-<script src="js/app.js?v=202610290200"></script>
+<script src="js/config.js?v=202610290300"></script>
+<script src="js/static-backend.js?v=202610290300"></script>
+<script src="js/lib.js?v=202610290300"></script>
+<script src="js/view.js?v=202610290300"></script>
+<script src="js/model.js?v=202610290300"></script>
+<script src="js/schematic.js?v=202610290300"></script>
+<script src="js/strokefont.js?v=202610290300"></script>
+<script src="js/pcb.js?v=202610290300"></script>
+<script src="js/pcbview.js?v=202610290300"></script>
+<script src="js/enclosure.js?v=202610290300"></script>
+<script src="js/shape3d.js?v=202610290300"></script>
+<script src="js/easyeda.js?v=202610290300"></script>
+<script src="js/libpanel.js?v=202610290300"></script>
+<script src="js/openlib.js?v=202610290300"></script>
+<script src="js/kicad.js?v=202610290300"></script>
+<script src="js/easyedapro.js?v=202610290300"></script>
+<script src="js/encview.js?v=202610290300"></script>
+<script src="js/encdesign.js?v=202610290300"></script>
+<script src="js/docview.js?v=202610290300"></script>
+<script src="js/pcb3d.js?v=202610290300"></script>
+<script src="js/blocks.js?v=202610290300"></script>
+<script src="js/engine.js?v=202610290300"></script>
+<script src="js/ai.js?v=202610290300"></script>
+<script src="js/exports.js?v=202610290300"></script>
+<script src="js/pcbpdf.js?v=202610290300"></script>
+<script src="js/folder.js?v=202610290300"></script>
+<script src="js/projects.js?v=202610290300"></script>
+<script src="js/cloud.js?v=202610290300"></script>
+<script src="js/editor.js?v=202610290300"></script>
+<script src="js/jlcorder.js?v=202610290300"></script>
+<script src="js/app.js?v=202610290300"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

@@ -1208,6 +1208,7 @@ const App = (() => {
     AI.onWeb().then(w => { document.body.classList.toggle('web', w); try { provRender(); } catch (e) { } });
     Engine.env.render = renderForAI;
     Engine.env.exportAll = exportAll;
+    Engine.env.saveFiles = (files, name) => download(name, makeZip(files));
     Engine.env.ui = what => { if (what === 'fit-sch') Sch.fit(); if (what === 'show-pcb') { showView('pcb'); Pcb.fit(); } if (what === 'show-enc') { showView('enc'); EncView.rebuild(); } if (what === 'show-doc') showView('doc'); };
     EncView.init(); Pcb3D.init(); DocView.init();
     $('#btn3d').onclick = () => { const on = !Pcb3D.ui.on; PcbView.setVisible(!on); Pcb3D.setOn(on); };

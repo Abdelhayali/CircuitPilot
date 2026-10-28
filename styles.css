@@ -567,3 +567,8 @@ body.web .as-tabs .tag.webonly { display: inline; }
 .cloudpanel p { margin: 6px 0 10px; }
 .cloudme { display: flex; gap: 10px; align-items: center; }
 .cloudme img { width: 34px; height: 34px; border-radius: 50%; }
+/* enclosure check results */
+.enc-check { position: absolute; right: 10px; top: 8px; width: min(420px, calc(100% - 20px)); max-height: calc(100% - 70px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; z-index: 5; box-shadow: 0 6px 20px rgba(0, 0, 0, .25); }
+.enc-check .ck-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; } .enc-check .ck-head .mini-btn { margin-left: auto; }
+.enc-check .ck-list { margin: 4px 0; padding-left: 16px; } .enc-check .ck-list li { cursor: pointer; margin: 2px 0; } .enc-check .ck-list li:hover { text-decoration: underline; }
+.enc-check li.bad { color: var(--bad, #e5534b); } .enc-check li.warn { color: var(--warn, #d29922); }

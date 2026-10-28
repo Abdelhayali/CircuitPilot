@@ -14,9 +14,12 @@ export function loadEngine(root, log = () => { }) {
   for (const [file, name] of FILES)
     vm.runInContext(fs.readFileSync(path.join(root, 'js', file), 'utf8') + `\n;globalThis.${name} = ${name};`, ctx, { filename: file });
   // fast 3D kernel (Manifold, WASM) for the enclosure scripts; ready within ms, until then the BSP kernel is used
+  // ctx.kernelReady: await it before running enclosure scripts (a fresh export worker must not fall back to the slow
+  // kernel, where gap() and the 2D booleans do not exist)
+  ctx.kernelReady = Promise.resolve(false);
   try {
     vm.runInContext(fs.readFileSync(path.join(root, 'js', 'vendor', 'manifold.js'), 'utf8'), ctx, { filename: 'manifold.js' });
-    ctx.ManifoldModule({ wasmBinary: fs.readFileSync(path.join(root, 'js', 'vendor', 'manifold.wasm')) }).then(m => ctx.Shape3D.useManifold(m), e => log('3D kernel not loaded: ' + e.message));
+    ctx.kernelReady = ctx.ManifoldModule({ wasmBinary: fs.readFileSync(path.join(root, 'js', 'vendor', 'manifold.wasm')) }).then(m => ctx.Shape3D.useManifold(m), e => { log('3D kernel not loaded: ' + e.message); return false; });
   } catch (e) { log('3D kernel not loaded: ' + e.message); }
   // open-library part lists straight from the app folder
   ctx.OpenLib.readIndex = async () => fs.readFileSync(path.join(root, 'data', 'open-parts.txt'), 'utf8');

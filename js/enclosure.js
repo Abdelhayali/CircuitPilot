@@ -204,8 +204,28 @@ const Enclosure = (() => {
     { re: /PRO.?MICRO/, name: 'Pro Micro', body: [18, 33], h: 4.3, port: { kind: 'USB', w: 8.0, h: 3.0, fromTop: 1.5, out: 1.0 } },
     { re: /ARDUINO.?NANO|NANO.?V3/, name: 'Arduino Nano', body: [18, 45], h: 5.5, port: { kind: 'mini-USB', w: 7.8, h: 4.0, fromTop: 2.0, out: 1.5 } },
   ];
+  // the part's own mechanical data: the project's override (set_enclosure partBodies) or the part library (create_part mech)
+  // body {w, l, h} (w along x, l along y as the footprint is drawn), connectors [{type, side: 'pin1' | board side, w, h, z (centre above the board), out}]
+  function mechOf(c) {
+    const pb = ((Model.S.enclosure || {}).partBodies || {})[c.ref], lib = c.lcsc && Model.S.lib && Model.S.lib[c.lcsc];
+    return pb || (lib && lib.mech) || null;
+  }
   // body box and port of a known module, in board coordinates (y down); null for anything else
   function moduleInfo(c) {
+    const mech = mechOf(c);
+    if (mech && mech.body) {
+      const pads = Pcb.padsOf(c); if (!pads.length) return null;
+      const xs = pads.map(q => q.x), ys = pads.map(q => q.y), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const turned = Math.round(((c.pcb && c.pcb.rot) || 0) / 90) % 2 !== 0, bw = turned ? +mech.body.l : +mech.body.w, bl = turned ? +mech.body.w : +mech.body.l, h = +mech.body.h || 0;
+      const body = [cx - bw / 2, cy - bl / 2, cx + bw / 2, cy + bl / 2], k = (mech.connectors || [])[0];
+      let port = null;
+      if (k) {
+        let side = k.side && k.side !== 'pin1' ? k.side : null;
+        if (!side) { const p1 = pads.find(q => String(q.num) === '1') || pads[0], longY = bl >= bw; side = longY ? (p1.y < cy ? 'top' : 'bottom') : (p1.x < cx ? 'left' : 'right'); }
+        port = { kind: k.type || 'connector', side, along: side === 'top' || side === 'bottom' ? (k.at ?? cx) : (k.at ?? cy), w: +k.w || 9, h: +k.h || 3.2, fromTop: h - (k.z ?? h / 2), out: +k.out || 1 };
+      }
+      return { name: c.value || c.ref, body, h, port };
+    }
     const M = MODULES.find(m => m.re.test(partText(c))); if (!M) return null;
     const pads = Pcb.padsOf(c); if (pads.length < 4) return null;
     // the pin rows: the pads of the most common size (castellations / header pins, not the pads underneath)
@@ -223,7 +243,8 @@ const Enclosure = (() => {
   }
   function partHeight(c, params) {
     if (params.partHeights && params.partHeights[c.ref] != null) return +params.partHeights[c.ref];
-    const t = partText(c), fp = Lib.footprint(c.footprint);
+    const t = partText(c), fp = Lib.footprint(c.footprint), mech = mechOf(c);
+    if (mech && mech.body && +mech.body.h) return +mech.body.h;
     const M = MODULES.find(m => m.re.test(t)); if (M) return M.h;
     // pads only (wire pads, test points, electrode pads, solder jumpers): nothing stands on the board
     if (fp && fp.pads.length && fp.pads.length <= 4 && fp.pads.every(q => !q.drill) && /PAD|ELECTRODE|TEST.?POINT|\bTP\d|WIRE|SOLDER|JUMPER/.test(t) && !/HOLDER|HEADER|JST|USB|SPRING|POGO/.test(t)) return 0.1;
@@ -303,9 +324,11 @@ const Enclosure = (() => {
     standoffHeight: 5.0, standoffDiameter: 6.0, screwHole: 2.5, lidFit: 0.3, lipHeight: 3.0, lipWidth: 1.2,
     vents: true, ventWidth: 1.6, ventLength: 18, ventSpacing: 3.5, autoConnectorCutouts: true, autoLidHoles: true,
     cutouts: [], partHeights: {}, explode: 12,
-    battery: '', batteryPlace: 'under', process: 'mjf',   // process: mjf | sls | sla | fdm — the manufacturability check's limits   // loose cell in the box (see batteries()): under the board, beside it (+X) or above the parts
+    battery: '', batteryPlace: 'under', process: 'mjf', partBodies: {},
+    // the project's manufacturing rules (F18): stricter defaults the enclosure tools apply — minWall, fit, minRidge, minPart [a, b, c]
+    rules: {},   // process: mjf | sls | sla | fdm — the manufacturability check's limits   // loose cell in the box (see batteries()): under the board, beside it (+X) or above the parts
   };
-  const params = () => Object.assign({}, DEFAULTS, Model.S.enclosure || {}, { cutouts: ((Model.S.enclosure || {}).cutouts || []).slice(), partHeights: Object.assign({}, (Model.S.enclosure || {}).partHeights || {}) });
+  const params = () => Object.assign({}, DEFAULTS, Model.S.enclosure || {}, { partBodies: Object.assign({}, (Model.S.enclosure || {}).partBodies || {}), rules: Object.assign({}, (Model.S.enclosure || {}).rules || {}), cutouts: ((Model.S.enclosure || {}).cutouts || []).slice(), partHeights: Object.assign({}, (Model.S.enclosure || {}).partHeights || {}) });
   function setParams(u = {}) {
     const S = Model.S, cur = Object.assign({}, S.enclosure || {});
     for (const [k, v] of Object.entries(u)) {
@@ -316,6 +339,7 @@ const Enclosure = (() => {
       if (k === 'process') { if (!['mjf', 'sls', 'sla', 'fdm'].includes(v)) throw new Error('process must be mjf, sls, sla or fdm'); cur.process = v; continue; }
       if (k === 'batteryPlace') { if (!['under', 'beside', 'above'].includes(v)) throw new Error('batteryPlace must be under, beside or above'); cur.batteryPlace = v; continue; }
       if (!(k in DEFAULTS)) throw new Error(`Unknown enclosure parameter "${k}". Known: mode, script, ${Object.keys(DEFAULTS).join(', ')}`);
+      if (k === 'partBodies' || k === 'rules') { cur[k] = Object.assign({}, cur[k] || {}); for (const [r, h] of Object.entries(v || {})) { if (h == null || h === '') delete cur[k][r]; else cur[k][r] = h; } continue; }
       if (k === 'partHeights') { cur.partHeights = Object.assign({}, cur.partHeights || {}); for (const [r, h] of Object.entries(v || {})) { if (h == null || h === '') delete cur.partHeights[r]; else cur.partHeights[r] = +h; } }
       else if (k === 'cutouts') cur.cutouts = v;
       else if (typeof DEFAULTS[k] === 'boolean') cur[k] = !!v;

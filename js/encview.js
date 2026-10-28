@@ -3,7 +3,7 @@
 const EncView = (() => {
   const $ = s => document.querySelector(s);
   const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
-  const WORKER = 'js/shape-worker.js?v=202610280600';
+  const WORKER = 'js/shape-worker.js?v=202610281300';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
   function loadThree() {
@@ -48,6 +48,7 @@ const EncView = (() => {
     $('#encThick').onclick = () => { ui.thick = !ui.thick; $('#encThick').classList.toggle('on', ui.thick); if (ui.thick) boxThickness(); place(); };
     $('#encSection').onclick = () => { ui.section = ui.section ? null : 'x'; $('#encSection').classList.toggle('on', !!ui.section); place(); };
     $('#encRender').onclick = renderDialog;
+    $('#encCheck').onclick = () => checkDesign();
     $('#encDims').onclick = () => { ui.showDims = !ui.showDims; $('#encDims').classList.toggle('on', ui.showDims); drawOverlay(); draw(); };
     $('#encMeasure').onclick = () => setMeasure(!ui.measure);
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && active && ui.measure) { if (ui.pendingA || ui.rulers.length) { ui.pendingA = null; ui.rulers = []; drawOverlay(); draw(); dimText(); } else setMeasure(false); } });
@@ -136,7 +137,7 @@ const EncView = (() => {
   // longer turns red as a whole because of one thin spot at its corner
   function heatGeometry(mesh, smp, wall) {
     const T = window.THREE, src = mesh.geometry.attributes.position.array, out = [], st = [], cell = 1.5, grid = new Map(), key = (x, y, z) => x + ',' + y + ',' + z;
-    for (let i = 0; i < smp.length; i += 4) { const k = key(Math.floor(smp[i] / cell), Math.floor(smp[i + 1] / cell), Math.floor(smp[i + 2] / cell)); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); }
+    for (let i = 0; i < smp.length; i += 7) { const k = key(Math.floor(smp[i] / cell), Math.floor(smp[i + 1] / cell), Math.floor(smp[i + 2] / cell)); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); }
     const near = (x, y, z) => { let best = 2.25, t = Infinity; const cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell);
       for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) for (const i of grid.get(key(cx + a, cy + b, cz + c)) || []) { const d = (smp[i] - x) ** 2 + (smp[i + 1] - y) ** 2 + (smp[i + 2] - z) ** 2; if (d < best) { best = d; t = smp[i + 3]; } }
       return t; };
@@ -171,7 +172,7 @@ const EncView = (() => {
   function boxThickness() {
     if (!ui.built || ui.built.custom || meshes.base.userData.samples) return;
     try {
-      const d = Shape3D.checkBox(ui.built, scriptCtx(), { process: Enclosure.params().process, cap: 15000, openPts: 1 });
+      const d = Shape3D.checkBox(ui.built, scriptCtx(), { process: Enclosure.params().process, rules: Enclosure.params().rules, cap: 15000, openPts: 1 });
       meshes.base.userData.thick = d.thick.base; meshes.lid.userData.thick = d.thick.lid; meshes.base.userData.samples = d.samples.base; meshes.lid.userData.samples = d.samples.lid; ui.wallMin = d.rules.wall;
     } catch (e) { App.toast('Thickness check failed: ' + e.message); }
   }
@@ -265,7 +266,7 @@ const EncView = (() => {
   function scriptCtx() { try { return Shape3D.context(Enclosure.layout()); } catch (e) { return { pcb: null }; } }
   // build a script (cached: the same script on the same board is not rebuilt)
   function runScript(code, extra = {}) {
-    const ctx = scriptCtx(), o = Object.assign({ timeLimitMs: 110000, process: Enclosure.params().process }, extra), key = code + '\u0000' + JSON.stringify(ctx) + JSON.stringify(o);
+    const ctx = scriptCtx(), o = Object.assign({ timeLimitMs: 110000, process: Enclosure.params().process, rules: Enclosure.params().rules }, extra), key = code + '\u0000' + JSON.stringify(ctx) + JSON.stringify(o);
     if (lastRun && lastRun.key === key) return lastRun.p;
     const id = ++seq;
     const p = new Promise((res, rej) => {
@@ -275,7 +276,7 @@ const EncView = (() => {
     });
     lastRun = { key, p };
     ui.running = true; out();
-    p.then(r => { if (lastRun && lastRun.p === p) { ui.custom = { r, ctx }; ui.running = false; ui.err = null; showCustom(true); } },
+    p.then(r => { if (lastRun && lastRun.p === p) { ui.custom = { r, ctx, code }; ui.running = false; ui.err = null; showCustom(true); } },
       e => { if (lastRun && lastRun.p === p) { ui.custom = { r: null, ctx, err: e }; ui.running = false; lastRun = null; showCustom(false); } });
     return p;
   }
@@ -336,7 +337,7 @@ const EncView = (() => {
       Object.assign(m.userData, p); root.add(m); return m;
     });
     ui.wallMin = r.report && r.report.dfm ? r.report.dfm.rules.wall : 1;
-    $('#encMetal').classList.toggle('hidden', !r.parts.some(p => p.kind === 'metal'));
+    $('#encMetal').title = r.parts.some(p => p.kind === 'metal') ? 'Sheet-metal parts for JLCCNC: DXF (true arcs) + STEP per part, one panel of all plates with break-off bridges, order settings' : 'No sheet-metal parts in this design — electrode({…}) in the script makes skin plates';
     meshes.extras = (r.extras || []).filter(x => x.kind === 'battery').map(b => { const m = batteryMesh(b, [0, 0, 0]); root.add(m); return m; });
     meshes.pcb = null;
     if (c.ctx.pcb) { try { const L = Enclosure.layout(), g = pcbGroup(L); g.position.set(-c.ctx.origin[0], -c.ctx.origin[1], -c.ctx.origin[2]); meshes.pcb = g; root.add(g); } catch (e) { } }
@@ -549,6 +550,16 @@ const EncView = (() => {
     const median = L => { const v = L.slice().sort((a, b) => a.t - b.t); return v.length ? v[Math.floor((v.length - 1) / 2)] : null; };
     const out = { size: [size.x, size.y, size.z], box: [box.min.toArray(), box.max.toArray()] };
     if (!base) return out;
+    // the manufacturability samples: every face of the part with its thickness and normal (x, y, z, t, nx, ny, nz)
+    const fromSamples = (mesh, pick) => {
+      const sm = mesh && mesh.userData.samples; if (!sm || !sm.length) return null;
+      const L = []; for (let i = 0; i < sm.length; i += 7) if (pick(sm[i + 6]) && sm[i + 3] < 3.9) L.push(i);
+      if (L.length < 5) return null;
+      L.sort((a, b) => sm[a + 3] - sm[b + 3]);
+      const lo = L[Math.floor(L.length * 0.02)], med = L[Math.floor(L.length / 2)], at = i => new T.Vector3(sm[i], sm[i + 1], sm[i + 2]), n = i => new T.Vector3(sm[i + 4], sm[i + 5], sm[i + 6]);
+      return { t: sm[med + 3], min: sm[lo + 3], a: at(med), b: at(med).addScaledVector(n(med), -sm[med + 3]), d: [sm[med + 4], sm[med + 5], 0.3], exact: true };
+    };
+    const sw = fromSamples(base, nz => Math.abs(nz) < 0.5), sf = fromSamples(base, nz => nz < -0.6), sl = fromSamples(lid, nz => nz > 0.6);
     const bb = new T.Box3().setFromObject(base), c = bb.getCenter(new T.Vector3()), bs = bb.getSize(new T.Vector3());
     const z = zRef != null && zRef > bb.min.z && zRef < bb.max.z ? zRef : c.z;
     // walls: from the middle of the cavity outwards, in the four directions (front and right first: they face the camera)
@@ -559,12 +570,13 @@ const EncView = (() => {
     }
     const wm = median(walls);
     if (wm) out.wall = walls.find(w => Math.abs(w.t - wm.t) < 0.05) || wm;
+    if (sw) out.wall = sw;
     // floor: straight down from the cavity; lid: straight up, off-centre (engraved text and vents sit in the middle)
     const fl = []; for (const [fx, fy] of [[0, 0], [0.2, 0.15], [-0.2, -0.15]]) { const r = across(base, new T.Vector3(c.x + fx * bs.x, c.y + fy * bs.y, z), new T.Vector3(0, 0, -1)); if (r) fl.push({ t: r[0].distanceTo(r[1]), a: r[0], b: r[1] }); }
-    out.floor = fl.sort((p, q) => p.t - q.t)[0] || null;   // the thinnest point (a curved floor thickens toward the ends)
+    out.floor = sf || fl.sort((p, q) => p.t - q.t)[0] || null;   // the thinnest point (a curved floor thickens toward the ends)
     if (lid) { const lb = new T.Box3().setFromObject(lid), lc = lb.getCenter(new T.Vector3()), ls = lb.getSize(new T.Vector3()), L = [];
       for (const [fx, fy] of [[0.28, 0.28], [-0.28, 0.28], [0.28, -0.28], [-0.28, -0.28], [0, 0.32]]) { const r = across(lid, new T.Vector3(lc.x + fx * ls.x, lc.y + fy * ls.y, Math.min(z, lb.min.z - 1)), new T.Vector3(0, 0, 1)); if (r) L.push({ t: r[0].distanceTo(r[1]), a: r[0], b: r[1] }); }
-      out.lid = median(L); if (out.lid) out.lidMesh = lid; }
+      out.lid = sl || median(L); if (out.lid) out.lidMesh = lid; }
     return out;
   }
   // a label that keeps its size on screen (and in renders): rounded box, coloured border
@@ -598,6 +610,7 @@ const EncView = (() => {
     return g;
   }
   const mm = v => (Math.round(v * 10) / 10).toFixed(1);
+  const thk = (k, m) => `${k} ${m.exact ? '' : '≈'}${mm(m.t)}${m.exact && m.min < m.t - 0.15 ? ` · min ${mm(m.min)}` : ''}`;
   function drawOverlay() {
     if (!scene) return;
     const T = window.THREE;
@@ -611,9 +624,9 @@ const EncView = (() => {
         G.add(dimension(new T.Vector3(hi.x, lo.y, lo.z), new T.Vector3(hi.x, hi.y, lo.z), new T.Vector3(off, 0, 0), `W ${mm(D.size[1])} mm`));
         G.add(dimension(new T.Vector3(lo.x, lo.y, lo.z), new T.Vector3(lo.x, lo.y, hi.z), new T.Vector3(-off * 0.7, -off * 0.7, 0), `H ${mm(D.size[2])} mm`));
       }
-      if (D.wall) G.add(thickness(D.wall.a, D.wall.b, new T.Vector3(...D.wall.d).add(new T.Vector3(0, 0, 0.6)), `wall ${mm(D.wall.t)}`));
-      if (D.floor) G.add(thickness(D.floor.a, D.floor.b, new T.Vector3(0.5, -0.5, -1), `floor ${mm(D.floor.t)}`));
-      if (D.lid && !(ui.explode && D.lidMesh && D.lidMesh.position.lengthSq() > 0) && ui.lid) G.add(thickness(D.lid.a, D.lid.b, new T.Vector3(-0.4, -0.6, 1), `lid ${mm(D.lid.t)}`));
+      if (D.wall) G.add(thickness(D.wall.a, D.wall.b, new T.Vector3(...D.wall.d).add(new T.Vector3(0, 0, 0.6)), thk('wall', D.wall)));
+      if (D.floor) G.add(thickness(D.floor.a, D.floor.b, new T.Vector3(0.5, -0.5, -1), thk('floor', D.floor)));
+      if (D.lid && !(ui.explode && D.lidMesh && D.lidMesh.position.lengthSq() > 0) && ui.lid) G.add(thickness(D.lid.a, D.lid.b, new T.Vector3(-0.4, -0.6, 1), thk('lid', D.lid)));
     }
     // ruler measurements: points, line, distance (and the run along each axis)
     const dot = p => { const s = tag('', p, RUL, 0.012); s.material.map.dispose(); s.material.map = null; s.material.color = new T.Color(RUL); return s; };
@@ -623,6 +636,7 @@ const EncView = (() => {
       G.add(tag(`${mm(d.length())} mm${parts.length > 1 ? '  (' + parts.map(q => 'Δ' + q[0] + ' ' + mm(Math.abs(q[1]))).join(' ') + ')' : ''}`, r.a.clone().add(r.b).multiplyScalar(0.5), RUL, 0.028));
     }
     if (ui.pendingA) G.add(dot(ui.pendingA));
+    if (ui.focus) { const c = new T.Mesh(new T.SphereGeometry(Math.max(0.6, (ui.dims ? Math.max(...ui.dims.size) : 30) * 0.015), 16, 12), new T.MeshBasicMaterial({ color: 0xff2d55, depthTest: false, transparent: true, opacity: 0.85 })); c.position.set(...ui.focus); c.renderOrder = 1002; G.add(c); }
     dimText();
   }
   // the numbers as text too, top-left of the view
@@ -630,7 +644,7 @@ const EncView = (() => {
     let el = $('#encDimTxt');
     if (!el) { el = document.createElement('div'); el.id = 'encDimTxt'; el.className = 'encdims'; wrap.appendChild(el); }
     const D = ui.dims, last = ui.rulers[ui.rulers.length - 1];
-    const a = D && ui.built ? `<b>${D.size.map(mm).join(' × ')} mm</b>${D.wall ? ` · wall ${mm(D.wall.t)}` : ''}${D.floor ? ` · floor ${mm(D.floor.t)}` : ''}${D.lid ? ` · lid ${mm(D.lid.t)}` : ''} mm` : '';
+    const a = D && ui.built ? `<b>${D.size.map(mm).join(' × ')} mm</b>${D.wall ? ' · ' + thk('wall', D.wall) : ''}${D.floor ? ' · ' + thk('floor', D.floor) : ''}${D.lid ? ' · ' + thk('lid', D.lid) : ''} mm${[D.wall, D.floor, D.lid].some(m => m && !m.exact) ? ' <span class="muted" title="≈ = estimated from a few rays; ✓ Check measures every face">(≈ estimated)</span>' : ''}` : '';
     const b = ui.measure ? `<div class="encruler">📏 ${ui.pendingA ? 'click the second point' : 'click a point on the model'}${last ? ` · last: <b>${mm(last.b.distanceTo(last.a))} mm</b>` : ''} · corners snap · Esc clears</div>` : '';
     const c = ui.thick ? `<div class="encruler"><span style="color:#e53935">■</span> under ${ui.wallMin || 1} mm · <span style="color:#fb8c00">■</span> under ${((ui.wallMin || 1) * 1.5).toFixed(1)} · <span style="color:#fdd835">■</span> under ${((ui.wallMin || 1) * 2).toFixed(1)} mm (${({ mjf: 'MJF', sls: 'SLS', sla: 'SLA', fdm: 'FDM' })[Enclosure.params().process] || 'MJF'} minimum wall)</div>` : '';
     el.innerHTML = a + b + c; el.style.display = a || b || c ? 'block' : 'none';
@@ -694,6 +708,9 @@ const EncView = (() => {
     if (Enclosure.mode() === 'custom') {
       const code = Enclosure.script(); if (!code.trim()) return null;
       try { await runScript(code); } catch (e) { return null; }
+      // B13: never draw an older build — wait until the shown result is this script's
+      for (let k = 0; k < 3 && !(ui.custom && ui.custom.r && ui.custom.code === code); k++) { try { await (lastRun && lastRun.p); } catch (e) { } if (!(ui.custom && ui.custom.code === code)) { lastRun = null; try { await runScript(code); } catch (e) { return null; } } }
+      if (!(ui.custom && ui.custom.code === code)) return null;
       showCustom(false);
     } else { if (o.fresh || dirty || !ui.built || ui.built.custom) rebuild(false); }
     if (!ui.built || !root) return null;
@@ -714,6 +731,33 @@ const EncView = (() => {
     renderer.setPixelRatio(pr); renderer.setSize(size.x, size.y); renderer.setClearColor(oc, oa); place(); resize(); draw();
     return { url, w, h };
   }
+  // ---------- ✓ Check: the manufacturability check for the chosen process, with every finding listed ----------
+  async function checkDesign() {
+    if (!ui.built) { App.toast('Build the enclosure first'); return; }
+    const proc = Enclosure.params().process, box = panelEl();
+    box.innerHTML = '<div class="muted"><span class="spin"></span> Checking every face for ' + ({ mjf: 'MJF', sls: 'SLS', sla: 'SLA', fdm: 'FDM' }[proc] || proc) + '…</div>';
+    let d;
+    try {
+      if (ui.built.custom) { const r = await runScript(Enclosure.script(), { dfmCap: 40000, dfmOpenPts: 10000, dfmSpacing: 0.4 }); d = r.report.dfm; d.warnings = r.report.warnings; }
+      else { meshes.base && delete meshes.base.userData.samples; d = Shape3D.checkBox(ui.built, scriptCtx(), { process: proc, rules: Enclosure.params().rules, cap: 40000, openPts: 10000, spacing: 0.4 }); meshes.base.userData.samples = d.samples.base; meshes.lid.userData.samples = d.samples.lid; delete meshes.base.userData.heatGeo; delete meshes.lid.userData.heatGeo; ui.wallMin = d.rules.wall; ui.dims = measureModel(ui.built.L.pcbTop + 1); }
+    } catch (e) { box.innerHTML = `<div class="bad">⚠ ${esc(e.message)}</div>`; return; }
+    if (!d) { box.innerHTML = '<div class="bad">No result</div>'; return; }
+    ui.lastCheck = d; ui.thick = true; $('#encThick').classList.add('on'); place();
+    const f = v => v.map(x => (+x).toFixed(1)).join(', '), rows = [];
+    for (const x of d.too_small || []) rows.push(['bad', `“${x.part}” is ${x.size_mm.join(' × ')} mm — below the ${d.rules.name} minimum ${x.min_mm.join(' × ')} mm`, null]);
+    for (const x of d.thin) rows.push(['bad', `Thin ${x.min_mm} mm in “${x.part}”${x.feature ? ` under ${esc(x.feature)} — ${esc(x.fix)}` : ''} (${x.area_mm2} mm²)`, x.at]);
+    for (const x of d.knife_edges) rows.push(['bad', `Knife edge ${x.angle_deg}° in “${x.part}”, ${x.length_mm} mm long`, x.at]);
+    for (const x of d.narrow_gaps) rows.push(['warn', `Slit ${x.gap_mm} mm in “${x.part}” (fuses shut below ${d.rules.gap} mm)`, x.at]);
+    for (const x of d.fit) if (!x.ok) rows.push(['warn', `${x.parts}: clearance ${x.clearance_mm} mm, ${d.rules.name} needs ${d.rules.fit}`, x.at]);
+    for (const x of d.openings) if (!x.expected) rows.push(['warn', `Opening on the ${x.side} nothing explains (~${f(x.size_mm)} mm)`, x.at]);
+    const ok = !rows.length;
+    box.innerHTML = `<div class="ck-head"><b>${ok ? '✓' : '⚠'} ${esc(d.rules.name)}</b> <span class="muted small">min wall ${d.rules.wall} · fit ${d.rules.fit} mm${d.rules.minBox ? ` · min part ${d.rules.minBox.join(' × ')}` : ''}</span><button class="mini-btn" id="ckClose">✕</button></div>` +
+      (ok ? '<div class="good">No problems found: walls, edges, slits, fit, openings and part size are fine for this process.</div>' : `<ul class="ck-list">${rows.map(([c, t, at], i) => `<li class="${c}" data-i="${i}">${t}${at ? ' <span class="muted small">↗</span>' : ''}</li>`).join('')}</ul>`) +
+      `<div class="muted small">${d.openings.filter(x => x.expected).map(x => '✓ ' + esc(x.expected)).join(' · ')}</div><div class="muted small">Walls are coloured: red below ${d.rules.wall} mm, orange below ${(d.rules.wall * 1.5).toFixed(1)}. Click a line to go there.</div>`;
+    $('#ckClose').onclick = () => box.remove();
+    box.querySelectorAll('li[data-i]').forEach(li => li.onclick = () => { const at = rows[+li.dataset.i][2]; if (!at) return; cam.tx = at[0]; cam.ty = at[1]; cam.tz = at[2]; cam.r = Math.max(25, cam.r * 0.5); ui.focus = at; drawOverlay(); draw(); });
+  }
+  function panelEl() { let b = $('#encCheckPanel'); if (!b) { b = document.createElement('div'); b.id = 'encCheckPanel'; b.className = 'enc-check'; wrap.appendChild(b); } return b; }
   // 📷 Render: the finished design as a picture (4 views, or one big angled view) to look at, save or share
   async function renderDialog() {
     if (!ui.built) { App.toast('Nothing to render yet'); return; }

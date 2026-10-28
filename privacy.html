@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CircuitPilot privacy policy</title>
+<style>
+  :root { --bg: #ffffff; --text: #1d232b; --muted: #5b6573; --line: #e3e7ee; --accent: #3a6df0; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #12161c; --text: #e6e9ef; --muted: #9aa4b2; --line: #2a313b; --accent: #7aa2ff; } }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; } h2 { font-size: 19px; margin: 28px 0 6px; }
+  p, li { color: var(--text); } .muted { color: var(--muted); font-size: 14px; }
+  a { color: var(--accent); } ul { padding-left: 20px; } hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CircuitPilot privacy policy</h1>
+  <p class="muted">CircuitPilot (pcbgo.site and the CircuitPilot desktop app) · last updated 28 October 2026</p>
+
+  <h2>In short</h2>
+  <p>CircuitPilot has no server that stores your designs or your account. Your projects stay on your own device, and — if you sign in with Google — in your own Google Drive. We do not sell, share or analyse your data.</p>
+
+  <h2>Where your designs are kept</h2>
+  <ul>
+    <li><b>On your device.</b> On pcbgo.site, projects are saved in your browser. In the desktop app, they are saved in a file on your computer (<code>%LOCALAPPDATA%\CircuitPilot</code>).</li>
+    <li><b>In your Google Drive, if you sign in with Google.</b> CircuitPilot then keeps a copy of each project and of your part library in the hidden <i>app-data</i> folder of your own Google Drive, so you can open them on another computer. Only CircuitPilot can see that folder; it does not show among your files and counts against your own Drive storage. Your browser talks to Google directly — no CircuitPilot server sees or keeps these files.</li>
+  </ul>
+
+  <h2>What CircuitPilot asks Google for</h2>
+  <ul>
+    <li><b>Its own app-data folder in your Drive</b> (<code>drive.appdata</code>): to save and read your CircuitPilot projects. CircuitPilot cannot see, open or change any of your other Drive files.</li>
+    <li><b>Your name, e-mail address and profile picture</b> (<code>openid</code>, <code>email</code>, <code>profile</code>): only to show who is signed in. They are kept in your browser, not sent anywhere else.</li>
+  </ul>
+  <p>CircuitPilot's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+  <h2>AI providers and other services</h2>
+  <p>If you use the AI copilot, your messages and the design context are sent from your browser (or your desktop app) directly to the AI provider you chose with your own API key, under that provider's terms. Your API keys stay in your browser or on your computer. Part searches go to the component catalogue (JLCPCB / LCSC) and, on pcbgo.site, through a small relay that keeps nothing. Ordering at JLCPCB, JLC3DP or JLCCNC happens on their websites, under their terms.</p>
+
+  <h2>Removing your data</h2>
+  <ul>
+    <li>Sign out in CircuitPilot (☁ → Sign out). To remove CircuitPilot's access to your Google account, go to <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a> and remove CircuitPilot; Google then deletes the app-data folder.</li>
+    <li>Projects on your device: delete them in CircuitPilot (Projects), clear the site data of pcbgo.site in your browser, or delete the CircuitPilot folder on your computer.</li>
+  </ul>
+
+  <h2>Cookies and tracking</h2>
+  <p>CircuitPilot uses no advertising, analytics or tracking cookies. It stores your settings and projects in your browser's local storage.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy: open an issue at <a href="https://github.com/Abdelhayali/CircuitPilot/issues">github.com/Abdelhayali/CircuitPilot/issues</a>.</p>
+  <hr>
+  <p class="muted"><a href="/">← Back to CircuitPilot</a></p>
+</main>
+</body>
+</html>

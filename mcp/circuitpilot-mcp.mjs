@@ -271,11 +271,16 @@ async function awaitJob(j, ms) {
 }
 // export: files from the worker, PDFs + images from the app window, all into one folder per project
 async function exportJob(job, project, input) {
-  const all = ['project', 'gerbers', 'jlcpcb', 'bom', 'netlist', 'enclosure', 'easyeda', 'pdf', 'images'];
-  const inc = Array.isArray(input.include) && input.include.length ? input.include : all;
+  const all = ['project', 'gerbers', 'jlcpcb', 'bom', 'netlist', 'enclosure', 'easyeda', 'pdf', 'images', 'order_readme'];
+  let inc = Array.isArray(input.include) && input.include.length ? input.include.slice() : all;
+  if (inc.includes('flat') && !inc.includes('enclosure')) inc.push('enclosure');   // the flat parts come with the enclosure files
   const { p, w } = workerRun({ kind: 'export', include: inc, project, myLib, base: BASE, headers }); job.worker = w;
   const { result: X } = await p, written = [], skipped = X.skipped.slice();
-  const root = path.resolve(String(input.out_dir || path.join(os.homedir(), 'Documents', 'CircuitPilot exports'))), dir = path.join(root, X.base);
+  // dated: a snapshot folder <project>-<YYYY-MM-DD> (several exports a day: -2, -3 …)
+  const root = path.resolve(String(input.out_dir || path.join(os.homedir(), 'Documents', 'CircuitPilot exports')));
+  let dir = path.join(root, X.base);
+  if (input.dated) { const d0 = path.join(root, `${X.base}-${new Date().toISOString().slice(0, 10)}`); dir = d0; for (let k = 2; fs.existsSync(dir); k++) dir = `${d0}-${k}`; }
+  if (inc.includes('flat') && !inc.includes('enclosure_all')) for (const k of Object.keys(X.files)) if (/^enclosure\/(jlc3dp\/|[^/]+\.(scad|js)$)/.test(k) && !input.include.includes('enclosure')) delete X.files[k];
   const put = (rel, data) => { const f = path.join(dir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, data instanceof Uint8Array ? Buffer.from(data) : data); written.push(rel.replace(/\\/g, '/')); };
   fs.mkdirSync(dir, { recursive: true });
   for (const [rel, d] of Object.entries(X.files)) put(rel, d);
@@ -299,6 +304,16 @@ async function exportJob(job, project, input) {
       }
       if (last) skipped.push(rel + ': ' + last.message);
     }
+  }
+  // one page that says what goes where (F16)
+  if (inc.includes('order_readme')) {
+    const has = re => written.filter(f => re.test(f)), lines = [`# ${X.name} — what to order`, '', `Exported by CircuitPilot ${new Date().toISOString().slice(0, 16).replace('T', ' ')}.`, ''];
+    if (has(/gerbers\.zip$/).length) lines.push('## PCB — JLCPCB (jlcpcb.com)', `- Upload \`${has(/gerbers\.zip$/)[0]}\`.`, ...(has(/^jlcpcb\//).length ? [`- Assembly: BOM and pick-and-place: ${has(/^jlcpcb\//).map(f => '`' + f + '`').join(', ')}.`] : []), X.drc ? `- DRC: ${typeof X.drc === 'string' ? X.drc : JSON.stringify(X.drc)}` : '', '');
+    if (has(/jlc3dp\//).length) lines.push('## Printed enclosure parts — JLC3DP (jlc3dp.com)', ...has(/jlc3dp\/.*\.stl$/).map(f => `- \`${f}\` (STEP next to it)`), '- Settings: `enclosure/jlc3dp/README-JLC3DP.txt`.', '');
+    if (has(/jlccnc\//).length) lines.push('## Sheet-metal parts — JLCCNC (jlccnc.com)', ...has(/jlccnc\/.*\.step$/).map(f => `- \`${f}\` + the DXF with the same name`), '- Settings: `enclosure/jlccnc/README-JLCCNC.txt`.', '');
+    if (has(/adhesive\//).length) lines.push('## Skin adhesive', ...has(/adhesive\/.*\.(pdf|dxf)$/).map(f => `- \`${f}\``), '- Print the PDF at 100 % and check the 50 mm line.', '');
+    if (skipped.length) lines.push('## Not exported', ...skipped.map(s => '- ' + s), '');
+    fs.writeFileSync(path.join(dir, 'ORDER-README.md'), lines.filter(l => l !== null).join('\n')); written.push('ORDER-README.md');
   }
   fs.writeFileSync(path.join(dir, 'README.txt'), `${X.name} — exported by CircuitPilot ${new Date().toISOString().slice(0, 16).replace('T', ' ')}\n\n` +
     written.map(f => '  ' + f).join('\n') + (skipped.length ? '\n\nNot exported:\n' + skipped.map(f => '  ' + f).join('\n') : '') +
@@ -525,6 +540,7 @@ async function callTool(name, input = {}) {
     });
   }
   if (!Engine.TOOLS.some(t => t.name === name)) throw new Error('Unknown tool ' + name);
+  await ctx.kernelReady;   // the fast 3D kernel (enclosure scripts) is loaded before any tool runs
   if (NO_PROJECT.has(name)) { Model.load(Model.blank()); try { myLib = await api('GET', '/api/library'); } catch { } return Engine.exec(name, input, 'agent'); }
   return withProject(() => Engine.exec(name, input, 'agent'), !RO.has(name), name);
 }

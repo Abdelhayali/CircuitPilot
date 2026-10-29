@@ -235,6 +235,26 @@ const Pcb = (() => {
     let d = Infinity; for (let i = 0; i < k.pts.length; i++) d = Math.min(d, ptSeg([x, y], k.pts[i], k.pts[(i + 1) % k.pts.length]));
     return d;
   }
+  // Where copper pours stay out on a layer: the keep-outs, plus — with the rule pourUnderSmd off (CNC boards) — the
+  // area under every SMD part on that layer: between the two pads of a 1206 / 0805 … (0.5 mm past their sides), the
+  // pad-centre box of a bigger part. A thin strip of pour under a part bridges with solder and lifts on a milled board.
+  function pourKeepouts(layer) {
+    const out = keepouts().filter(k => k.pours && koOn(k, layer));
+    if (rules().pourUnderSmd !== false) return out;
+    const idx = Model.pinIndex();
+    for (const c of placed()) {
+      const ps = padsOf(c, idx).filter(p => !p.drill && (p.layer || 'F') === layer); if (ps.length < 2) continue;
+      let b;
+      if (ps.length === 2) {
+        const [a, q] = ps, horiz = Math.abs(a.x - q.x) >= Math.abs(a.y - q.y), [l, r] = horiz ? (a.x < q.x ? [a, q] : [q, a]) : (a.y < q.y ? [a, q] : [q, a]);
+        if (horiz) { const h = Math.max(a.h, q.h) / 2 + 0.5, cy = (a.y + q.y) / 2; b = [l.x + l.w / 2, cy - h, r.x - r.w / 2, cy + h]; }
+        else { const w = Math.max(a.w, q.w) / 2 + 0.5, cx = (a.x + q.x) / 2; b = [cx - w, l.y + l.h / 2, cx + w, r.y - r.h / 2]; }
+        if (b[2] - b[0] < 0.05 || b[3] - b[1] < 0.05) continue;
+      } else b = [Math.min(...ps.map(p => p.x)), Math.min(...ps.map(p => p.y)), Math.max(...ps.map(p => p.x)), Math.max(...ps.map(p => p.y))];
+      out.push({ name: 'under ' + c.ref, layer, pours: true, pts: [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]] });
+    }
+    return out;
+  }
   const koBox = k => { let b = [Infinity, Infinity, -Infinity, -Infinity]; for (const [x, y] of k.pts) b = [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)]; return b; };
   function addKeepout(o = {}) {
     const S = Model.S; if (!S.board.w) throw new Error('Generate the PCB first');
@@ -296,7 +316,7 @@ const Pcb = (() => {
     for (const t of S.pcb.traces) if (t.net !== pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) block({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, cl);
     for (const v of S.pcb.vias) if (v.net !== pr.net) block({ k: 'circ', c: [v.x, v.y], r: v.d / 2 }, cl);
     for (const h of S.pcb.holes || []) block({ k: 'circ', c: [h.x, h.y], r: h.d / 2 }, cl);
-    for (const k of keepouts()) if (k.pours && koOn(k, pr.layer)) {
+    for (const k of pourKeepouts(pr.layer)) {
       const b = koBox(k), x0 = Math.max(0, Math.floor(b[0] / gStep) - 1), x1 = Math.min(W - 1, Math.ceil(b[2] / gStep) + 1), y0 = Math.max(0, Math.floor(b[1] / gStep) - 1), y1 = Math.min(H - 1, Math.ceil(b[3] / gStep) + 1);
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (koDist(k, x * gStep, y * gStep) < gStep * 0.5) ok[y * W + x] = 0;
     }
@@ -462,7 +482,7 @@ const Pcb = (() => {
     };
     polyTerm(boardPoly(), R.edgeClearance, 1);
     polyTerm(pp, -dl, 1);   // the trace lands on the pour outline itself
-    for (const k of keepouts()) if (k.pours && koOn(k, pr.layer)) polyTerm(k.pts, 0, -1);
+    for (const k of pourKeepouts(pr.layer)) polyTerm(k.pts, 0, -1);
     for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net !== pr.net && padCu(q, L2).includes(pr.layer)) obstacle(padShape(q), cl);
     for (const t of S.pcb.traces) if (t.net !== pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) obstacle({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, cl);
     for (const v of S.pcb.vias) if (v.net !== pr.net) obstacle({ k: 'circ', c: [v.x, v.y], r: v.d / 2 }, cl);
@@ -1131,8 +1151,8 @@ const Pcb = (() => {
     jlcpcb_power: { label: 'JLCPCB 2-layer — power / robust', values: { traceWidth: 0.3, powerTraceWidth: 0.8, clearance: 0.25, viaDiameter: 0.8, viaDrill: 0.4, edgeClearance: 0.5, layers: 2, neckDown: true, ...JLC_MIN } },
     // milling on a desktop CNC (3018 Pro …): the V-bit groove is ~0.15 mm and varies with the board's flatness, the
     // machine has ~0.1 mm play and the drill wanders — wide tracks and gaps, big rings, one layer, no vias
-    cnc3018: { label: 'CNC milling — 3018 / GRBL desktop CNC (1 layer, 0.9 mm tracks, 0.4 mm gaps, 0.8 / 1.0 mm drills, no vias)', values: { traceWidth: 0.9, powerTraceWidth: 1.0, powerWider: false, clearance: 0.4, padClearance: 0.4, viaClearance: 0.4, pourClearance: 0.6, viaDiameter: 2.0, viaDrill: 0.8, edgeClearance: 1.5, layers: 1, neckDown: true, minTraceWidth: 0.5, minClearance: 0.4, minViaDrill: 0.8, minViaDiameter: 1.8, minAnnularRing: 0.5, minPthRing: 0.35, minHoleToHole: 1.0, minEdgeClearance: 1.5, minHoleSize: 0.8, pourMinArea: 2, trackStyle: '45', cnc: true } },
-    home: { label: 'Home etching (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6 } },
+    cnc3018: { label: 'CNC milling — 3018 / GRBL desktop CNC (1 layer, 0.9 mm tracks, 0.4 mm gaps, 0.8 / 1.0 mm drills, no vias)', values: { traceWidth: 0.9, powerTraceWidth: 1.0, powerWider: false, clearance: 0.4, padClearance: 0.4, viaClearance: 0.4, pourClearance: 0.6, viaDiameter: 2.0, viaDrill: 0.8, edgeClearance: 1.5, layers: 1, neckDown: true, minTraceWidth: 0.5, minClearance: 0.4, minViaDrill: 0.8, minViaDiameter: 1.8, minAnnularRing: 0.5, minPthRing: 0.35, minHoleToHole: 1.0, minEdgeClearance: 1.5, minHoleSize: 0.8, pourMinArea: 2, trackStyle: '45', pourUnderSmd: false, cnc: true } },
+    home: { label: 'Home etching (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6, pourUnderSmd: false } },
   };
   const DEFAULT_PRESET = 'jlcpcb_free_min';
   // JLCPCB measures tracks against drill holes too: via hole to track ≥ minHoleToTrack (0.2), plated hole to track
@@ -1172,7 +1192,7 @@ const Pcb = (() => {
     let base = Model.S.rules || {};
     if (u.preset) {   // a preset sets the sizes and fab minimums; settings that are not sizes stay
       if (!RULE_PRESETS[u.preset]) throw new Error(`Unknown preset "${u.preset}". Presets: ${Object.keys(RULE_PRESETS).join(', ')}`);
-      const keep = {}; for (const k of ['trackStyle', 'noViaInPad', 'viaInPad', 'warnUnderMetal', 'pourMinArea', 'routeTime', 'powerWider', 'epKeepout']) if (base[k] != null) keep[k] = base[k];
+      const keep = {}; for (const k of ['trackStyle', 'noViaInPad', 'viaInPad', 'warnUnderMetal', 'pourMinArea', 'routeTime', 'powerWider', 'epKeepout', 'pourUnderSmd']) if (base[k] != null) keep[k] = base[k];
       base = Object.assign({ preset: u.preset, netWidths: base.netWidths || {} }, keep);
     }
     const next = Object.assign({}, base);
@@ -1185,6 +1205,7 @@ const Pcb = (() => {
     if (u.viaInPad != null) next.viaInPad = !!u.viaInPad;
     if (next.viaInPad && (next.noViaInPad ?? true)) { if (u.viaInPad === true && u.noViaInPad !== true) next.noViaInPad = false; else next.viaInPad = false; }   // the strict rule is on unless switched off
     if (u.warnUnderMetal != null) next.warnUnderMetal = !!u.warnUnderMetal;
+    if (u.pourUnderSmd != null) next.pourUnderSmd = !!u.pourUnderSmd;
     if (u.epKeepout != null) next.epKeepout = !!u.epKeepout;
     // switching the automatic keep-outs back on brings back the ones removed one by one
     if (next.epKeepout && base.epKeepout === false && Model.S.pcb) delete Model.S.pcb.epKeepoutOff;
@@ -2733,7 +2754,7 @@ const Pcb = (() => {
           for (const rg of pourFill(pr).rings) { b.push(rg.hole ? '%LPC*%' : '%LPD*%'); region(rg.pts); }
           b.push('%LPC*%'); drawCopper(A, b, layer, 2 * cl, pr.net);
           b.push(A(`C,${f6(2 * R.edgeClearance)}`) + '*', X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*');
-          for (const k of keepouts()) if (k.pours && koOn(k, layer)) region(k.pts);
+          for (const k of pourKeepouts(layer)) region(k.pts);
         }
         b.push('%LPD*%');
       }
@@ -3084,7 +3105,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

@@ -222,7 +222,7 @@ const Cnc = (() => {
       for (const rg of Pcb.pourFill(pr).rings) pc.poly(rg.pts, rg.hole ? 0 : 1);
       copper(cl, pr.net, 0);
       for (let i = 0; i < outline.length; i++) pc.capsule(...outline[i], ...outline[(i + 1) % outline.length], R.edgeClearance, 0);
-      for (const k of Pcb.keepouts()) if (k.pours && koOn(k, layer)) pc.poly(k.pts, 0);
+      for (const k of Pcb.pourKeepouts(layer)) pc.poly(k.pts, 0);
     }
     copper(0, undefined, 1);
     const Bd = new Uint8Array(G.N); painter(G, Bd).poly(outline, 1);
@@ -242,9 +242,29 @@ const Cnc = (() => {
       const raw = contours(G, F).filter(l => Math.abs(area(l)) > g * g * 4).map(l => simplify(l, tol));
       rawPasses.push(raw); passes.push(frame(raw));
     }
+    const node = (x, y) => { const i = Math.round((x - G.x0) / g), j = Math.round((y - G.y0) / g); return i < 0 || j < 0 || i >= G.nx || j >= G.ny ? -1 : j * G.nx + i; };
+    // ---- copper cleared away where the pour stays out: under SMD parts (no strip between the pads of a 1206 to
+    // bridge with solder) and in keep-outs (antenna end). Milling only cuts grooves, so without this the copper there
+    // would stay as a floating island. Zig-zag lines across the area, clear of all copper by half the groove ----
+    const clearRaw = [], step = o.iso_dia * (1 - o.iso_overlap), keep = o.iso_dia / 2 + 0.02;
+    for (const k of Pcb.pourKeepouts(layer)) {
+      const xs = k.pts.map(q => q[0]), ys = k.pts.map(q => q[1]), kx0 = Math.min(...xs), kx1 = Math.max(...xs);
+      let flip = false;
+      for (let y = Math.min(...ys) + step / 2; y < Math.max(...ys); y += step) {
+        const runs = []; let a = null;
+        for (let x = kx0; x <= kx1 + 1e-9; x += g) {
+          const q = node(x, y), ok = q >= 0 && Pcb.inPoly(x, y, k.pts) && Bd[q] && Din[q] > 0.05 && Dc[q] > keep;
+          if (ok && a === null) a = x; if (!ok && a !== null) { if (x - g - a > 0.05) runs.push([a, x - g]); a = null; }
+        }
+        if (a !== null && kx1 - a > 0.05) runs.push([a, kx1]);
+        if (flip) runs.reverse();
+        for (const [x0, x1] of runs) clearRaw.push(flip ? [[x1, y], [x0, y]] : [[x0, y], [x1, y]]);
+        flip = !flip;
+      }
+    }
+    const clearPaths = clearRaw.map(l => l.map(T));
     // copper the V-bit cannot separate: two nets inside one ring
     const cuL = label(G, k => Cu[k] === 1), grownL = label(G, k => Dc[k] <= o.iso_dia / 2), netOf = new Map();
-    const node = (x, y) => { const i = Math.round((x - G.x0) / g), j = Math.round((y - G.y0) / g); return i < 0 || j < 0 || i >= G.nx || j >= G.ny ? -1 : j * G.nx + i; };
     const tag = (x, y, net) => { const k = node(x, y); if (k >= 0 && net && cuL.L[k]) { const gk = grownL.L[k]; if (!netOf.has(gk)) netOf.set(gk, new Set()); netOf.get(gk).add(net); } };
     for (const p of pads) if (onL(p)) tag(p.x, p.y, p.net);
     for (const t of traces) if (t.layer === layer) for (const q of t.pts) tag(q[0], q[1], t.net);
@@ -254,6 +274,7 @@ const Cnc = (() => {
     const verify = width => {
       const M = Bd.slice(), pm = painter(G, M);
       for (const loops of rawPasses) for (const l of loops) for (let i = 0; i < l.length; i++) pm.capsule(...l[i], ...l[(i + 1) % l.length], width / 2, 0);
+      for (const l of clearRaw) pm.capsule(...l[0], ...l[1], width / 2, 0);
       const lab = label(G, k => M[k] === 1).L, byLab = new Map(), byNet = new Map();
       const put = (x, y, net) => { const k = node(x, y); if (k < 0 || !net || !lab[k]) return; if (!byLab.has(lab[k])) byLab.set(lab[k], new Set()); byLab.get(lab[k]).add(net); if (!byNet.has(net)) byNet.set(net, new Set()); byNet.get(net).add(lab[k]); };
       for (const p of pads) if (onL(p)) put(p.x, p.y, p.net);
@@ -318,6 +339,11 @@ const Cnc = (() => {
         isoLen += len(p); rings++; pos = p[p.length - 1];
       }
     });
+    if (clearPaths.length) iso.push(`(clearing: no copper under SMD parts and in keep-outs, ${clearPaths.length} lines)`, `G0 Z${n3(o.safe_z)}`);
+    for (const p of clearPaths) {
+      iso.push(`G0 X${n3(p[0][0])} Y${n3(p[0][1])}`, `G0 Z${n3(o.travel_z)}`, `G1 Z${n3(-o.iso_depth)} F${o.plunge_feed}`, `G1 X${n3(p[1][0])} Y${n3(p[1][1])} F${fz}`, `G0 Z${n3(o.travel_z)}`);
+      isoLen += len(p);
+    }
     files['1_isolation.nc'] = gfile(`${name} - isolation, V-bit ${o.iso_dia} mm at ${o.iso_depth} mm deep, ${passes.length} pass${passes.length > 1 ? 'es' : ''}`, o, iso);
     // 2: one file per drill size
     const sizes = [...new Set(drilled.map(h => h.bit))].sort((a, b) => a - b), dz = -(thick + 0.2);
@@ -376,6 +402,7 @@ const Cnc = (() => {
       `<rect x="${x0}" y="0" width="${jw.toFixed(3)}" height="${jh.toFixed(3)}" fill="none" stroke="#555" stroke-width="0.1" stroke-dasharray="0.6 0.4"/>`,
       `<path d="${d(outline.map(T))}" fill="#b87333"/>`,
       ...passes.map((ls, k) => `<path d="${ls.map(d).join('')}" fill="none" stroke="${k ? '#7fb3ff' : '#2f7fff'}" stroke-width="${o.iso_dia}" stroke-linejoin="round" opacity="0.95"/>`),
+      clearPaths.length ? `<path d="${clearPaths.map(l => 'M' + l.map(q => `${q[0].toFixed(3)} ${sy(q[1]).toFixed(3)}`).join('L')).join('')}" fill="none" stroke="#2f7fff" stroke-width="${o.iso_dia}" stroke-linecap="round" opacity="0.95"/>` : '',
       `<path d="${d(cut)}" fill="none" stroke="#e5484d" stroke-width="${o.cut_dia}" opacity="0.35"/>`,
       ...tabs.map(([a, b]) => { const m = (a + b) / 2; let i = s.findIndex(v => v >= m); i = Math.max(1, i); const t = (m - s[i - 1]) / ((s[i] - s[i - 1]) || 1), x = ring[i - 1][0] + t * (ring[i][0] - ring[i - 1][0]), y = ring[i - 1][1] + t * (ring[i][1] - ring[i - 1][1]); return `<circle cx="${x.toFixed(3)}" cy="${sy(y).toFixed(3)}" r="${(o.tab_width / 2).toFixed(2)}" fill="#ffd166"/>`; }),
       ...holes.map(h => `<circle cx="${h.p[0].toFixed(3)}" cy="${sy(h.p[1]).toFixed(3)}" r="${(h.d / 2).toFixed(3)}" fill="#111"/>`),
@@ -387,7 +414,7 @@ const Cnc = (() => {
     Object.assign(info, {
       layer: layer === 'F' ? 'top' : 'bottom', mirrored: mirror, parts_side: mirror ? 'bare side (copper on the bottom of the finished board)' : 'copper side', mirror_choice: chosen ? 'chosen' : 'auto — pass parts_side "bare" or "copper" to choose', board_mm: [+W.toFixed(2), +H.toFixed(2)], job_mm: [+jw.toFixed(2), +jh.toFixed(2)],
       origin: o.origin === 'job' ? 'X0 Y0 = lower-left corner of the job: every move is at X ≥ 0, Y ≥ 0' : `X0 Y0 = lower-left corner of the PCB; the cutout reaches ${o.cut_dia} mm left of and below it`,
-      isolation: { passes: passes.length, rings, length_mm: Math.round(isoLen), v_bit_mm: o.iso_dia, depth_mm: o.iso_depth, v_bit: `${o.vbit_angle} deg, tip ${o.vbit_tip} mm` }, toolpath_check: verified,
+      isolation: { passes: passes.length, rings, cleared_lines: clearPaths.length, length_mm: Math.round(isoLen), v_bit_mm: o.iso_dia, depth_mm: o.iso_depth, v_bit: `${o.vbit_angle} deg, tip ${o.vbit_tip} mm` }, toolpath_check: verified,
       milled_holes: milled.length, cutout: { end_mill_mm: o.cut_dia, depth_mm: +total.toFixed(2), passes: steps, tabs: nt },
       board_thickness_mm: thick, est_minutes: Math.ceil(mins), files: fl, warnings, grid_mm: +g.toFixed(4),
     });

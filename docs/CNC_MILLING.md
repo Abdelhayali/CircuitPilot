@@ -76,6 +76,7 @@ Code: [`js/cnc.js`](../js/cnc.js).
 | Hole to hole | 1.0 mm | drill wander |
 | Ring around a through-hole pad | ≥ 0.35 mm (warning) | unplated pads lift, the drill can be off centre |
 | Smallest pour piece | 2 mm² | slivers peel off |
+| Pour under SMD parts | none (`pourUnderSmd: false`) | a pour strip between the pads of a 1206 bridges with solder; the G-code also mills that copper away (zig-zag with the V-bit), and the copper in keep-outs such as the antenna end |
 | Track corners | 45° | the V-bit cannot reach sharp inside corners |
 | Vias | DRC error | nothing to join on a 1-sided board: use a wire jumper |
 | Tracks on both layers | DRC error | |

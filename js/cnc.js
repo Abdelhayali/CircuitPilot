@@ -187,7 +187,11 @@ const Cnc = (() => {
     const smd = pads.filter(p => !p.drill && p.layer === layer), tht = pads.filter(p => p.drill);
     if ((S.pcb.vias || []).length) warnings.push(`${S.pcb.vias.length} via${S.pcb.vias.length > 1 ? 's are' : ' is'} drilled; on a 1-sided board each needs a wire link on the other side (or remove them)`);
     // mirror: copper facing up on the machine, seen from below when the parts go on the other side
-    let mirror = o.mirror === true || o.mirror === 'on' || o.mirror === 'true' ? true : o.mirror === false || o.mirror === 'off' || o.mirror === 'false' ? false : null;
+    // where the parts go decides the mirror: parts_side "bare" (through-hole parts in from the side without copper) =
+    // mirrored, "copper" (parts on the copper) = not mirrored; mirror on / off says the same; auto picks from the parts
+    const side = String(o.parts_side || '').toLowerCase();
+    let mirror = side === 'bare' ? true : side === 'copper' ? false : o.mirror === true || o.mirror === 'on' || o.mirror === 'true' ? true : o.mirror === false || o.mirror === 'off' || o.mirror === 'false' ? false : null;
+    const chosen = mirror !== null;
     // mixed boards: the through-hole parts go in from the bare side, the SMD parts sit on the copper — mirrored, as long as
     // every SMD part there is a 2-pad part (a mirrored 1206 is the same part; a mirrored SOIC has its pins reversed)
     const smdPins = new Map(); for (const p of smd) smdPins.set(p.ref, (smdPins.get(p.ref) || 0) + 1);
@@ -381,7 +385,7 @@ const Cnc = (() => {
     const mins = (isoLen / fz + passes.flat().length * (o.iso_depth / o.plunge_feed) + Lc * steps / o.cut_feed + drilled.length * (thick + 0.2) / o.drill_feed * 2 + wide.reduce((a, h) => a + Math.PI * (h.d - h.bit) * wz.length / o.widen_feed, 0) + milled.reduce((a, h) => a + Math.PI * (h.d - o.cut_dia) * steps / o.cut_feed, 0)) * 1.15;
     const fl = Object.keys(files).filter(f => f.endsWith('.nc'));
     Object.assign(info, {
-      layer: layer === 'F' ? 'top' : 'bottom', mirrored: mirror, board_mm: [+W.toFixed(2), +H.toFixed(2)], job_mm: [+jw.toFixed(2), +jh.toFixed(2)],
+      layer: layer === 'F' ? 'top' : 'bottom', mirrored: mirror, parts_side: mirror ? 'bare side (copper on the bottom of the finished board)' : 'copper side', mirror_choice: chosen ? 'chosen' : 'auto — pass parts_side "bare" or "copper" to choose', board_mm: [+W.toFixed(2), +H.toFixed(2)], job_mm: [+jw.toFixed(2), +jh.toFixed(2)],
       origin: o.origin === 'job' ? 'X0 Y0 = lower-left corner of the job: every move is at X ≥ 0, Y ≥ 0' : `X0 Y0 = lower-left corner of the PCB; the cutout reaches ${o.cut_dia} mm left of and below it`,
       isolation: { passes: passes.length, rings, length_mm: Math.round(isoLen), v_bit_mm: o.iso_dia, depth_mm: o.iso_depth, v_bit: `${o.vbit_angle} deg, tip ${o.vbit_tip} mm` }, toolpath_check: verified,
       milled_holes: milled.length, cutout: { end_mill_mm: o.cut_dia, depth_mm: +total.toFixed(2), passes: steps, tabs: nt },

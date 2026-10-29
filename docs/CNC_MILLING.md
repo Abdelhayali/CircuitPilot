@@ -32,6 +32,7 @@ Every file: `G21 G90 G94`, `G0 Z5`, `M3 S1000`, `G4 P3` … `G0 Z5`, `M5`, `G0 X
 | `tabs` / `tab_width` / `tab_height` | 4 / 2 / 0.5 | |
 | `board_thick` | design (1.6) | mm |
 | `spindle` | 1000 | `S` value (GRBL `$30=1000` → full speed) |
+| `parts_side` | auto | **Where the parts go** (dialog: *Parts go on*). `bare` = through-hole parts from the side without copper, soldered on the copper → milled mirrored. `copper` = all parts on the copper side → not mirrored. The AI asks you when it does not know |
 | `mirror` | auto | auto = mirrored when the through-hole parts go on the bare side: bottom copper, through-hole only, or through-hole + 2-pad SMD parts (1206 …, soldered on the copper side). Not mirrored when an SMD IC sits on the copper (its pins would be reversed) |
 | `origin` | board | `board` (PCB corner) or `job` |
 | `drill_bits` | [0.8, 1.0] | the drill bits you have |

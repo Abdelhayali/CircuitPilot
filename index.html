@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610301000">
+<link rel="stylesheet" href="styles.css?v=202610301100">
 </head>
 <body>
 <header id="top">
@@ -362,7 +362,7 @@
 <div id="cncModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>CNC milling (GRBL)</h2><button id="cncClose">✕</button></div>
-    <p class="muted" style="margin:2px 0 6px;font-size:12px">For a desktop CNC such as the 3018 Pro. X0 Y0 = lower-left corner of the PCB, Z0 = copper surface. One copper side only: ⚙ Rules → CNC milling — 3018.</p>
+    <p class="muted" style="margin:2px 0 6px;font-size:12px">For a desktop CNC such as the 3018 Pro. X0 Y0 = lower-left corner of the PCB, Z0 = copper surface. One copper side only: ⚙ Rules → CNC milling — 3018. <b>Parts go on</b>: bare side = through-hole parts from the side without copper (milled mirrored), copper side = parts on the copper.</p>
     <div class="cnc-grid">
       <fieldset><legend>V-bit (isolation)</legend>
         <label>Angle, deg <input id="cncVAngle" type="number" step="5" min="10" max="90" value="30"></label>
@@ -381,7 +381,7 @@
       <fieldset><legend>Board</legend>
         <label>Thickness, mm <input id="cncThick" type="number" step="0.1" min="0.2" value="1.6"></label>
         <label>Tabs <input id="cncTabs" type="number" step="1" min="0" max="12" value="4"></label>
-        <label>Mirror <select id="cncMirror"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label>
+        <label title="Bare side: through-hole parts go in from the side without copper and are soldered on the copper (the board is milled mirrored so the pins match); 1206 parts on the copper. Copper side: all parts sit on the copper (not mirrored).">Parts go on <select id="cncMirror"><option value="on">bare side (mirrored)</option><option value="off">copper side</option><option value="auto">auto</option></select></label>
         <label>X0 Y0 <select id="cncOrigin"><option value="board">PCB corner</option><option value="job">job corner</option></select></label>
         <label>Spindle S <input id="cncSpindle" type="number" step="100" min="0" value="1000"></label>
       </fieldset>
@@ -409,38 +409,38 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610301000"></script>
-<script src="js/static-backend.js?v=202610301000"></script>
-<script src="js/lib.js?v=202610301000"></script>
-<script src="js/view.js?v=202610301000"></script>
-<script src="js/model.js?v=202610301000"></script>
-<script src="js/schematic.js?v=202610301000"></script>
-<script src="js/strokefont.js?v=202610301000"></script>
-<script src="js/pcb.js?v=202610301000"></script>
-<script src="js/cnc.js?v=202610301000"></script>
-<script src="js/pcbview.js?v=202610301000"></script>
-<script src="js/enclosure.js?v=202610301000"></script>
-<script src="js/shape3d.js?v=202610301000"></script>
-<script src="js/easyeda.js?v=202610301000"></script>
-<script src="js/libpanel.js?v=202610301000"></script>
-<script src="js/openlib.js?v=202610301000"></script>
-<script src="js/kicad.js?v=202610301000"></script>
-<script src="js/easyedapro.js?v=202610301000"></script>
-<script src="js/encview.js?v=202610301000"></script>
-<script src="js/encdesign.js?v=202610301000"></script>
-<script src="js/docview.js?v=202610301000"></script>
-<script src="js/pcb3d.js?v=202610301000"></script>
-<script src="js/blocks.js?v=202610301000"></script>
-<script src="js/engine.js?v=202610301000"></script>
-<script src="js/ai.js?v=202610301000"></script>
-<script src="js/exports.js?v=202610301000"></script>
-<script src="js/pcbpdf.js?v=202610301000"></script>
-<script src="js/folder.js?v=202610301000"></script>
-<script src="js/projects.js?v=202610301000"></script>
-<script src="js/cloud.js?v=202610301000"></script>
-<script src="js/editor.js?v=202610301000"></script>
-<script src="js/jlcorder.js?v=202610301000"></script>
-<script src="js/app.js?v=202610301000"></script>
+<script src="js/config.js?v=202610301100"></script>
+<script src="js/static-backend.js?v=202610301100"></script>
+<script src="js/lib.js?v=202610301100"></script>
+<script src="js/view.js?v=202610301100"></script>
+<script src="js/model.js?v=202610301100"></script>
+<script src="js/schematic.js?v=202610301100"></script>
+<script src="js/strokefont.js?v=202610301100"></script>
+<script src="js/pcb.js?v=202610301100"></script>
+<script src="js/cnc.js?v=202610301100"></script>
+<script src="js/pcbview.js?v=202610301100"></script>
+<script src="js/enclosure.js?v=202610301100"></script>
+<script src="js/shape3d.js?v=202610301100"></script>
+<script src="js/easyeda.js?v=202610301100"></script>
+<script src="js/libpanel.js?v=202610301100"></script>
+<script src="js/openlib.js?v=202610301100"></script>
+<script src="js/kicad.js?v=202610301100"></script>
+<script src="js/easyedapro.js?v=202610301100"></script>
+<script src="js/encview.js?v=202610301100"></script>
+<script src="js/encdesign.js?v=202610301100"></script>
+<script src="js/docview.js?v=202610301100"></script>
+<script src="js/pcb3d.js?v=202610301100"></script>
+<script src="js/blocks.js?v=202610301100"></script>
+<script src="js/engine.js?v=202610301100"></script>
+<script src="js/ai.js?v=202610301100"></script>
+<script src="js/exports.js?v=202610301100"></script>
+<script src="js/pcbpdf.js?v=202610301100"></script>
+<script src="js/folder.js?v=202610301100"></script>
+<script src="js/projects.js?v=202610301100"></script>
+<script src="js/cloud.js?v=202610301100"></script>
+<script src="js/editor.js?v=202610301100"></script>
+<script src="js/jlcorder.js?v=202610301100"></script>
+<script src="js/app.js?v=202610301100"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

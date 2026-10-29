@@ -1306,7 +1306,7 @@ const App = (() => {
           const o = cncOpts(); try { localStorage.setItem('cp.cnc', JSON.stringify(o)); } catch (e) { }
           const r = Cnc.job(o), i = r.info; cncLast = r;
           $('#cncPreview').innerHTML = r.files['preview.svg'];
-          $('#cncInfo').innerHTML = `<b>${i.layer} copper${i.mirrored ? ', mirrored' : ''}</b> · groove ${i.isolation.v_bit_mm} mm at ${i.isolation.depth_mm} mm · board ${i.board_mm.join(' × ')} mm · job ${i.job_mm.join(' × ')} mm · ${i.isolation.rings} isolation rings · ` +
+          $('#cncInfo').innerHTML = `<b>parts on the ${i.mirrored ? 'bare side — milled mirrored' : 'copper side — not mirrored'}</b> · groove ${i.isolation.v_bit_mm} mm at ${i.isolation.depth_mm} mm · board ${i.board_mm.join(' × ')} mm · job ${i.job_mm.join(' × ')} mm · ${i.isolation.rings} isolation rings · ` +
             `${i.drills.map(d => `${d.holes}× ${d.bit_mm.toFixed(2)} mm`).join(', ') || 'no drilled holes'}${i.milled_holes ? ` · ${i.milled_holes} milled holes` : ''} · ${i.cutout.passes} cutout passes, ${i.cutout.tabs} tabs · ~${i.est_minutes} min` +
             (i.warnings.length ? '<ul class="warn" style="margin:4px 0 0 16px;padding:0">' + i.warnings.map(w => `<li>${esc(w)}</li>`).join('') + '</ul>' : '') +
             '<div class="muted" style="margin-top:3px">Blue = isolation, red = cutout, yellow = tabs, green = X0 Y0.</div>';

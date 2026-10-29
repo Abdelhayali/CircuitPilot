@@ -5,7 +5,7 @@
 // contours of that copper's distance field. X0 Y0 = lower-left corner of the PCB (or of the job), Z0 = copper surface.
 const Cnc = (() => {
   const DEF = {
-    iso_dia: 0.15, iso_depth: 0.08, iso_passes: 2, iso_overlap: 0.3, iso_feed: 120, plunge_feed: 60,
+    iso_dia: 0, iso_depth: 0.2, vbit_angle: 30, vbit_tip: 0.1, iso_passes: 2, iso_overlap: 0.3, iso_feed: 120, plunge_feed: 60,
     drill_feed: 40, cut_dia: 2, cut_step: 0.3, cut_feed: 100, tabs: 4, tab_width: 2, tab_height: 0.5,
     spindle: 1000, safe_z: 5, travel_z: 1, origin: 'board', drill_bits: [0.8, 1.0], widen_feed: 30, widen_step: 0.4, mirror: 'auto', board_thick: 0, resolution: 0.02, layer: '',
   };
@@ -173,7 +173,9 @@ const Cnc = (() => {
     for (const k of Object.keys(DEF)) if (typeof DEF[k] === 'number') o[k] = +o[k];
     const S = Model.S, R = Pcb.rules(), cs = Pcb.placed(), idx = Model.pinIndex();
     if (!cs.length || !S.board.w) throw new Error('No PCB yet — generate_pcb first');
-    if (!(o.iso_dia > 0 && o.iso_depth > 0 && o.cut_dia > 0 && o.cut_step > 0)) throw new Error('iso_dia, iso_depth, cut_dia and cut_step must be > 0');
+    // the groove the V-bit cuts at that depth (iso_dia 0 = from the bit: tip + 2 · depth · tan(angle / 2))
+    if (!(o.iso_dia > 0)) o.iso_dia = +(o.vbit_tip + 2 * o.iso_depth * Math.tan(o.vbit_angle / 2 * Math.PI / 180)).toFixed(3);
+    if (!(o.iso_dia > 0 && o.iso_depth > 0 && o.cut_dia > 0 && o.cut_step > 0)) throw new Error('iso_dia (or vbit_tip / vbit_angle), iso_depth, cut_dia and cut_step must be > 0');
     const warnings = [], pads = cs.flatMap(c => Pcb.padsOf(c, idx)), traces = S.pcb.traces || [];
     // the copper side to mill: the one with the tracks (through-hole pads are on both)
     const tl = new Set(traces.map(t => t.layer));
@@ -186,11 +188,17 @@ const Cnc = (() => {
     if ((S.pcb.vias || []).length) warnings.push(`${S.pcb.vias.length} via${S.pcb.vias.length > 1 ? 's are' : ' is'} drilled; on a 1-sided board each needs a wire link on the other side (or remove them)`);
     // mirror: copper facing up on the machine, seen from below when the parts go on the other side
     let mirror = o.mirror === true || o.mirror === 'on' || o.mirror === 'true' ? true : o.mirror === false || o.mirror === 'off' || o.mirror === 'false' ? false : null;
-    if (mirror === null) mirror = layer === 'B' || !smd.length;
-    if (layer === 'F' && smd.length && tht.length && !mirror) warnings.push('SMD and through-hole parts: not mirrored, the SMD parts sit on the copper. Through-hole parts go in from the bare side and are soldered on the copper side: match pin 1 to the square pad');
+    // mixed boards: the through-hole parts go in from the bare side, the SMD parts sit on the copper — mirrored, as long as
+    // every SMD part there is a 2-pad part (a mirrored 1206 is the same part; a mirrored SOIC has its pins reversed)
+    const smdPins = new Map(); for (const p of smd) smdPins.set(p.ref, (smdPins.get(p.ref) || 0) + 1);
+    const symmetric = [...smdPins.values()].every(n => n <= 2);
+    if (mirror === null) mirror = layer === 'B' || !smd.length || (tht.length > 0 && symmetric);
+    if (layer === 'F' && smd.length && tht.length) warnings.push(mirror
+      ? 'Mirrored: through-hole parts go in from the bare side (soldered on the copper), the 2-pad SMD parts are soldered on the copper side'
+      : `Not mirrored: ${[...smdPins].filter(([, n]) => n > 2).map(([r]) => r).slice(0, 4).join(', ')} would have reversed pins on the copper side, so the through-hole parts sit on the copper side too (leads not through the board)`);
     const thick = o.board_thick > 0 ? o.board_thick : Pcb.boardThickness();
     if (!R.cnc) warnings.push('Design rules are not "CNC milling - 3018" (set_design_rules {preset: "cnc3018"}, or Rules in the PCB tab): tracks, gaps and rings may be too fine to mill safely');
-    if (R.clearance < o.iso_dia + 0.05) warnings.push(`Design clearance ${R.clearance} mm is under the V-bit cut (${o.iso_dia} mm) + 0.05: copper that close is not separated — a finer V-bit (smaller iso_dia) or wider clearance (set_design_rules {preset: "home"}: 0.4 mm)`);
+    if (R.clearance < o.iso_dia + 0.05) warnings.push(`Design clearance ${R.clearance} mm is under the V-bit cut (${o.iso_dia} mm) + 0.05: copper that close is not separated — a shallower cut, a finer V-bit or wider clearance (set_design_rules {preset: "cnc3018"}: 0.4 mm)`);
 
     // ---- raster of the copper (same order as the Gerber: pours, their clearances, then all copper) ----
     const outline = Pcb.boardPoly(), bx0 = Math.min(...outline.map(q => q[0])), bx1 = Math.max(...outline.map(q => q[0])), by0 = Math.min(...outline.map(q => q[1])), by1 = Math.max(...outline.map(q => q[1]));
@@ -219,15 +227,16 @@ const Cnc = (() => {
     const off = o.origin === 'board' ? 0 : o.cut_dia;
     const T = q => [(mirror ? bx1 - q[0] : q[0] - bx0) + off, by1 - q[1] + off];
     // every path keeps its material on the left (conventional milling with M3)
-    const frame = (loops, tol) => loops.map(l => { let p = simplify(l, tol).map(T); if (!mirror) p.reverse(); return p; });
+    const frame = loops => loops.map(l => { const p = l.map(T); if (!mirror) p.reverse(); return p; });
     const tol = Math.max(0.003, g / 2);
 
     // ---- isolation: rings at iso/2, iso/2 + step … around the copper, inside the board (0.05 mm in) ----
-    const Dc = distance(G, Cu, 1), Din = distance(G, Bd, 0), F = new Float32Array(G.N), passes = [];
+    const Dc = distance(G, Cu, 1), Din = distance(G, Bd, 0), F = new Float32Array(G.N), passes = [], rawPasses = [];
     for (let k = 0; k < Math.max(1, Math.round(o.iso_passes)); k++) {
       const r = o.iso_dia / 2 + k * o.iso_dia * (1 - o.iso_overlap);
       for (let q = 0; q < G.N; q++) { const a = Dc[q] - r, b = Bd[q] ? 0.05 - Din[q] : 1; F[q] = a > b ? a : b; }
-      passes.push(frame(contours(G, F), tol).filter(l => Math.abs(area(l)) > g * g * 4));
+      const raw = contours(G, F).filter(l => Math.abs(area(l)) > g * g * 4).map(l => simplify(l, tol));
+      rawPasses.push(raw); passes.push(frame(raw));
     }
     // copper the V-bit cannot separate: two nets inside one ring
     const cuL = label(G, k => Cu[k] === 1), grownL = label(G, k => Dc[k] <= o.iso_dia / 2), netOf = new Map();
@@ -236,6 +245,21 @@ const Cnc = (() => {
     for (const p of pads) if (onL(p)) tag(p.x, p.y, p.net);
     for (const t of traces) if (t.layer === layer) for (const q of t.pts) tag(q[0], q[1], t.net);
     for (const s of netOf.values()) if (s.size > 1) warnings.push(`${[...s].slice(0, 4).join(' / ')}${s.size > 4 ? ' …' : ''}: copper closer than the ${o.iso_dia} mm V-bit — they stay shorted (wider clearance, a finer bit or a smaller iso_dia)`);
+    // check of the toolpaths themselves: the whole sheet is copper except where the grooves go. A narrower groove than
+    // planned (a shallow spot) must still separate every net, a wider one (a worn bit, a low spot) must not cut a net in two
+    const verify = width => {
+      const M = Bd.slice(), pm = painter(G, M);
+      for (const loops of rawPasses) for (const l of loops) for (let i = 0; i < l.length; i++) pm.capsule(...l[i], ...l[(i + 1) % l.length], width / 2, 0);
+      const lab = label(G, k => M[k] === 1).L, byLab = new Map(), byNet = new Map();
+      const put = (x, y, net) => { const k = node(x, y); if (k < 0 || !net || !lab[k]) return; if (!byLab.has(lab[k])) byLab.set(lab[k], new Set()); byLab.get(lab[k]).add(net); if (!byNet.has(net)) byNet.set(net, new Set()); byNet.get(net).add(lab[k]); };
+      for (const p of pads) if (onL(p)) put(p.x, p.y, p.net);
+      for (const t of traces) if (t.layer === layer) for (const q of t.pts) put(q[0], q[1], t.net);
+      return { shorts: [...byLab.values()].filter(s => s.size > 1).map(s => [...s]), opens: [...byNet].filter(([, s]) => s.size > 1).map(([n]) => n) };
+    };
+    const narrow = +(o.iso_dia * 0.6).toFixed(3), wideG = +(o.iso_dia * 1.5).toFixed(3), vN = verify(narrow), vW = verify(wideG);
+    for (const s of vN.shorts) warnings.push(`Toolpath check: with a ${narrow} mm groove (a shallow spot) ${s.slice(0, 4).join(' / ')} stay connected`);
+    if (vW.opens.length) warnings.push(`Toolpath check: with a ${wideG} mm groove (worn bit, low spot) ${vW.opens.slice(0, 6).join(', ')} would be cut in two — wider tracks`);
+    const verified = { shorts_at_narrow_groove: vN.shorts.length, nets_cut_at_wide_groove: vW.opens.length, narrow_mm: narrow, wide_mm: wideG };
 
     // ---- holes: drilled per bit size; bigger than the end mill → milled in the cutout file ----
     const holes = [...tht.map(p => ({ x: p.x, y: p.y, d: p.drill })), ...(S.pcb.vias || []).map(v => ({ x: v.x, y: v.y, d: v.drill })), ...(S.pcb.holes || []).map(h => ({ x: h.x, y: h.y, d: h.d }))]
@@ -266,7 +290,7 @@ const Cnc = (() => {
     }
     for (let q = 0; q < G.N; q++) if (F[q] !== INF) Dout[q] = Bd[q] ? -F[q] : F[q];
     for (let q = 0; q < G.N; q++) F[q] = Dout[q] - o.cut_dia / 2;
-    const cutLoops = frame(contours(G, F), tol).sort((a, b) => Math.abs(area(b)) - Math.abs(area(a)));
+    const cutLoops = frame(contours(G, F).map(l => simplify(l, tol))).sort((a, b) => Math.abs(area(b)) - Math.abs(area(a)));
     if (!cutLoops.length) throw new Error('Board outline not found');
     let cut = cutLoops[0];
     // start on the left end of the bottom edge (a straight run, away from the tabs)
@@ -359,11 +383,11 @@ const Cnc = (() => {
     Object.assign(info, {
       layer: layer === 'F' ? 'top' : 'bottom', mirrored: mirror, board_mm: [+W.toFixed(2), +H.toFixed(2)], job_mm: [+jw.toFixed(2), +jh.toFixed(2)],
       origin: o.origin === 'job' ? 'X0 Y0 = lower-left corner of the job: every move is at X ≥ 0, Y ≥ 0' : `X0 Y0 = lower-left corner of the PCB; the cutout reaches ${o.cut_dia} mm left of and below it`,
-      isolation: { passes: passes.length, rings, length_mm: Math.round(isoLen), v_bit_mm: o.iso_dia, depth_mm: o.iso_depth },
+      isolation: { passes: passes.length, rings, length_mm: Math.round(isoLen), v_bit_mm: o.iso_dia, depth_mm: o.iso_depth, v_bit: `${o.vbit_angle} deg, tip ${o.vbit_tip} mm` }, toolpath_check: verified,
       milled_holes: milled.length, cutout: { end_mill_mm: o.cut_dia, depth_mm: +total.toFixed(2), passes: steps, tabs: nt },
       board_thickness_mm: thick, est_minutes: Math.ceil(mins), files: fl, warnings, grid_mm: +g.toFixed(4),
     });
-    const bitList = [`V-bit 20-30 deg, ${o.iso_dia} mm wide at ${o.iso_depth} mm deep  ->  1_isolation.nc`, ...info.drills.map(q => `${q.bit_mm.toFixed(2)} mm drill (${q.holes} holes${q.widened ? `, ${q.widened} widened` : ''})  ->  ${q.file}`), `${o.cut_dia} mm flat end mill  ->  3_cutout.nc${milled.length ? ` (also mills the ${milled.length} hole${milled.length > 1 ? 's' : ''} of ${n3(millAt)} mm and more)` : ''}`];
+    const bitList = [`V-bit ${o.vbit_angle} deg, tip ${o.vbit_tip} mm: ${o.iso_dia} mm wide at ${o.iso_depth} mm deep  ->  1_isolation.nc`, ...info.drills.map(q => `${q.bit_mm.toFixed(2)} mm drill (${q.holes} holes${q.widened ? `, ${q.widened} widened` : ''})  ->  ${q.file}`), `${o.cut_dia} mm flat end mill  ->  3_cutout.nc${milled.length ? ` (also mills the ${milled.length} hole${milled.length > 1 ? 's' : ''} of ${n3(millAt)} mm and more)` : ''}`];
     files['README-cnc.txt'] = [`${name} - CNC milling files (GRBL, e.g. CNC 3018 Pro)`, '',
       o.origin === 'job' ? `Board ${info.board_mm.join(' x ')} mm, job ${info.job_mm.join(' x ')} mm (the copper sheet must reach this far right and up from X0 Y0).`
         : `Board ${info.board_mm.join(' x ')} mm. From X0 Y0 the copper sheet must reach ${n3(W + o.cut_dia + 1)} mm right and ${n3(H + o.cut_dia + 1)} mm up, and ${n3(o.cut_dia + 1)} mm left and down (cutout).`,

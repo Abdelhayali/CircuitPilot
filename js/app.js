@@ -1296,7 +1296,7 @@ const App = (() => {
     $$('[data-layer]').forEach(cb => cb.onchange = () => { Pcb.ui.show[cb.dataset.layer] = cb.checked; Pcb.render(); });
     $('#btnGerber').onclick = () => exportAs('gerber');
     // ---------- CNC milling (GRBL G-code): settings, preview, download ----------
-    const CNC_F = { iso_dia: 'cncIsoDia', iso_depth: 'cncIsoDepth', iso_passes: 'cncIsoPasses', iso_feed: 'cncIsoFeed', drill_feed: 'cncDrillFeed', cut_dia: 'cncCutDia', cut_step: 'cncCutStep', cut_feed: 'cncCutFeed', board_thick: 'cncThick', tabs: 'cncTabs', mirror: 'cncMirror', origin: 'cncOrigin', spindle: 'cncSpindle', drill_bits: 'cncBits' };
+    const CNC_F = { vbit_angle: 'cncVAngle', vbit_tip: 'cncVTip', iso_depth: 'cncIsoDepth', iso_passes: 'cncIsoPasses', iso_feed: 'cncIsoFeed', drill_feed: 'cncDrillFeed', cut_dia: 'cncCutDia', cut_step: 'cncCutStep', cut_feed: 'cncCutFeed', board_thick: 'cncThick', tabs: 'cncTabs', mirror: 'cncMirror', origin: 'cncOrigin', spindle: 'cncSpindle', drill_bits: 'cncBits' };
     const cncOpts = () => { const o = {}; for (const [k, id] of Object.entries(CNC_F)) { const el = $('#' + id); o[k] = el.tagName === 'SELECT' || el.type === 'text' ? el.value : +el.value; } return o; };
     let cncLast = null;
     const cncRun = () => {
@@ -1306,7 +1306,7 @@ const App = (() => {
           const o = cncOpts(); try { localStorage.setItem('cp.cnc', JSON.stringify(o)); } catch (e) { }
           const r = Cnc.job(o), i = r.info; cncLast = r;
           $('#cncPreview').innerHTML = r.files['preview.svg'];
-          $('#cncInfo').innerHTML = `<b>${i.layer} copper${i.mirrored ? ', mirrored' : ''}</b> · board ${i.board_mm.join(' × ')} mm · job ${i.job_mm.join(' × ')} mm · ${i.isolation.rings} isolation rings · ` +
+          $('#cncInfo').innerHTML = `<b>${i.layer} copper${i.mirrored ? ', mirrored' : ''}</b> · groove ${i.isolation.v_bit_mm} mm at ${i.isolation.depth_mm} mm · board ${i.board_mm.join(' × ')} mm · job ${i.job_mm.join(' × ')} mm · ${i.isolation.rings} isolation rings · ` +
             `${i.drills.map(d => `${d.holes}× ${d.bit_mm.toFixed(2)} mm`).join(', ') || 'no drilled holes'}${i.milled_holes ? ` · ${i.milled_holes} milled holes` : ''} · ${i.cutout.passes} cutout passes, ${i.cutout.tabs} tabs · ~${i.est_minutes} min` +
             (i.warnings.length ? '<ul class="warn" style="margin:4px 0 0 16px;padding:0">' + i.warnings.map(w => `<li>${esc(w)}</li>`).join('') + '</ul>' : '') +
             '<div class="muted" style="margin-top:3px">Blue = isolation, red = cutout, yellow = tabs, green = X0 Y0.</div>';
@@ -1317,6 +1317,7 @@ const App = (() => {
       if (!Model.S.board.w || !Pcb.placed().length) { toast('No PCB yet'); return; }
       let saved = {}; try { saved = JSON.parse(localStorage.getItem('cp.cnc') || '{}'); } catch (e) { }
       if (!saved.drill_bits) delete saved.origin;   // saved before the PCB corner became the default
+      if (!saved.vbit_angle) delete saved.iso_depth;   // saved before the 0.2 mm default (0.08 left areas uncut)
       for (const [k, id] of Object.entries(CNC_F)) if (saved[k] !== undefined && k !== 'board_thick') $('#' + id).value = saved[k];
       $('#cncThick').value = Pcb.boardThickness();
       $('#cncModal').classList.remove('hidden'); cncRun();

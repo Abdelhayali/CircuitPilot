@@ -23,15 +23,16 @@ Every file: `G21 G90 G94`, `G0 Z5`, `M3 S1000`, `G4 P3` … `G0 Z5`, `M5`, `G0 X
 
 | Option | Default | |
 |---|---|---|
-| `iso_dia` | 0.15 | V-bit cut width at the cut depth, mm |
-| `iso_depth` | 0.08 | mm |
+| `iso_depth` | 0.2 | mm. Copper is 0.035 mm thick: 0.2 mm still cuts through where the board sits ~0.15 mm low (0.08 left areas uncut) |
+| `vbit_angle` / `vbit_tip` | 30 / 0.1 | the V-bit; the groove width follows from them |
+| `iso_dia` | auto | groove width at the cut depth = tip + 2·depth·tan(angle/2) → 0.207 mm at 0.2 mm deep |
 | `iso_passes` / `iso_overlap` | 2 / 0.3 | |
 | `iso_feed` / `plunge_feed` / `drill_feed` / `cut_feed` | 120 / 60 / 40 / 100 | mm/min |
 | `cut_dia` / `cut_step` | 2 / 0.3 | end mill, mm |
 | `tabs` / `tab_width` / `tab_height` | 4 / 2 / 0.5 | |
 | `board_thick` | design (1.6) | mm |
 | `spindle` | 1000 | `S` value (GRBL `$30=1000` → full speed) |
-| `mirror` | auto | auto = mirrored for bottom copper, or top copper with through-hole parts only (the parts go on the other side); `off` for SMD on the copper side |
+| `mirror` | auto | auto = mirrored when the through-hole parts go on the bare side: bottom copper, through-hole only, or through-hole + 2-pad SMD parts (1206 …, soldered on the copper side). Not mirrored when an SMD IC sits on the copper (its pins would be reversed) |
 | `origin` | board | `board` (PCB corner) or `job` |
 | `drill_bits` | [0.8, 1.0] | the drill bits you have |
 | `layer` | auto | the copper side with the tracks |
@@ -46,6 +47,10 @@ Every file: `G21 G90 G94`, `G0 Z5`, `M3 S1000`, `G4 P3` … `G0 Z5`, `M5`, `G0 X
    - Isolation pass *k* is the contour of `max(distance − r_k, board inset 0.05 mm)`, found by marching squares with interpolation and simplified to 0.01 mm.
    - Where two nets are closer than the V-bit, the rings merge, and the cutter never enters either net's copper.
 3. **Short check**: copper islands are labelled. If one island grown by `iso_dia/2` holds pads or tracks of two nets, a warning names them: they would stay shorted.
+4. **Toolpath check**: the finished paths are cut out of a full copper sheet twice:
+   - with a groove 0.6 × `iso_dia` (a shallow spot): every net must still be separate;
+   - with a groove 1.5 × `iso_dia` (a worn bit, a low spot): no net may be cut in two.
+   The result is `toolpath_check` in the tool result, plus warnings.
 4. **Outline**: the end mill path is the contour at `cut_dia/2` outside the board. Near that path, the distance is computed exactly from the outline edges.
    - Tabs are spread evenly along the perimeter.
    - On passes deeper than `−(total − tab_height)`, the tool rises to the tab top across each tab, `(tab_width + cut_dia)` long.
@@ -62,8 +67,8 @@ Code: [`js/cnc.js`](../js/cnc.js).
 | Rule | Value | Why |
 |---|---|---|
 | Layers | 1 | one copper side |
-| Track width | 0.5 mm, power nets 1.0 mm, never under 0.4 | the V-bit eats the edges; thin tracks lift when soldering |
-| Clearance (tracks, pads, vias) | 0.4 mm | groove (~0.15 mm, more where the board is not flat) + ~0.1 mm machine play |
+| Track width | 0.9 mm (3V3 / power 1.0), necked down to 0.5 mm at most | at 0.2 mm deep the groove is ~0.21 mm; wide tracks survive a worn bit and lift less when soldering |
+| Clearance (tracks, pads, vias) | 0.4 mm | groove (~0.21 mm at 0.2 mm deep) + ~0.1 mm machine play |
 | Pour clearance | 0.6 mm | the isolation passes fully separate the pour |
 | Copper to edge | 1.5 mm | 2 mm end mill, tabs, burr |
 | Smallest hole | 0.8 mm | 0.6 mm bits break on a 3018 |
@@ -76,8 +81,10 @@ Code: [`js/cnc.js`](../js/cnc.js).
 | Pin pitch under 1.2 mm | DRC warning | SOIC 1.27 mm or bigger |
 | Pads under 0.6 mm (0603 and smaller) | DRC warning | use 0805 / 1206 |
 
-- Through-hole parts: copper on the bottom of the finished board → mirror on (auto).
-- SMD on a single-sided board: the parts sit on the copper → not mirrored (auto when the top copper has SMD pads).
+- Through-hole parts (XIAO on pin headers, adapters, connectors) go in from the bare side; 1206 parts are soldered on the copper side → mirror on (auto).
+- SMD ICs on the copper side → not mirrored (auto), so their pins are not reversed.
+- One copper layer with a GND pour: the router leaves GND to the pour and only adds tracks to pads the pour cannot reach (GND tracks would wall other nets in).
+- A fine-pitch chip (AD8310 MSOP-8 …): solder it on an SOP/MSOP→DIP adapter and mill only the 2.54 mm DIP holes.
 - Auto-size on one layer: if the packed board does not route, it is made 25 % bigger and routed again (twice at most).
 - The `home` preset stays for chemical etching (0.4 mm tracks).
 
@@ -93,6 +100,7 @@ Tools: V-bit 20–30° (0.1 mm tip), drill bits for each `2_drill` file, 2 mm fl
    - At each bit change set **only Z0** again. Never touch X0 / Y0.
 6. **Board not flat?** Use the sender's height map with a probe clip. The files have no height compensation.
 7. **Tuning:**
+   - Copper left uncut in some areas: the board is not flat. Use the height map, flatten the sacrificial board, or cut deeper.
    - Copper strands left between tracks: `iso_depth` + 0.02.
    - Tracks too thin: go shallower, or use a finer V-bit.
 

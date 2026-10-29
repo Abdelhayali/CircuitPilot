@@ -616,12 +616,15 @@ const Pcb = (() => {
     const b = Lib.footprint(c.footprint).box, wide = (b[2] - b[0]) >= (b[3] - b[1]), horiz = side === 'top' || side === 'bottom';
     return wide === horiz ? 0 : 90;
   }
+  const okPair = (a, b) => (Model.S.pcb.okOverlaps || []).some(p => (p[0] === a.ref && p[1] === b.ref) || (p[0] === b.ref && p[1] === a.ref));
   function separate(cs, gap, lock = new Map(), maxIt = 500) {
     const half = c => { const b = fpBox(c), x = c.pcb.x, y = c.pcb.y; return [(b[2] - b[0]) / 2, (b[3] - b[1]) / 2, (b[0] + b[2]) / 2 - x, (b[1] + b[3]) / 2 - y]; };
     for (let it = 0; it < maxIt; it++) {
       let moved = false;
       for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
-        const a = cs[i], b = cs[j], ha = half(a), hb = half(b);
+        const a = cs[i], b = cs[j];
+        if (okPair(a, b)) continue;   // accepted overlap (a part under a module / adapter)
+        const ha = half(a), hb = half(b);
         const dx = (b.pcb.x + hb[2]) - (a.pcb.x + ha[2]), dy = (b.pcb.y + hb[3]) - (a.pcb.y + ha[3]);
         const ox = ha[0] + hb[0] + gap - Math.abs(dx), oy = ha[1] + hb[1] + gap - Math.abs(dy);
         if (ox <= 0 || oy <= 0) continue;
@@ -1097,6 +1100,8 @@ const Pcb = (() => {
     }
     if (o.rot != null) c.pcb.rot = ((Math.round(+o.rot / 90) * 90) % 360 + 360) % 360;
     if (o.x != null) c.pcb.x = +o.x; if (o.y != null) c.pcb.y = +o.y;
+    // a position given without an edge is where the part goes: it forgets an earlier edge and is not pulled to one
+    if (!o.edge && (o.x != null || o.y != null)) { delete c.pcbEdge; c.pcb.free = true; } else if (o.edge) delete c.pcb.free;
     c.pcb.x = +(+c.pcb.x).toFixed(3); c.pcb.y = +(+c.pcb.y).toFixed(3);
     const b = fpBox(c);
     return { ref: c.ref, x: c.pcb.x, y: c.pcb.y, rot: c.pcb.rot, side: isBottom(c) ? 'bottom' : 'top', edge: c.pcbEdge || null, outside_board: b[0] < -0.01 || b[1] < -0.01 || b[2] > S.board.w + 0.01 || b[3] > S.board.h + 0.01 };
@@ -1126,7 +1131,7 @@ const Pcb = (() => {
     jlcpcb_power: { label: 'JLCPCB 2-layer — power / robust', values: { traceWidth: 0.3, powerTraceWidth: 0.8, clearance: 0.25, viaDiameter: 0.8, viaDrill: 0.4, edgeClearance: 0.5, layers: 2, neckDown: true, ...JLC_MIN } },
     // milling on a desktop CNC (3018 Pro …): the V-bit groove is ~0.15 mm and varies with the board's flatness, the
     // machine has ~0.1 mm play and the drill wanders — wide tracks and gaps, big rings, one layer, no vias
-    cnc3018: { label: 'CNC milling — 3018 / GRBL desktop CNC (1 layer, 0.5 mm tracks, 0.4 mm gaps, 0.8 / 1.0 mm drills, no vias)', values: { traceWidth: 0.5, powerTraceWidth: 1.0, powerWider: true, clearance: 0.4, padClearance: 0.4, viaClearance: 0.4, pourClearance: 0.6, viaDiameter: 2.0, viaDrill: 0.8, edgeClearance: 1.5, layers: 1, neckDown: true, minTraceWidth: 0.4, minClearance: 0.4, minViaDrill: 0.8, minViaDiameter: 1.8, minAnnularRing: 0.5, minPthRing: 0.35, minHoleToHole: 1.0, minEdgeClearance: 1.5, minHoleSize: 0.8, pourMinArea: 2, trackStyle: '45', cnc: true } },
+    cnc3018: { label: 'CNC milling — 3018 / GRBL desktop CNC (1 layer, 0.9 mm tracks, 0.4 mm gaps, 0.8 / 1.0 mm drills, no vias)', values: { traceWidth: 0.9, powerTraceWidth: 1.0, powerWider: false, clearance: 0.4, padClearance: 0.4, viaClearance: 0.4, pourClearance: 0.6, viaDiameter: 2.0, viaDrill: 0.8, edgeClearance: 1.5, layers: 1, neckDown: true, minTraceWidth: 0.5, minClearance: 0.4, minViaDrill: 0.8, minViaDiameter: 1.8, minAnnularRing: 0.5, minPthRing: 0.35, minHoleToHole: 1.0, minEdgeClearance: 1.5, minHoleSize: 0.8, pourMinArea: 2, trackStyle: '45', cnc: true } },
     home: { label: 'Home etching (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6 } },
   };
   const DEFAULT_PRESET = 'jlcpcb_free_min';
@@ -2895,9 +2900,10 @@ const Pcb = (() => {
   function legalisePlacement(gap = 0.4) {
     gap = Math.max(gap, +rules().partGap || 0);
     const S = Model.S, lock = new Map();
-    for (const c of placed()) if (c.pcbEdge || edgeInfo(c) || c.pcb.locked) lock.set(c, 'xy');
+    const onEdge = c => c.pcbEdge || (!c.pcb.free && edgeInfo(c));
+    for (const c of placed()) if (onEdge(c) || c.pcb.locked) lock.set(c, 'xy');
     separate(placed(), gap, lock);
-    for (const c of placed()) if (c.pcbEdge || edgeInfo(c)) {
+    for (const c of placed()) if (onEdge(c) && !c.pcb.locked) {
       const b = fpBox(c), side = c.pcbEdge || [['left', b[0]], ['right', S.board.w - b[2]], ['top', b[1]], ['bottom', S.board.h - b[3]]].sort((p, q) => p[1] - q[1])[0][0];
       const had = c.pcbEdge; placeFootprint(c.ref, { edge: side }); if (!had) delete c.pcbEdge;
     } else if (!c.pcb.locked) clampInside(c, boardPoly(), Math.max(rules().edgeClearance + 0.3, 0.6), S.board.w, S.board.h);

@@ -497,6 +497,22 @@ const Model = (() => {
       }
       return false;
     };
+    const besides = (c, ka, kb, A, B, placed) => {
+      const side = A.dx !== 0;   // host pins on the left / right: the part stands vertical
+      let best = c.rot || 0;
+      for (const rot of [0, 90, 180, 270]) {
+        const P = dirs(c, rot), pa = P.find(q => q.key === ka), pb = P.find(q => q.key === kb);
+        if (side ? pa.dx === 0 && Math.sign(pb.y - pa.y) === Math.sign(B.y - A.y) : pa.dy === 0 && Math.sign(pb.x - pa.x) === Math.sign(B.x - A.x)) { best = rot; break; }
+      }
+      c.rot = best;
+      const P = pinsWorld(c), pa = P.find(q => q.key === ka), pb = P.find(q => q.key === kb);
+      const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2, tx = side ? A.x + A.dx * 40 : (A.x + B.x) / 2, ty = side ? (A.y + B.y) / 2 : A.y + A.dy * 40;
+      const bx = c.x + tx - mx, by = c.y + ty - my;
+      for (let o = 0; o <= 30; o++) for (const l of [0, 2, -2, 4, -4]) {
+        c.x = Math.round((bx + (A.dx || 0) * o * 20 + (side ? 0 : l * 10)) / 10) * 10; c.y = Math.round((by + (A.dy || 0) * o * 20 + (side ? l * 10 : 0)) / 10) * 10;
+        if (!hit(labelBox(c, idx), placed)) return;
+      }
+    };
     // clusters: one per main part, built around it at (0, 0), then laid out left to right (rows when it gets wide)
     const clusters = [];
     for (const m of order) {
@@ -505,7 +521,10 @@ const Model = (() => {
       const queue = [m];
       while (queue.length) {
         const host = queue.shift();
-        for (const A of pinsWorld(host)) {
+        // parts wired to two pins of this host first: they need the space right beside those pins
+        const two = r => { const c = byRef.get(r); if (!c || pinsOf(c).length !== 2) return 0; const ns = netsOf(c); return ns.every(n => n && role(n) === 'S' && S.nets[n].some(q => q.startsWith(host.ref + '.'))) ? 1 : 0; };
+        const hp = pinsWorld(host), firstOf = A => { const n = idx[A.key]; return n && S.nets[n].some(q => two(q.slice(0, q.lastIndexOf('.')))) ? 0 : 1; };
+        for (const A of hp.slice().sort((a, b) => firstOf(a) - firstOf(b))) {
           const net = idx[A.key]; if (!net) continue;
           const isSup = role(net) !== 'S';
           for (const k of S.nets[net]) {
@@ -513,8 +532,17 @@ const Model = (() => {
             if (!c || done.has(r) || isMain.has(r) || owner.get(r) !== m.ref) continue;
             // supply pins only take parts with no signal neighbour (decoupling caps, pull-ups to a supply-only node)
             if (isSup && (role(net) === 'G' || sigNbrs(c).size)) continue;
-            done.add(r); orient(c, { net, dx: A.dx, dy: A.dy });
-            put(c, k, A, placed); placed.push(labelBox(c, idx)); members.push(c); queue.push(c);
+            // a decoupling cap (this net + GND) goes to the host's supply pin (VDD, VCC …) on this net, when it has one
+            const supName = /^(A|D|IO)?V(DD|CC|IN|BAT|SYS)\w*$|^3V3$|^VCC/i;
+            if (!supName.test(A.name || '') && netsOf(c).some(n => role(n) === 'G') && pinsWorld(host).some(q => q !== A && idx[q.key] === net && supName.test(q.name || ''))) continue;
+            done.add(r);
+            // a 2-pin part wired to two pins on the same side of the host (electrodes, a crystal, a sensor): it
+            // stands beside them, each pin facing its own host pin, so the two wires do not cross
+            const other = pinsOf(c).length === 2 && pinsWorld(c).find(q => q.key !== k), onet = other && idx[other.key];
+            const B = onet && onet !== net && role(onet) === 'S' && pinsWorld(host).find(q => idx[q.key] === onet && q.dx === A.dx && q.dy === A.dy);
+            if (B) besides(c, k, other.key, A, B, placed);
+            else { orient(c, { net, dx: A.dx, dy: A.dy }); put(c, k, A, placed); }
+            placed.push(labelBox(c, idx)); members.push(c); queue.push(c);
           }
         }
       }

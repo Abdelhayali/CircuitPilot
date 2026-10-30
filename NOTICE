@@ -1,10 +1,18 @@
 CircuitPilot
 Copyright 2026 Abdelhay Ali
+https://github.com/Abdelhayali/CircuitPilot · https://pcbgo.site
 
-This product includes CircuitPilot, developed by Abdelhay Ali
-(https://github.com/Abdelhayali/CircuitPilot).
+CircuitPilot is licensed under the PolyForm Strict License 1.0.0 (see LICENSE):
+use for noncommercial purposes only; no changes, no new works based on it and no
+redistribution. Versions up to and including v2026.10.30.6 were
+licensed under the Apache License 2.0 and stay under it.
 
-Under section 4(d) of the Apache License 2.0, any redistribution of this
-software, or of a work derived from it, must include the attribution notices
-in this NOTICE file (for example in a NOTICE file, in the documentation, or
-where third-party notices are normally shown).
+Commercial licences: abdelhay@eng.aun.edu.eg
+
+Third-party components keep their own licences and are not covered by the
+CircuitPilot licence:
+- Manifold 3D kernel, js/vendor/manifold.js and .wasm (Apache License 2.0,
+  js/vendor/manifold-LICENSE.txt)
+- three.js, loaded from cdnjs and in js/vendor (MIT, js/vendor/three-LICENSE.txt)
+- KiCad, SparkFun and Digi-Key part libraries, JLCPCB / LCSC part data and the
+  EasyEDA library: see "Data sources & licenses" in README.md

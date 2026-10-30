@@ -36,6 +36,8 @@ async function js(expr) {
 }
 await cdp('Page.enable'); await cdp('Runtime.enable');
 await cdp('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+// light theme for the screenshots (the app follows the system theme unless one was picked)
+await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
 async function go(url) { const loaded = new Promise(r => listeners['Page.loadEventFired'] = r); await cdp('Page.navigate', { url }); await loaded; await sleep(2500); }
 async function shot(name, clip) {
   await sleep(900);

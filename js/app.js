@@ -424,7 +424,7 @@ const App = (() => {
     window.dispatchEvent(new Event('themechange'));
   }
   function initTheme() {
-    let mode = 'system'; try { mode = localStorage.getItem('cp.theme') || 'system'; } catch (e) { }
+    let mode = 'light'; try { mode = localStorage.getItem('cp.theme') || 'light'; } catch (e) { }
     applyTheme(THEMES[mode] ? mode : 'system');
     $('#btnTheme').onclick = () => { const order = ['system', 'light', 'dark'], cur = document.documentElement.getAttribute('data-theme-mode') || 'system'; applyTheme(order[(order.indexOf(cur) + 1) % 3]); toast(THEMES[document.documentElement.getAttribute('data-theme-mode')][1].split(' — ')[0]); };
     if (window.matchMedia) matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if ((document.documentElement.getAttribute('data-theme-mode') || 'system') === 'system') applyTheme('system'); });
@@ -1235,6 +1235,13 @@ const App = (() => {
       const b = e.target.closest('.part'); if (b) { if (view !== 'sch') showView('sch'); placeBuiltin(b.dataset.type); }
     };
     $$('.tab').forEach(b => b.onclick = () => showView(b.dataset.view));
+    // phones: one panel at a time (Parts / Design / AI Copilot), switched from the bar at the bottom
+    const mobile = () => matchMedia('(max-width: 800px)').matches;
+    const setPanel = p => { document.body.dataset.mpanel = p; $$('#mobNav [data-mp]').forEach(b => b.classList.toggle('on', b.dataset.mp === p)); window.dispatchEvent(new Event('resize')); };
+    document.body.dataset.mpanel = 'editor';
+    $$('#mobNav [data-mp]').forEach(b => b.onclick = () => setPanel(b.dataset.mp));
+    // picking a part on a phone goes straight to the drawing to place it
+    $('#partList').addEventListener('click', e => { if (mobile() && e.target.closest('.part, .dbpart')) setTimeout(() => setPanel('editor'), 50); });
     $('#btnLayout').onclick = () => { Model.mutate(() => Model.autoLayout()); Sch.fit(); };
     $('#btnOrganize').onclick = () => { Model.mutate(() => Model.organize()); Sch.fit(); toast('Schematic organized — Undo (Ctrl+Z) brings the old layout back'); };
     $('#btnDbParts').onclick = async () => { toast('Loading JLCPCB parts…', 15000); const r = await Engine.useDatabaseParts(); toast(r.converted.length ? `${r.converted.length} parts now use real JLCPCB footprints${r.failed.length ? ' · ' + r.failed.length + ' failed' : ''}` : 'Every part already uses a database footprint', 6000); };

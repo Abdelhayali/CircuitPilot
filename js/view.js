@@ -12,6 +12,22 @@ class Viewport {
       this.apply();
     }, { passive: false });
     new ResizeObserver(() => this.apply()).observe(svg);
+    // phones: one finger pans, two fingers pinch-zoom (a tap still selects through the mouse events the browser sends)
+    let tp = null;
+    const pts = e => [...e.touches].map(t => [t.clientX, t.clientY]);
+    svg.addEventListener('touchstart', e => { tp = pts(e); }, { passive: true });
+    svg.addEventListener('touchmove', e => {
+      if (!tp) return; e.preventDefault(); const now = pts(e);
+      if (now.length === 1 && tp.length === 1) this.panBy(now[0][0] - tp[0][0], now[0][1] - tp[0][1]);
+      else if (now.length >= 2 && tp.length >= 2) {
+        const c = q => [(q[0][0] + q[1][0]) / 2, (q[0][1] + q[1][1]) / 2], d = q => Math.hypot(q[0][0] - q[1][0], q[0][1] - q[1][1]) || 1;
+        const c0 = c(tp), c1 = c(now), p = this.toWorld(c0[0], c0[1]), r = svg.getBoundingClientRect();
+        this.s = Math.min(this.max, Math.max(this.min, this.s * d(now) / d(tp)));
+        this.cx = p.x - (c1[0] - r.left - r.width / 2) / this.s; this.cy = p.y - (c1[1] - r.top - r.height / 2) / this.s; this.apply();
+      }
+      tp = now;
+    }, { passive: false });
+    svg.addEventListener('touchend', e => { tp = e.touches.length ? pts(e) : null; }, { passive: true });
   }
   toWorld(x, y) {
     const r = this.svg.getBoundingClientRect();

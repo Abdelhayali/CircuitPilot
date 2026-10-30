@@ -4,6 +4,8 @@ An AI copilot for electronics design: describe a circuit in plain language and i
 
 ![CircuitPilot — ESP32-C3 board schematic](docs/media/schematic.png)
 
+**📖 [Tutorial and user guide (PDF)](https://pcbgo.site/docs/CircuitPilot-Tutorial.pdf)**: getting started, every tool with screenshots, the Windows app, Claude Desktop and Claude Code, CNC milling, troubleshooting.
+
 **▶ Try it online: [pcbgo.site](https://pcbgo.site)**: nothing to install. The **🔑 Connect AI** window walks you through getting a free Google Gemini or Ollama Cloud key in about a minute (Claude, OpenAI, OpenRouter and others work too). Your key stays in your browser. Then describe your circuit. Projects are saved in your browser. For local models, knowledge folders and Claude Code control, run the desktop version (below).
 
 ## See it in action

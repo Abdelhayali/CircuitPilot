@@ -167,8 +167,69 @@ const Cnc = (() => {
   }
   const len = pts => { let s = 0; for (let i = 1; i < pts.length; i++) s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return s; };
 
+  // ---------- 3D view of the milled board: a page of its own (three.js from cdnjs), also shown in the app's CNC dialog ----------
+  function view3d(v) {
+    const data = JSON.stringify(v).replace(/</g, '\\u003c');
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${ascii(v.name)} - milled board 3D</title>
+<style>html,body{margin:0;height:100%;background:#1b1d22;color:#ddd;font:12px sans-serif;overflow:hidden}#bar{position:absolute;left:8px;top:8px;display:flex;gap:6px;flex-wrap:wrap}
+#bar button{background:#2b2e36;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 9px;cursor:pointer}#bar button:hover{background:#3a3e48}
+#tip{position:absolute;left:8px;bottom:8px;opacity:.7}canvas{position:fixed;inset:0;width:100%!important;height:100%!important;display:block}#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}</style></head>
+<body><div id="msg">Loading 3D…</div><div id="bar"><button data-v="top">Copper side</button><button data-v="iso">Angled</button><button data-v="bottom">Other side</button></div>
+<div id="tip">${v.mirrored ? 'Copper side as milled (mirrored: the parts go in from the other side). ' : 'Copper side as milled. '}Drag to turn, wheel to zoom.</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const V = ${data};
+(async () => {
+  const msg = document.getElementById('msg');
+  if (!window.THREE) { msg.textContent = 'three.js could not load (needs internet). result-2d.svg shows the same board flat.'; return; }
+  const img = s => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s); });
+  const px = Math.min(30, 4096 / Math.max(V.vb[2], V.vb[3]));
+  const tex = async s => { const i = await img(s), c = document.createElement('canvas'); c.width = Math.round(V.vb[2] * px); c.height = Math.round(V.vb[3] * px); c.getContext('2d').drawImage(i, 0, 0, c.width, c.height); const t = new THREE.CanvasTexture(c); t.anisotropy = 8;
+    t.repeat.set(1 / V.vb[2], 1 / V.vb[3]); t.offset.set(-V.vb[0] / V.vb[2], -(V.top - V.vb[1] - V.vb[3]) / V.vb[3]); return t; };
+  let map, bump; try { [map, bump] = await Promise.all([tex(V.tex), tex(V.bump)]); } catch (e) { msg.textContent = 'Could not draw the board texture'; return; }
+  msg.remove();
+  const R = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); R.setPixelRatio(devicePixelRatio); document.body.appendChild(R.domElement);
+  const S = new THREE.Scene(); S.background = new THREE.Color(0x1b1d22);
+  const cam = new THREE.PerspectiveCamera(35, 1, 0.1, 2000);
+  S.add(new THREE.HemisphereLight(0xffffff, 0x404040, 0.75)); const L = new THREE.DirectionalLight(0xffffff, 0.75); L.position.set(-40, -60, 120); S.add(L);
+  const sh = new THREE.Shape(V.outline.map(q => new THREE.Vector2(q[0], q[1])));
+  for (const h of V.holes) { const p = new THREE.Path(); p.absarc(h[0], h[1], h[2] / 2, 0, Math.PI * 2, true); sh.holes.push(p); }
+  const fr4 = new THREE.MeshStandardMaterial({ color: 0xcfc59a, roughness: 0.9 });
+  const body = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: V.thick, bevelEnabled: false, curveSegments: 24 }), fr4); body.position.z = -V.thick;
+  const top = new THREE.Mesh(new THREE.ShapeGeometry(sh, 24), new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: 0.6, roughness: 0.45, metalness: 0.35 })); top.position.z = 0.01;
+  const g = new THREE.Group(); g.add(body, top); S.add(g);
+  const xs = V.outline.map(q => q[0]), ys = V.outline.map(q => q[1]), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  g.position.set(-cx, -cy, 0);
+  const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  const st = { th: -Math.PI / 2, ph: 0.6, r: size * 1.7 };
+  const put = () => { cam.position.set(st.r * Math.sin(st.ph) * Math.cos(st.th), st.r * Math.sin(st.ph) * Math.sin(st.th), st.r * Math.cos(st.ph)); cam.up.set(0, 0, 1); cam.lookAt(0, 0, 0); R.render(S, cam); };
+  const fit = () => { const w = R.domElement.clientWidth || innerWidth, h = R.domElement.clientHeight || innerHeight; R.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); put(); };
+  new ResizeObserver(fit).observe(R.domElement); fit();
+  window.view3d = { R, S, cam, put, st };
+  const views = { top: [-Math.PI / 2, 0.001], iso: [-Math.PI / 2, 0.6], bottom: [-Math.PI / 2, Math.PI - 0.001] };
+  document.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { [st.th, st.ph] = views[b.dataset.v]; put(); });
+  let drag = null; const el = R.domElement;
+  el.onpointerdown = e => { drag = [e.clientX, e.clientY]; el.setPointerCapture(e.pointerId); };
+  el.onpointermove = e => { if (!drag) return; st.th -= (e.clientX - drag[0]) * 0.008; st.ph = Math.min(Math.PI - 0.001, Math.max(0.001, st.ph - (e.clientY - drag[1]) * 0.008)); drag = [e.clientX, e.clientY]; put(); };
+  el.onpointerup = () => drag = null;
+  el.onwheel = e => { e.preventDefault(); st.r = Math.min(size * 8, Math.max(size * 0.3, st.r * (e.deltaY > 0 ? 1.1 : 0.9))); put(); };
+})();
+</script></body></html>
+`;
+  }
+
   // ---------- the job ----------
+  // pad_relief "on" / "off": SMD pads on the pour with / without a milled gap and 4 spokes, for this job only
+  // (otherwise the design rule smdPadRelief decides)
   function job(opts = {}) {
+    const pr = String(opts.pad_relief ?? 'auto').toLowerCase(), S = Model.S;
+    if (pr !== 'on' && pr !== 'off' && pr !== 'true' && pr !== 'false') return jobI(opts);
+    const had = S.rules && Object.prototype.hasOwnProperty.call(S.rules, 'smdPadRelief'), old = had ? S.rules.smdPadRelief : undefined;
+    S.rules = Object.assign({}, S.rules, { smdPadRelief: pr === 'on' || pr === 'true' });
+    try { return jobI(opts); } finally { if (had) S.rules.smdPadRelief = old; else delete S.rules.smdPadRelief; }
+  }
+  function jobI(opts = {}) {
     const o = { ...DEF }; for (const k in opts) if (opts[k] !== undefined && opts[k] !== null && opts[k] !== '') o[k] = opts[k];
     for (const k of Object.keys(DEF)) if (typeof DEF[k] === 'number') o[k] = +o[k];
     const S = Model.S, R = Pcb.rules(), cs = Pcb.placed(), idx = Model.pinIndex();
@@ -409,6 +470,20 @@ const Cnc = (() => {
       `<circle cx="0" cy="${top.toFixed(3)}" r="0.6" fill="#3ddc84"/><text x="0.9" y="${(top - 0.6).toFixed(3)}" font-size="1.6" fill="#3ddc84" font-family="sans-serif">X0 Y0</text>`,
       '</svg>'];
     files['preview.svg'] = svg.join('\n') + '\n';
+    // the finished board as it comes off the machine (copper side up, as milled): copper, the grooves the V-bit leaves,
+    // holes, cut to the outline. result-2d.svg, and result-3d.html (the same picture on a 3D board, three.js)
+    const bo = outline.map(T), bvb = [Math.min(...bo.map(q => q[0])) - 1, sy(Math.max(...bo.map(q => q[1]))) - 1, W + 2, H + 2];
+    const grooveD = [...passes.flat().map(d), ...clearPaths.map(l => 'M' + l.map(q => `${q[0].toFixed(3)} ${sy(q[1]).toFixed(3)}`).join('L'))].join('');
+    const resultSvg = (cuC, grC, holeC, bg, labels) => [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${bvb.map(v => v.toFixed(3)).join(' ')}" width="${(bvb[2] * 12).toFixed(0)}" height="${(bvb[3] * 12).toFixed(0)}">`,
+      `<defs><clipPath id="b"><path d="${d(bo)}"/></clipPath></defs>`, `<rect x="${bvb[0]}" y="${bvb[1]}" width="${bvb[2]}" height="${bvb[3]}" fill="${bg}"/>`,
+      `<g clip-path="url(#b)"><path d="${d(bo)}" fill="${cuC}"/><path d="${grooveD}" fill="none" stroke="${grC}" stroke-width="${o.iso_dia}" stroke-linejoin="round" stroke-linecap="round"/>`,
+      ...holes.map(h => `<circle cx="${h.p[0].toFixed(3)}" cy="${sy(h.p[1]).toFixed(3)}" r="${(h.d / 2).toFixed(3)}" fill="${holeC}"/>`), '</g>',
+      labels ? cs.map(c => { const q = T([c.pcb.x, c.pcb.y]); return `<text x="${q[0].toFixed(2)}" y="${sy(q[1]).toFixed(2)}" font-size="1.2" fill="#fff" fill-opacity="0.75" stroke="#000" stroke-opacity="0.35" stroke-width="0.08" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif">${ascii(c.ref)}</text>`; }).join('') : '',
+      '</svg>'].join('\n') + '\n';
+    files['result-2d.svg'] = resultSvg('#c98a5e', '#b4bba6', '#151515', '#1b1d22', true);
+    const view = { outline: bo.map(q => [+q[0].toFixed(3), +q[1].toFixed(3)]), holes: holes.map(h => [+h.p[0].toFixed(3), +h.p[1].toFixed(3), h.d]), thick, vb: bvb, top,
+      tex: resultSvg('#c98a5e', '#b4bba6', '#151515', '#000', false), bump: resultSvg('#ffffff', '#000000', '#000000', '#000', false), mirrored: mirror, name };
+    files['result-3d.html'] = view3d(view);
     const mins = (isoLen / fz + passes.flat().length * (o.iso_depth / o.plunge_feed) + Lc * steps / o.cut_feed + drilled.length * (thick + 0.2) / o.drill_feed * 2 + wide.reduce((a, h) => a + Math.PI * (h.d - h.bit) * wz.length / o.widen_feed, 0) + milled.reduce((a, h) => a + Math.PI * (h.d - o.cut_dia) * steps / o.cut_feed, 0)) * 1.15;
     const fl = Object.keys(files).filter(f => f.endsWith('.nc'));
     Object.assign(info, {
@@ -416,7 +491,8 @@ const Cnc = (() => {
       origin: o.origin === 'job' ? 'X0 Y0 = lower-left corner of the job: every move is at X ≥ 0, Y ≥ 0' : `X0 Y0 = lower-left corner of the PCB; the cutout reaches ${o.cut_dia} mm left of and below it`,
       isolation: { passes: passes.length, rings, cleared_lines: clearPaths.length, length_mm: Math.round(isoLen), v_bit_mm: o.iso_dia, depth_mm: o.iso_depth, v_bit: `${o.vbit_angle} deg, tip ${o.vbit_tip} mm` }, toolpath_check: verified,
       milled_holes: milled.length, cutout: { end_mill_mm: o.cut_dia, depth_mm: +total.toFixed(2), passes: steps, tabs: nt },
-      board_thickness_mm: thick, est_minutes: Math.ceil(mins), files: fl, warnings, grid_mm: +g.toFixed(4),
+      board_thickness_mm: thick, est_minutes: Math.ceil(mins), files: fl, previews: ['preview.svg', 'result-2d.svg', 'result-3d.html'], warnings, grid_mm: +g.toFixed(4),
+      smd_pad_relief: !!R.smdPadRelief,
     });
     const bitList = [`V-bit ${o.vbit_angle} deg, tip ${o.vbit_tip} mm: ${o.iso_dia} mm wide at ${o.iso_depth} mm deep  ->  1_isolation.nc`, ...info.drills.map(q => `${q.bit_mm.toFixed(2)} mm drill (${q.holes} holes${q.widened ? `, ${q.widened} widened` : ''})  ->  ${q.file}`), `${o.cut_dia} mm flat end mill  ->  3_cutout.nc${milled.length ? ` (also mills the ${milled.length} hole${milled.length > 1 ? 's' : ''} of ${n3(millAt)} mm and more)` : ''}`];
     files['README-cnc.txt'] = [`${name} - CNC milling files (GRBL, e.g. CNC 3018 Pro)`, '',
@@ -434,6 +510,7 @@ const Cnc = (() => {
       '  5. Not flat? Candle -> Heightmap with a probe clip (the files have no height compensation).',
       '  6. Copper strands left between tracks: iso_depth +0.02. Tracks too thin: shallower, or a finer V-bit.', '',
       'Open preview.svg to see the cuts: blue = isolation, red = cutout, yellow = tabs, green = X0 Y0.',
+      'result-2d.svg = the finished board as milled (copper, grooves, holes); result-3d.html = the same in 3D (open it in a browser).',
       ...(warnings.length ? ['', 'WARNINGS:', ...warnings.map(w => '  - ' + w)] : []), ''].join('\n');
     return { files, info };
   }

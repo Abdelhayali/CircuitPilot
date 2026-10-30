@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='system';try{m=localStorage.getItem('cp.theme')||'system'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610301200">
+<link rel="stylesheet" href="styles.css?v=202610301530">
 </head>
 <body>
 <header id="top">
@@ -70,6 +70,7 @@
         <button class="tab" data-view="doc">Documentation</button>
       </div>
       <div id="schTools" class="tools">
+        <button id="btnOrganize" title="Readable schematic: ICs in a row, every small part next to the pin it connects to, GND parts vertical with GND down, supply parts vertical with 3V3 / VDD up, wires routed around the symbols">✨ Organize</button>
         <button id="btnLayout">Auto-layout</button>
         <button id="btnDbParts" title="Give every built-in part the footprint and pinout of a real JLCPCB part">⇄ JLCPCB parts</button>
         <button id="btnErc">ERC</button>
@@ -323,6 +324,7 @@
       <label>Autorouter effort (max time)<input data-r="routeTime" type="number" step="5" min="5" max="1800"><span>s</span></label>
       <label>Smallest copper-pour piece kept<input data-r="pourMinArea" type="number" step="0.1" min="0"><span>mm²</span></label>
       <label class="chk full"><input data-r="warnUnderMetal" type="checkbox"> Warn about tracks / vias under batteries, coin cells and metal parts on the same side (only solder mask insulates them)</label>
+      <label class="chk full"><input data-r="smdPadRelief" type="checkbox"> SMD pads on a copper pour: a gap all round with 4 spokes (thermal relief), so every pad is its own solder spot (on by default for home etching and CNC milling)</label>
       <label class="chk full"><input data-r="noViaInPad" type="checkbox"> Never put vias on SMD pads (strict, default) — not even as the router's last resort; DRC error. Thermal vias inside a QFN / DFN exposed pad stay allowed</label>
       <label class="chk full"><input data-r="epKeepout" type="checkbox"> Keep-out under exposed centre pads (QFN / DFN) on the other layer: no tracks or vias of other nets there, pour allowed (single ones can be removed: click the dashed outline, Del)</label>
       <label class="chk full"><input data-r="viaInPad" type="checkbox"> Allow vias on SMD pins (via-in-pad — needs filled vias, extra cost)</label>
@@ -384,9 +386,11 @@
         <label title="Bare side: through-hole parts go in from the side without copper and are soldered on the copper (the board is milled mirrored so the pins match); 1206 parts on the copper. Copper side: all parts sit on the copper (not mirrored).">Parts go on <select id="cncMirror"><option value="on">bare side (mirrored)</option><option value="off">copper side</option><option value="auto">auto</option></select></label>
         <label>X0 Y0 <select id="cncOrigin"><option value="board">PCB corner</option><option value="job">job corner</option></select></label>
         <label>Spindle S <input id="cncSpindle" type="number" step="100" min="0" value="1000"></label>
+        <label title="SMD pads on the GND pour: a milled gap all round with 4 spokes, so each pad is its own solder spot. Design rules = the rule in ⚙ Rules (on in the CNC preset)">SMD pads on pour <select id="cncRelief"><option value="auto">design rules</option><option value="on">outlined (spokes)</option><option value="off">plain pour</option></select></label>
       </fieldset>
     </div>
     <div id="cncInfo" style="font-size:12px;margin:6px 0"></div>
+    <div class="cnc-tabs"><button data-cv="paths" class="on">Toolpaths</button><button data-cv="r2d" title="The finished board as it comes off the machine: copper, the grooves, holes">Result 2D</button><button data-cv="r3d" title="The finished board in 3D (drag to turn)">Result 3D</button></div>
     <div id="cncPreview" class="cnc-preview"></div>
     <div class="row end">
       <button id="cncUpdate">Preview</button>
@@ -409,38 +413,38 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610301200"></script>
-<script src="js/static-backend.js?v=202610301200"></script>
-<script src="js/lib.js?v=202610301200"></script>
-<script src="js/view.js?v=202610301200"></script>
-<script src="js/model.js?v=202610301200"></script>
-<script src="js/schematic.js?v=202610301200"></script>
-<script src="js/strokefont.js?v=202610301200"></script>
-<script src="js/pcb.js?v=202610301200"></script>
-<script src="js/cnc.js?v=202610301200"></script>
-<script src="js/pcbview.js?v=202610301200"></script>
-<script src="js/enclosure.js?v=202610301200"></script>
-<script src="js/shape3d.js?v=202610301200"></script>
-<script src="js/easyeda.js?v=202610301200"></script>
-<script src="js/libpanel.js?v=202610301200"></script>
-<script src="js/openlib.js?v=202610301200"></script>
-<script src="js/kicad.js?v=202610301200"></script>
-<script src="js/easyedapro.js?v=202610301200"></script>
-<script src="js/encview.js?v=202610301200"></script>
-<script src="js/encdesign.js?v=202610301200"></script>
-<script src="js/docview.js?v=202610301200"></script>
-<script src="js/pcb3d.js?v=202610301200"></script>
-<script src="js/blocks.js?v=202610301200"></script>
-<script src="js/engine.js?v=202610301200"></script>
-<script src="js/ai.js?v=202610301200"></script>
-<script src="js/exports.js?v=202610301200"></script>
-<script src="js/pcbpdf.js?v=202610301200"></script>
-<script src="js/folder.js?v=202610301200"></script>
-<script src="js/projects.js?v=202610301200"></script>
-<script src="js/cloud.js?v=202610301200"></script>
-<script src="js/editor.js?v=202610301200"></script>
-<script src="js/jlcorder.js?v=202610301200"></script>
-<script src="js/app.js?v=202610301200"></script>
+<script src="js/config.js?v=202610301530"></script>
+<script src="js/static-backend.js?v=202610301530"></script>
+<script src="js/lib.js?v=202610301530"></script>
+<script src="js/view.js?v=202610301530"></script>
+<script src="js/model.js?v=202610301530"></script>
+<script src="js/schematic.js?v=202610301530"></script>
+<script src="js/strokefont.js?v=202610301530"></script>
+<script src="js/pcb.js?v=202610301530"></script>
+<script src="js/cnc.js?v=202610301530"></script>
+<script src="js/pcbview.js?v=202610301530"></script>
+<script src="js/enclosure.js?v=202610301530"></script>
+<script src="js/shape3d.js?v=202610301530"></script>
+<script src="js/easyeda.js?v=202610301530"></script>
+<script src="js/libpanel.js?v=202610301530"></script>
+<script src="js/openlib.js?v=202610301530"></script>
+<script src="js/kicad.js?v=202610301530"></script>
+<script src="js/easyedapro.js?v=202610301530"></script>
+<script src="js/encview.js?v=202610301530"></script>
+<script src="js/encdesign.js?v=202610301530"></script>
+<script src="js/docview.js?v=202610301530"></script>
+<script src="js/pcb3d.js?v=202610301530"></script>
+<script src="js/blocks.js?v=202610301530"></script>
+<script src="js/engine.js?v=202610301530"></script>
+<script src="js/ai.js?v=202610301530"></script>
+<script src="js/exports.js?v=202610301530"></script>
+<script src="js/pcbpdf.js?v=202610301530"></script>
+<script src="js/folder.js?v=202610301530"></script>
+<script src="js/projects.js?v=202610301530"></script>
+<script src="js/cloud.js?v=202610301530"></script>
+<script src="js/editor.js?v=202610301530"></script>
+<script src="js/jlcorder.js?v=202610301530"></script>
+<script src="js/app.js?v=202610301530"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

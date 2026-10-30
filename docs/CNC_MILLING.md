@@ -12,7 +12,9 @@ CircuitPilot writes the G-code itself: no FlatCAM, no Gerber conversion step.
 | `1_isolation.nc` | V-bit 20–30° | Rings around the copper at `iso_dia/2`, then `+ iso_dia·(1 − overlap)` for each extra pass, at `−iso_depth` |
 | `2_drill_<d>mm.nc` | drill `<d>` | One file per bit you have (`drill_bits`, default 0.8 / 1.0 mm): each hole gets the smallest bit that fits; holes bigger than every bit and smaller than the end mill are drilled, then widened in a small circle, 0.4 mm deeper per turn at 30 mm/min |
 | `3_cutout.nc` | flat end mill | Holes ≥ end mill + 0.1 mm milled as circles (G2), then the outline at `cut_dia/2` outside the board, `cut_step` per pass to `−(thickness + 0.1)`, with tabs |
-| `preview.svg` | | Copper sheet, isolation (blue), cutout (red), tabs (yellow), holes, X0 Y0 (green) |
+| `preview.svg` | | Toolpaths: copper sheet, isolation (blue), cutout (red), tabs (yellow), holes, X0 Y0 (green) |
+| `result-2d.svg` | | The finished board as it comes off the machine (copper side up, as milled): copper, grooves, holes, part names |
+| `result-3d.html` | | The same board in 3D (open in a browser: drag to turn, Copper side / Angled / Other side). In the app: **Result 2D** / **Result 3D** tabs in the CNC dialog |
 | `README-cnc.txt` | | Bit order, job size, set-up steps, warnings |
 
 Every file: `G21 G90 G94`, `G0 Z5`, `M3 S1000`, `G4 P3` … `G0 Z5`, `M5`, `G0 X0 Y0`, `M2`.
@@ -37,6 +39,7 @@ Every file: `G21 G90 G94`, `G0 Z5`, `M3 S1000`, `G4 P3` … `G0 Z5`, `M5`, `G0 X
 | `origin` | board | `board` (PCB corner) or `job` |
 | `drill_bits` | [0.8, 1.0] | the drill bits you have |
 | `layer` | auto | the copper side with the tracks |
+| `pad_relief` | auto | SMD pads on the GND pour: `on` = a milled gap all round with 4 spokes, so each pad is its own solder spot; `off` = plain pour; auto = design rule `smdPadRelief` (on in `cnc3018` and `home`). Dialog: *SMD pads on pour* |
 
 ## How it works
 
@@ -77,6 +80,7 @@ Code: [`js/cnc.js`](../js/cnc.js).
 | Ring around a through-hole pad | ≥ 0.35 mm (warning) | unplated pads lift, the drill can be off centre |
 | Smallest pour piece | 2 mm² | slivers peel off |
 | Pour under SMD parts | none (`pourUnderSmd: false`) | a pour strip between the pads of a 1206 bridges with solder; the G-code also mills that copper away (zig-zag with the V-bit), and the copper in keep-outs such as the antenna end |
+| SMD pads on the pour | outlined, 4 spokes (`smdPadRelief: true`) | a pad inside plain pour cannot be seen on the milled board and the pour soaks up the iron's heat |
 | Track corners | 45° | the V-bit cannot reach sharp inside corners |
 | Vias | DRC error | nothing to join on a 1-sided board: use a wire jumper |
 | Tracks on both layers | DRC error | |

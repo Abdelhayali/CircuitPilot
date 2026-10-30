@@ -603,3 +603,5 @@ body.web .as-tabs .tag.webonly { display: inline; }
 .dlg .cnc-grid label input:not([type=checkbox]), .dlg .cnc-grid select { width: 84px; margin: 0 0 0 auto; display: inline-block; }
 .cnc-preview { background: #1b1d22; border-radius: 8px; min-height: 60px; max-height: 46vh; overflow: auto; display: flex; justify-content: center; }
 .cnc-preview svg { width: 100%; height: auto; max-height: 46vh; }
+.cnc-tabs { display: flex; gap: 4px; margin: 2px 0 4px; } .cnc-tabs button.on { background: var(--accent, #2f7fff); color: #fff; }
+.cnc-preview .cnc-3d { width: 100%; height: 46vh; border: 0; border-radius: 8px; display: block; }

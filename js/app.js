@@ -1236,6 +1236,7 @@ const App = (() => {
     };
     $$('.tab').forEach(b => b.onclick = () => showView(b.dataset.view));
     $('#btnLayout').onclick = () => { Model.mutate(() => Model.autoLayout()); Sch.fit(); };
+    $('#btnOrganize').onclick = () => { Model.mutate(() => Model.organize()); Sch.fit(); toast('Schematic organized — Undo (Ctrl+Z) brings the old layout back'); };
     $('#btnDbParts').onclick = async () => { toast('Loading JLCPCB parts…', 15000); const r = await Engine.useDatabaseParts(); toast(r.converted.length ? `${r.converted.length} parts now use real JLCPCB footprints${r.failed.length ? ' · ' + r.failed.length + ' failed' : ''}` : 'Every part already uses a database footprint', 6000); };
     $('#btnFitS').onclick = () => Sch.fit(); $('#btnFitP').onclick = () => Pcb.fit();
     $('#connStyle').value = Model.S.connStyle || 'auto';
@@ -1296,20 +1297,29 @@ const App = (() => {
     $$('[data-layer]').forEach(cb => cb.onchange = () => { Pcb.ui.show[cb.dataset.layer] = cb.checked; Pcb.render(); });
     $('#btnGerber').onclick = () => exportAs('gerber');
     // ---------- CNC milling (GRBL G-code): settings, preview, download ----------
-    const CNC_F = { vbit_angle: 'cncVAngle', vbit_tip: 'cncVTip', iso_depth: 'cncIsoDepth', iso_passes: 'cncIsoPasses', iso_feed: 'cncIsoFeed', drill_feed: 'cncDrillFeed', cut_dia: 'cncCutDia', cut_step: 'cncCutStep', cut_feed: 'cncCutFeed', board_thick: 'cncThick', tabs: 'cncTabs', mirror: 'cncMirror', origin: 'cncOrigin', spindle: 'cncSpindle', drill_bits: 'cncBits' };
+    const CNC_F = { vbit_angle: 'cncVAngle', vbit_tip: 'cncVTip', iso_depth: 'cncIsoDepth', iso_passes: 'cncIsoPasses', iso_feed: 'cncIsoFeed', drill_feed: 'cncDrillFeed', cut_dia: 'cncCutDia', cut_step: 'cncCutStep', cut_feed: 'cncCutFeed', board_thick: 'cncThick', tabs: 'cncTabs', mirror: 'cncMirror', origin: 'cncOrigin', spindle: 'cncSpindle', drill_bits: 'cncBits', pad_relief: 'cncRelief' };
     const cncOpts = () => { const o = {}; for (const [k, id] of Object.entries(CNC_F)) { const el = $('#' + id); o[k] = el.tagName === 'SELECT' || el.type === 'text' ? el.value : +el.value; } return o; };
-    let cncLast = null;
+    let cncLast = null, cncView = 'paths';
+    // toolpaths (preview.svg), the finished board flat (result-2d.svg) or in 3D (result-3d.html in a frame)
+    const cncShow = () => {
+      $$('[data-cv]').forEach(b => b.classList.toggle('on', b.dataset.cv === cncView));
+      const el = $('#cncPreview'); if (!cncLast) { el.innerHTML = ''; return; }
+      const f = cncLast.files;
+      if (cncView === 'r3d') { el.innerHTML = '<iframe class="cnc-3d" title="Milled board 3D"></iframe>'; el.firstChild.srcdoc = f['result-3d.html']; }
+      else el.innerHTML = f[cncView === 'r2d' ? 'result-2d.svg' : 'preview.svg'];
+    };
+    $$('[data-cv]').forEach(b => b.onclick = () => { cncView = b.dataset.cv; cncShow(); });
     const cncRun = () => {
       $('#cncInfo').textContent = 'Working…'; cncLast = null;
       setTimeout(() => {
         try {
           const o = cncOpts(); try { localStorage.setItem('cp.cnc', JSON.stringify(o)); } catch (e) { }
           const r = Cnc.job(o), i = r.info; cncLast = r;
-          $('#cncPreview').innerHTML = r.files['preview.svg'];
+          cncShow();
           $('#cncInfo').innerHTML = `<b>parts on the ${i.mirrored ? 'bare side — milled mirrored' : 'copper side — not mirrored'}</b> · groove ${i.isolation.v_bit_mm} mm at ${i.isolation.depth_mm} mm · board ${i.board_mm.join(' × ')} mm · job ${i.job_mm.join(' × ')} mm · ${i.isolation.rings} isolation rings · ` +
             `${i.drills.map(d => `${d.holes}× ${d.bit_mm.toFixed(2)} mm`).join(', ') || 'no drilled holes'}${i.milled_holes ? ` · ${i.milled_holes} milled holes` : ''} · ${i.cutout.passes} cutout passes, ${i.cutout.tabs} tabs · ~${i.est_minutes} min` +
             (i.warnings.length ? '<ul class="warn" style="margin:4px 0 0 16px;padding:0">' + i.warnings.map(w => `<li>${esc(w)}</li>`).join('') + '</ul>' : '') +
-            '<div class="muted" style="margin-top:3px">Blue = isolation, red = cutout, yellow = tabs, green = X0 Y0.</div>';
+            `<div class="muted" style="margin-top:3px">Toolpaths: blue = isolation, red = cutout, yellow = tabs, green = X0 Y0. Result: the copper side as milled${i.mirrored ? ' (mirrored — the parts go in from the other side)' : ''}${i.smd_pad_relief ? ', SMD pads on the pour outlined with spokes' : ''}.</div>`;
         } catch (e) { $('#cncInfo').innerHTML = `<span class="bad">${esc(e.message)}</span>`; $('#cncPreview').innerHTML = ''; }
       }, 30);
     };

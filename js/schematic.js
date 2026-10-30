@@ -94,6 +94,97 @@ const Sch = (() => {
     if (s1 !== s2) return [a, s1 < s2 ? e1 : e2, b];
     return [a, a.dx ? e1 : e2, b];
   }
+  // Wires of all nets on a 10-unit grid. Each net starts at one pin; every other pin is joined to the nearest point of
+  // the net's wires so far (Dijkstra over cell + direction: steps, bends cost extra, crossing another net's wire costs
+  // extra, running along it, through a symbol or over another net's pin / corner is not allowed). Returns per net
+  // { d (SVG path), junctions }, or null when the sheet is too big for the grid (then the plain L wires are used).
+  const routeMemo = { key: null, val: null };
+  function mazeRoute(jobs, boxes, solid = []) {
+    const G = 10; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const j of jobs) for (const p of j.pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    for (const b of boxes) { x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]); }
+    x0 = Math.floor(x0 / G) * G - 60; y0 = Math.floor(y0 / G) * G - 60;
+    const W = Math.ceil((x1 + 60 - x0) / G) + 1, H = Math.ceil((y1 + 60 - y0) / G) + 1, N = W * H;
+    if (!jobs.length || N > 300000) return null;
+    const ci = (x, y) => Math.round((y - y0) / G) * W + Math.round((x - x0) / G);
+    const block = new Uint8Array(N), hOwn = new Int32Array(N), vOwn = new Int32Array(N), pinOwn = new Int32Array(N), nodeOwn = new Int32Array(N);
+    for (const b of boxes) {
+      const i0 = Math.floor((b[0] - x0) / G) + 1, i1 = Math.ceil((b[2] - x0) / G) - 1, j0 = Math.floor((b[1] - y0) / G) + 1, j1 = Math.ceil((b[3] - y0) / G) - 1;
+      for (let j = Math.max(0, j0); j <= Math.min(H - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(W - 1, i1); i++) block[j * W + i] = 1;
+    }
+    // power symbols (GND, +3V3 …) and their stubs: no wire through them
+    for (const b of solid) {
+      const i0 = Math.ceil((b[0] - x0) / G), i1 = Math.floor((b[2] - x0) / G), j0 = Math.ceil((b[1] - y0) / G), j1 = Math.floor((b[3] - y0) / G);
+      for (let j = Math.max(0, j0); j <= Math.min(H - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(W - 1, i1); i++) block[j * W + i] = 1;
+    }
+    jobs.forEach((jb, n) => { for (const p of jb.pts) { const k = ci(p.x, p.y); if (k >= 0 && k < N) { pinOwn[k] = n + 1; block[k] = 0; } } });
+    const DX = [1, 0, -1, 0], DY = [0, 1, 0, -1], INF = 1e9, dist = new Float64Array(N * 4), prev = new Int32Array(N * 4);
+    // binary heap of [cost, state]
+    let hc = [], hs = [];
+    const push = (c, s) => { let i = hc.length; hc.push(c); hs.push(s); while (i) { const p = (i - 1) >> 1; if (hc[p] <= c) break; hc[i] = hc[p]; hs[i] = hs[p]; i = p; } hc[i] = c; hs[i] = s; };
+    const pop = () => { const s = hs[0], c = hc.pop(), t = hs.pop(); if (hc.length) { let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; const cm = () => m === i ? c : hc[m]; if (l < hc.length && hc[l] < cm()) m = l; if (r < hc.length && hc[r] < cm()) m = r; if (m === i) break; hc[i] = hc[m]; hs[i] = hs[m]; i = m; } hc[i] = c; hs[i] = t; } return s; };
+    const out = new Map();
+    jobs.forEach((jb, n) => {
+      const id = n + 1, tree = new Uint8Array(N), segs = [], deg = new Map();
+      const mark = (a, b) => {   // a unit step between two cells of this net
+        const horiz = Math.abs(a - b) === 1; (horiz ? hOwn : vOwn)[a] = id; (horiz ? hOwn : vOwn)[b] = id;
+        tree[a] = tree[b] = 1; deg.set(a, (deg.get(a) || 0) + 1); deg.set(b, (deg.get(b) || 0) + 1);
+      };
+      const pins = jb.pts.map(p => ({ p, k: ci(p.x, p.y) }));
+      // pins nearest first, so the tree grows outward
+      const order = [pins[0]], left = pins.slice(1);
+      while (left.length) { let bi = 0, bd = Infinity; left.forEach((q, i) => { const d = Math.min(...order.map(o => Math.abs(o.p.x - q.p.x) + Math.abs(o.p.y - q.p.y))); if (d < bd) { bd = d; bi = i; } }); order.push(left.splice(bi, 1)[0]); }
+      tree[order[0].k] = 1; nodeOwn[order[0].k] = id;
+      const failed = [];
+      for (const { p, k } of order.slice(1)) {
+        if (tree[k]) continue;
+        dist.fill(INF); hc = []; hs = [];
+        // leave the pin outward first (when that cell is free)
+        const pd = DX.findIndex((v, i) => v === (p.dx || 0) && DY[i] === (p.dy || 0));
+        for (let d = 0; d < 4; d++) { const s = k * 4 + d, c0 = d === pd ? 0 : 6; dist[s] = c0; prev[s] = -1; push(c0, s); }
+        let goal = -1;
+        while (hc.length) {
+          const s = pop(), c = dist[s], cell = s >> 2, dir = s & 3;
+          if (tree[cell] && cell !== k) { goal = s; break; }
+          if (c > 4000) break;
+          const ix = cell % W, iy = (cell - ix) / W;
+          for (let d = 0; d < 4; d++) {
+            if (d === ((dir + 2) & 3) && cell !== k) continue;
+            const nx = ix + DX[d], ny = iy + DY[d]; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+            const nc = ny * W + nx, horiz = d === 0 || d === 2;
+            if (block[nc] && !tree[nc]) continue;
+            if (pinOwn[nc] && pinOwn[nc] !== id) continue;
+            if (nodeOwn[nc] && nodeOwn[nc] !== id) continue;
+            const own = horiz ? hOwn : vOwn, cross = horiz ? vOwn : hOwn;
+            if ((own[nc] && own[nc] !== id) || (own[cell] && own[cell] !== id)) continue;   // along another net's wire
+            let step = 1 + (d !== dir && cell !== k ? 4 : 0) + (cross[nc] && cross[nc] !== id && !tree[nc] ? 8 : 0);
+            if (d !== dir && cell !== k && cross[cell] && cross[cell] !== id) continue;   // no corner on another net's wire
+            const ns = nc * 4 + d, v = c + step; if (v < dist[ns]) { dist[ns] = v; prev[ns] = s; push(v, ns); }
+          }
+        }
+        if (goal < 0) { failed.push(p); continue; }
+        // walk back: cells from the tree to the pin
+        const cells = []; for (let s = goal; s >= 0; s = prev[s]) { const cell = s >> 2; if (cells[cells.length - 1] !== cell) cells.push(cell); }
+        for (let i = 1; i < cells.length; i++) mark(cells[i - 1], cells[i]);
+        // corners and ends of this net may not be crossed by others
+        for (let i = 0; i < cells.length; i++) { const a = cells[i - 1], b = cells[i + 1]; if (a == null || b == null || (a - cells[i]) !== (cells[i] - b)) nodeOwn[cells[i]] = id; }
+        segs.push(cells);
+      }
+      // SVG: each path as straight runs; junctions where 3+ wire ends meet (a pin counts as one)
+      let d = '';
+      const cx = c => x0 + (c % W) * G, cy = c => y0 + Math.floor(c / W) * G;
+      for (const cells of segs) {
+        const pts = [cells[0]]; for (let i = 1; i < cells.length - 1; i++) if (cells[i] - cells[i - 1] !== cells[i + 1] - cells[i]) pts.push(cells[i]); pts.push(cells[cells.length - 1]);
+        d += 'M' + pts.map(c => cx(c) + ' ' + cy(c)).join('L');
+      }
+      // pins off the 10 grid: a short stub to the grid point
+      for (const { p, k } of pins) if (cx(k) !== p.x || cy(k) !== p.y) d += `M${p.x} ${p.y}L${cx(k)} ${cy(k)}`;
+      const junctions = [];
+      for (const [c, n0] of deg) { const n1 = n0 + (pins.some(q => q.k === c) ? 1 : 0); if (n1 >= 3) junctions.push([cx(c), cy(c)]); }
+      out.set(jb.net, { d, junctions, failed });
+    });
+    return out;
+  }
   const angFor = (d, upIsAway) => { // rotation so that local -y (power) or +y (ground) points along d
     const k = `${d.dx},${d.dy}`;
     if (upIsAway) return { '0,-1': 0, '1,0': 90, '0,1': 180, '-1,0': 270 }[k] ?? 0;
@@ -111,7 +202,26 @@ const Sch = (() => {
       boxes.push(Model.bbox(c));
       for (const p of Model.pinsWorld(c)) pinPos[p.key] = p;
     }
-    // nets
+    // nets drawn as wires go through the router together (labels and power symbols need none)
+    const wireNet = (net, keys, pts) => !Model.isPower(net) && pts.length >= 2 && !keys.some(k => elsewhere.has(k.split('.')[0])) &&
+      !(S.connStyle === 'labels' || (S.connStyle === 'auto' && mst(pts).some(([a, b]) => mdist(pts[a], pts[b]) > 320)));
+    const jobs = [];
+    for (const [net, keys] of Object.entries(S.nets)) { const pts = keys.map(k => pinPos[k]).filter(Boolean); if (wireNet(net, keys, pts)) jobs.push({ net, pts }); }
+    // short nets first: they get the straight wires
+    jobs.sort((a, b) => { const span = j => { const xs = j.pts.map(p => p.x), ys = j.pts.map(p => p.y); return Math.max(...xs) - Math.min(...xs) + Math.max(...ys) - Math.min(...ys); }; return span(a) - span(b); });
+    const solid = [];
+    for (const [net, keys] of Object.entries(S.nets)) if (Model.isPower(net)) for (const k of keys) {
+      const p = pinPos[k]; if (!p) continue;
+      const ex = p.x + p.dx * 22, ey = p.y + p.dy * 22, w = p.dx ? 10 : 12, h = p.dy ? 10 : 12;
+      solid.push([Math.min(p.x, ex) - (p.dy ? w : 0), Math.min(p.y, ey) - (p.dx ? h : 0), Math.max(p.x, ex) + (p.dy ? w : 0), Math.max(p.y, ey) + (p.dx ? h : 0)]);
+    }
+    // while a part is dragged the quick L wires are drawn; the router runs again when it is dropped (and is cached)
+    let routed = null;
+    if (!(ui.drag && ui.drag.moved)) {
+      const key = JSON.stringify([jobs.map(j => [j.net, j.pts.map(p => [p.x, p.y, p.dx, p.dy])]), boxes, solid]);
+      if (routeMemo.key === key) routed = routeMemo.val;
+      else { try { routed = mazeRoute(jobs, boxes, solid); } catch (e) { routed = null; } routeMemo.key = key; routeMemo.val = routed; }
+    }
     const junction = {};
     const bump = (p) => { const k = p.x + ',' + p.y; junction[k] = (junction[k] || 0) + 1; };
     for (const [net, keys] of Object.entries(S.nets)) {
@@ -147,12 +257,20 @@ const Sch = (() => {
         continue;
       }
       let d = '';
-      for (const [a, b] of E) {
-        const r = route(pts[a], pts[b], boxes);
-        d += 'M' + r.map(q => q.x + ' ' + q.y).join('L');
-        bump(pts[a]); bump(pts[b]);
+      const R = routed && routed.get(net);
+      if (R) {
+        d = R.d;
+        for (const [x, y] of R.junctions) junction[x + ',' + y] = 3;
+        // pins the router could not reach: a plain wire to the nearest pin of the net
+        for (const p of R.failed) { const q = pts.filter(o => o !== p).reduce((a, b) => mdist(a, p) <= mdist(b, p) ? a : b); d += 'M' + route(p, q, boxes).map(o => o.x + ' ' + o.y).join('L'); }
+      } else {
+        for (const [a, b] of E) {
+          const r = route(pts[a], pts[b], boxes);
+          d += 'M' + r.map(q => q.x + ' ' + q.y).join('L');
+          bump(pts[a]); bump(pts[b]);
+        }
+        for (const p of pts) bump(p);
       }
-      for (const p of pts) bump(p);
       out.push(`<g class="netw${selC}" data-net="${esc(net)}"><path class="wire" d="${d}"/><path class="hitw" d="${d}"/>`);
       if (!/^N\$/.test(net)) {
         const p = pts[E[0][0]];
@@ -284,7 +402,8 @@ const Sch = (() => {
         ui.onContext({ x: e.clientX, y: e.clientY, ref: r.ref, net: r.net });
       }
     }
-    if (ui.drag && ui.drag.moved) Model.emit('change'); ui.drag = null; ui.pan = null;
+    const dr = ui.drag; ui.drag = null; ui.pan = null;
+    if (dr && dr.moved) Model.emit('change'); else if (dr) render();   // wires routed again after a drag
   }
 
   function key(e) {

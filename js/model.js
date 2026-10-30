@@ -109,6 +109,8 @@ const Model = (() => {
   // the space a part really takes on the sheet: symbol + the net labels / power symbols on its pins + ref / value text
   function labelBox(c, idx = pinIndex()) {
     const b = bbox(c), out = [b[0], b[1] - 14, b[2], b[3] + 16];
+    // a standing 2-pin part has its ref / value written on its right
+    if ((c.rot === 90 || c.rot === 270) && b[3] - b[1] > b[2] - b[0] && !(Lib.type(c.type) || {}).generic) out[2] = Math.max(out[2], b[2] + 6 + Math.max(String(c.ref).length, String(c.value || '').length) * 4.4);
     for (const p of pinsWorld(c)) {
       const net = idx[p.key]; if (!net) continue;
       const len = isGround(net) ? 18 : isPower(net) ? 18 + net.length * 5.2 : 14 + net.length * 5.2;
@@ -435,6 +437,111 @@ const Model = (() => {
     for (const c of cs) { c.x -= mx; c.y -= my; }
   }
 
+  // ---------- organize: a readable schematic ----------
+  // ICs / modules (4+ pins) in a row, connector-like parts first; every small part (2–3 pins) next to the pin it is
+  // wired to, chains (R → C → GND) continuing outward. Parts on GND stand vertical with GND at the bottom, parts on a
+  // supply (3V3, VDD …) vertical with the supply on top, series parts horizontal along the pin. Wires are then drawn
+  // by the schematic's router around the symbols.
+  function organize(sheet) {
+    if (sheet == null) { for (const sh of [...new Set(S.components.map(sheetOf))]) organize(sh); return { parts: S.components.length }; }
+    const cs = S.components.filter(c => sheetOf(c) === sheet); if (!cs.length) return;
+    const idx = pinIndex(), byRef = new Map(cs.map(c => [c.ref, c]));
+    const pinsOf = c => { try { return Lib.type(c.type).pins(c); } catch (e) { return []; } };
+    const nPins = c => pinsOf(c).length;
+    const role = n => !n ? '' : isGround(n) ? 'G' : isPower(n) ? 'P' : 'S';
+    const netsOf = c => pinsOf(c).map(p => idx[c.ref + '.' + p.num]);
+    let main = cs.filter(c => nPins(c) >= 4);
+    if (!main.length) main = [cs.reduce((a, b) => nPins(b) > nPins(a) ? b : a)];
+    const isMain = new Set(main.map(c => c.ref));
+    // which parts share signal nets (power nets join everything, so they do not count)
+    const sigNbrs = c => { const out = new Set(); for (const n of netsOf(c)) if (role(n) === 'S') for (const k of S.nets[n]) { const r = k.slice(0, k.lastIndexOf('.')); if (r !== c.ref && byRef.has(r)) out.add(r); } return out; };
+    // main parts: a chain, each next one the most connected to the last (connectors J / P / CN at an end)
+    const w = (a, b) => { let s = 0; for (const n of netsOf(a)) if (role(n) === 'S' && S.nets[n].some(k => k.startsWith(b.ref + '.'))) s++; return s; };
+    const rest = main.slice(), order = [];
+    let cur = rest.find(c => /^(J|P|CN|X)\d/i.test(c.ref)) || rest.reduce((a, b) => nPins(b) > nPins(a) ? b : a);
+    while (cur) { order.push(cur); rest.splice(rest.indexOf(cur), 1); if (!rest.length) break; cur = rest.reduce((a, b) => w(cur, b) > w(cur, a) ? b : a); }
+    // small parts → the main part they hang on (nearest through signal nets); supply-only parts → a main part on that supply
+    const owner = new Map(), q = order.map(c => c.ref); for (const r of q) owner.set(r, r);
+    while (q.length) { const r = q.shift(); for (const o of sigNbrs(byRef.get(r))) if (!owner.has(o) && !isMain.has(o)) { owner.set(o, owner.get(r)); q.push(o); } }
+    for (const c of cs) if (!owner.has(c.ref)) {
+      const sup = netsOf(c).find(n => role(n) === 'P'), m = sup && order.find(o => netsOf(o).includes(sup));
+      if (m) owner.set(c.ref, m.ref);
+    }
+    // rotation of a small part: pin directions after rotating
+    const dirs = (c, rot) => { const o = c.rot; c.rot = rot; const p = pinsWorld(c); c.rot = o; return p; };
+    const orient = (c, anchor) => {
+      if (nPins(c) > 3) return;
+      const ns = netsOf(c), rs = ns.map(role), score = rot => {
+        const P = dirs(c, rot); let s = 0;
+        P.forEach((p, i) => { if (rs[i] === 'G') s += p.dy > 0 ? 10 : p.dy < 0 ? -10 : -3; else if (rs[i] === 'P') s += p.dy < 0 ? 10 : p.dy > 0 ? -10 : -3; });
+        if (anchor) P.forEach((p, i) => { if (ns[i] && ns[i] === anchor.net && role(anchor.net) === 'S') { if (p.dx === -anchor.dx && p.dy === -anchor.dy) s += 6; else if (p.dx === anchor.dx && p.dy === anchor.dy) s -= 4; } });
+        if (!rs.some(r => r === 'G' || r === 'P') && anchor && nPins(c) === 2) { const along = anchor.dx ? P.every(p => p.dy === 0) : P.every(p => p.dx === 0); if (along) s += 3; }
+        return s;
+      };
+      let best = c.rot || 0, bs = -1e9; for (const rot of [0, 90, 180, 270]) { const s = score(rot); if (s > bs + 1e-9) { bs = s; best = rot; } }
+      c.rot = best;
+    };
+    const gap = 8, hit = (b, placed) => placed.some(a => !(b[2] + gap <= a[0] || b[0] >= a[2] + gap || b[3] + gap <= a[1] || b[1] >= a[3] + gap));
+    // put c so that its pin `pk` lands near the anchor pin's tip, then step outward / sideways until it is free
+    const put = (c, pk, A, placed) => {
+      const pw = () => pinsWorld(c).find(p => p.key === pk) || pinsWorld(c)[0];
+      const p0 = pw(), dx = A.dx || 0, dy = A.dy || 0, out = dx || dy ? 1 : 0;
+      const tx = A.x + dx * 30, ty = A.y + dy * 30;
+      const bx = c.x + (tx - p0.x), by = c.y + (ty - p0.y), cand = [];
+      for (let o = 0; o <= 24; o++) for (let l = -12; l <= 12; l++) cand.push([o, l, o + Math.abs(l) * 1.6]);
+      cand.sort((a, b) => a[2] - b[2]);
+      for (const [o, l] of cand) {
+        const ox = out ? dx * o * 20 : 0, oy = out ? dy * o * 20 : 0, lx = dy ? l * 20 : 0, ly = dx ? l * 20 : (out ? 0 : l * 20);
+        c.x = Math.round((bx + ox + lx) / 10) * 10; c.y = Math.round((by + oy + ly) / 10) * 10;
+        if (!hit(labelBox(c, idx), placed)) return true;
+      }
+      return false;
+    };
+    // clusters: one per main part, built around it at (0, 0), then laid out left to right (rows when it gets wide)
+    const clusters = [];
+    for (const m of order) {
+      m.rot = m.rot || 0; m.x = 0; m.y = 0;
+      const placed = [labelBox(m, idx)], members = [m], done = new Set([m.ref]);
+      const queue = [m];
+      while (queue.length) {
+        const host = queue.shift();
+        for (const A of pinsWorld(host)) {
+          const net = idx[A.key]; if (!net) continue;
+          const isSup = role(net) !== 'S';
+          for (const k of S.nets[net]) {
+            const r = k.slice(0, k.lastIndexOf('.')), c = byRef.get(r);
+            if (!c || done.has(r) || isMain.has(r) || owner.get(r) !== m.ref) continue;
+            // supply pins only take parts with no signal neighbour (decoupling caps, pull-ups to a supply-only node)
+            if (isSup && (role(net) === 'G' || sigNbrs(c).size)) continue;
+            done.add(r); orient(c, { net, dx: A.dx, dy: A.dy });
+            put(c, k, A, placed); placed.push(labelBox(c, idx)); members.push(c); queue.push(c);
+          }
+        }
+      }
+      clusters.push({ members, placed });
+    }
+    // parts that belong to no cluster (only GND, or not connected): a column of their own
+    const loose = cs.filter(c => !clusters.some(k => k.members.includes(c)));
+    if (loose.length) {
+      const placed = [], members = [];
+      let y = 0; for (const c of loose) { orient(c, null); c.x = 0; c.y = y; const b = labelBox(c, idx); c.y += y - b[1]; y = labelBox(c, idx)[3] + 20; placed.push(labelBox(c, idx)); members.push(c); }
+      clusters.push({ members, placed });
+    }
+    const bbOf = k => k.members.map(c => labelBox(c, idx)).reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]);
+    let cx = 0, rowTop = 0, rowBottom = 0;
+    for (const k of clusters) {
+      const b = bbOf(k), wdt = b[2] - b[0];
+      if (cx > 0 && cx + wdt > 1600) { cx = 0; rowTop = rowBottom + 60; }
+      const sx = Math.round((cx - b[0]) / 10) * 10, sy = Math.round((rowTop - b[1]) / 10) * 10;
+      for (const c of k.members) { c.x += sx; c.y += sy; }
+      cx += wdt + 60; rowBottom = Math.max(rowBottom, rowTop + (b[3] - b[1]));
+    }
+    let mx = 0, my = 0; for (const c of cs) { mx += c.x; my += c.y; }
+    mx = Math.round(mx / cs.length / 10) * 10; my = Math.round(my / cs.length / 10) * 10;
+    for (const c of cs) { c.x -= mx; c.y -= my; }
+    if (S.connStyle === 'labels') S.connStyle = 'auto';   // wires between parts that are now close
+  }
+
   function summary() {
     const idx = pinIndex();
     return {
@@ -450,6 +557,6 @@ const Model = (() => {
     get S() { return S; }, blank, subscribe: f => subs.push(f), emit, begin, mutate, load, undo, redo, snapshot,
     canUndo: () => undoStack.length > 0, canRedo: () => redoStack.length > 0,
     comp, pinsWorld, bbox, pinIndex, netOf, resolvePins, addComponent, removeComponent, updateComponent, connect, disconnect,
-    renameNet, removeNet, clear, setLibPart, fpNameFor, lcscOf, assignPart, copyParts, pasteParts, attachDb, erc, autoLayout, spaceOut, labelBox, sheetOf, summary, isPower, isGround, invalidate, netsOfComp, nextRef, autoNetName
+    renameNet, removeNet, clear, setLibPart, fpNameFor, lcscOf, assignPart, copyParts, pasteParts, attachDb, erc, autoLayout, organize, spaceOut, labelBox, sheetOf, summary, isPower, isGround, invalidate, netsOfComp, nextRef, autoNetName
   };
 })();

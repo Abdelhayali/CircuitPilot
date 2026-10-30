@@ -487,6 +487,18 @@ const Pcb = (() => {
     for (const t of S.pcb.traces) if (t.net !== pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) obstacle({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, cl);
     for (const v of S.pcb.vias) if (v.net !== pr.net) obstacle({ k: 'circ', c: [v.x, v.y], r: v.d / 2 }, cl);
     for (const h of S.pcb.holes || []) obstacle({ k: 'circ', c: [h.x, h.y], r: h.d / 2 }, cl);
+    // rule smdPadRelief: the pour's own SMD pads get a gap of cl all round, joined by 4 spokes (thermal relief), so each
+    // pad is a solder spot of its own (on a milled board the pad shows; the iron does not have to heat the whole pour)
+    if (R.smdPadRelief) for (const c of placed()) for (const q of padsOf(c, idx)) {
+      if (q.drill || q.net !== pr.net || !padCu(q, L2).includes(pr.layer)) continue;
+      const s0 = padShape(q), b = bboxOf(s0), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+      const s = s0.k === 'rect' ? { k: 'rect', cx: s0.cx, cy: s0.cy, hw: s0.hw + cl, hh: s0.hh + cl } : s0, c2 = s0.k === 'rect' ? 0 : cl;
+      const sw = min(R.reliefSpoke || 0.6, 0.8 * min(b[2] - b[0], b[3] - b[1])) / 2, [x0, y0, x1, y1] = span(b, cl + M);
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const px = (x + X0) * g, py = (y + Y0) * g; if (abs(px - cx) <= sw || abs(py - cy) <= sw) continue;   // spoke
+        const i = y * W + x, v = sd(s, px, py) - c2; if (v < f[i]) f[i] = v;
+      }
+    }
     // pieces: samples with f > τ (τ > g/2: the free disks of two neighbours overlap, so the copper between them is
     // really there), 4-connected; the thinner rim (0 < f ≤ τ) joins the one piece next to it, or -1 when it touches
     // none or two (a hairline the grid cannot resolve: never drawn). Then: which pieces touch copper of the pour's net
@@ -1151,8 +1163,8 @@ const Pcb = (() => {
     jlcpcb_power: { label: 'JLCPCB 2-layer — power / robust', values: { traceWidth: 0.3, powerTraceWidth: 0.8, clearance: 0.25, viaDiameter: 0.8, viaDrill: 0.4, edgeClearance: 0.5, layers: 2, neckDown: true, ...JLC_MIN } },
     // milling on a desktop CNC (3018 Pro …): the V-bit groove is ~0.15 mm and varies with the board's flatness, the
     // machine has ~0.1 mm play and the drill wanders — wide tracks and gaps, big rings, one layer, no vias
-    cnc3018: { label: 'CNC milling — 3018 / GRBL desktop CNC (1 layer, 0.9 mm tracks, 0.4 mm gaps, 0.8 / 1.0 mm drills, no vias)', values: { traceWidth: 0.9, powerTraceWidth: 1.0, powerWider: false, clearance: 0.4, padClearance: 0.4, viaClearance: 0.4, pourClearance: 0.6, viaDiameter: 2.0, viaDrill: 0.8, edgeClearance: 1.5, layers: 1, neckDown: true, minTraceWidth: 0.5, minClearance: 0.4, minViaDrill: 0.8, minViaDiameter: 1.8, minAnnularRing: 0.5, minPthRing: 0.35, minHoleToHole: 1.0, minEdgeClearance: 1.5, minHoleSize: 0.8, pourMinArea: 2, trackStyle: '45', pourUnderSmd: false, cnc: true } },
-    home: { label: 'Home etching (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6, pourUnderSmd: false } },
+    cnc3018: { label: 'CNC milling — 3018 / GRBL desktop CNC (1 layer, 0.9 mm tracks, 0.4 mm gaps, 0.8 / 1.0 mm drills, no vias)', values: { traceWidth: 0.9, powerTraceWidth: 1.0, powerWider: false, clearance: 0.4, padClearance: 0.4, viaClearance: 0.4, pourClearance: 0.6, viaDiameter: 2.0, viaDrill: 0.8, edgeClearance: 1.5, layers: 1, neckDown: true, minTraceWidth: 0.5, minClearance: 0.4, minViaDrill: 0.8, minViaDiameter: 1.8, minAnnularRing: 0.5, minPthRing: 0.35, minHoleToHole: 1.0, minEdgeClearance: 1.5, minHoleSize: 0.8, pourMinArea: 2, trackStyle: '45', pourUnderSmd: false, smdPadRelief: true, cnc: true } },
+    home: { label: 'Home etching (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6, pourUnderSmd: false, smdPadRelief: true } },
   };
   const DEFAULT_PRESET = 'jlcpcb_free_min';
   // JLCPCB measures tracks against drill holes too: via hole to track ≥ minHoleToTrack (0.2), plated hole to track
@@ -1192,7 +1204,7 @@ const Pcb = (() => {
     let base = Model.S.rules || {};
     if (u.preset) {   // a preset sets the sizes and fab minimums; settings that are not sizes stay
       if (!RULE_PRESETS[u.preset]) throw new Error(`Unknown preset "${u.preset}". Presets: ${Object.keys(RULE_PRESETS).join(', ')}`);
-      const keep = {}; for (const k of ['trackStyle', 'noViaInPad', 'viaInPad', 'warnUnderMetal', 'pourMinArea', 'routeTime', 'powerWider', 'epKeepout', 'pourUnderSmd']) if (base[k] != null) keep[k] = base[k];
+      const keep = {}; for (const k of ['trackStyle', 'noViaInPad', 'viaInPad', 'warnUnderMetal', 'pourMinArea', 'routeTime', 'powerWider', 'epKeepout', 'pourUnderSmd', 'smdPadRelief']) if (base[k] != null) keep[k] = base[k];
       base = Object.assign({ preset: u.preset, netWidths: base.netWidths || {} }, keep);
     }
     const next = Object.assign({}, base);
@@ -1206,6 +1218,7 @@ const Pcb = (() => {
     if (next.viaInPad && (next.noViaInPad ?? true)) { if (u.viaInPad === true && u.noViaInPad !== true) next.noViaInPad = false; else next.viaInPad = false; }   // the strict rule is on unless switched off
     if (u.warnUnderMetal != null) next.warnUnderMetal = !!u.warnUnderMetal;
     if (u.pourUnderSmd != null) next.pourUnderSmd = !!u.pourUnderSmd;
+    if (u.smdPadRelief != null) next.smdPadRelief = !!u.smdPadRelief;
     if (u.epKeepout != null) next.epKeepout = !!u.epKeepout;
     // switching the automatic keep-outs back on brings back the ones removed one by one
     if (next.epKeepout && base.epKeepout === false && Model.S.pcb) delete Model.S.pcb.epKeepoutOff;

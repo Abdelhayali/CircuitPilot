@@ -12,7 +12,7 @@ os.makedirs(TAB, exist_ok=True)
 R = json.load(open(os.path.join(HERE, 'results.json')))
 C = json.load(open(os.path.join(HERE, 'cnc.json')))
 T = json.load(open(os.path.join(HERE, 'tokens.json')))
-plt.rcParams.update({'font.family': 'serif', 'font.size': 8, 'axes.spines.top': False, 'axes.spines.right': False})
+plt.rcParams.update({'font.family': 'serif', 'font.size': 9, 'axes.spines.top': False, 'axes.spines.right': False})
 BLUE, ORANGE, GREEN, RED, GREY = '#2563eb', '#f59e0b', '#16a34a', '#dc2626', '#64748b'
 
 def esc(s): return s.replace('_', r'\_')
@@ -44,18 +44,24 @@ json.dump(stats, open(os.path.join(HERE, 'stats.json'), 'w'), indent=1)
 print(stats)
 
 # ---- Chart: completion and run time per design ----
-fig, ax = plt.subplots(1, 2, figsize=(7.0, 2.4))
+fig, ax = plt.subplots(1, 2, figsize=(7.0, 2.9))
 x = range(len(R)); w = 0.38
 ax[0].bar([i - w / 2 for i in x], [100 * r['noripup']['routed'] / r['noripup']['total'] for r in R], w, color=ORANGE, label='single pass (no rip-up)')
 ax[0].bar([i + w / 2 for i in x], [100 * r['full']['routed'] / r['full']['total'] for r in R], w, color=BLUE, label='negotiated rip-up')
 ax[0].set_ylim(75, 101); ax[0].set_ylabel('nets routed (%)'); ax[0].set_xticks(list(x)); ax[0].set_xticklabels([short[r['name']] for r in R], rotation=90)
-ax[0].legend(loc='upper center', bbox_to_anchor=(0.5, -0.32), ncol=2, frameon=False, fontsize=7); ax[0].set_title('(a) Routing completion', fontsize=8)
+ax[0].legend(loc='upper center', bbox_to_anchor=(0.5, -0.3), ncol=2, frameon=False, fontsize=9); ax[0].set_title('(a) Routing completion', fontsize=10)
 nets = [r['nets'] for r in R]
 ok = [r['full']['unrouted'] == 0 for r in R]
 ax[1].scatter([n for n, o in zip(nets, ok) if o], [r['full']['seconds'] for r, o in zip(R, ok) if o], color=GREEN, s=18, label='all nets routed', zorder=3)
 ax[1].scatter([n for n, o in zip(nets, ok) if not o], [r['full']['seconds'] for r, o in zip(R, ok) if not o], color=RED, marker='x', s=22, label='nets left open', zorder=3)
-for r in R: ax[1].annotate(short[r['name']], (r['nets'], r['full']['seconds']), fontsize=6, xytext=(3, 2), textcoords='offset points', color=GREY)
-ax[1].set_xlabel('multi-pin nets'); ax[1].set_ylabel('router run time (s)'); ax[1].legend(frameon=False, fontsize=7, loc='lower right'); ax[1].set_title('(b) Run time vs. design size', fontsize=8)
+# labels only where they do not collide: the small boards D1-D6 share one label
+small = [r for r in R if r['nets'] <= 26]
+ax[1].annotate('D1-D6', (18, 11.9), fontsize=8, xytext=(-12, 8), textcoords='offset points', color=GREY)
+offs = {'D7': (-14, 6), 'D8': (6, -10), 'D9': (5, 2), 'D12': (-22, 4), 'D10': (5, -4)}
+for r in R:
+    if r in small: continue
+    k = short[r['name']]; ax[1].annotate(k, (r['nets'], r['full']['seconds']), fontsize=8, xytext=offs.get(k, (5, 2)), textcoords='offset points', color=GREY)
+ax[1].set_xlabel('multi-pin nets'); ax[1].set_ylabel('router run time (s)'); ax[1].legend(loc='upper center', bbox_to_anchor=(0.5, -0.3), ncol=2, frameon=False, fontsize=9); ax[1].set_title('(b) Run time vs. design size', fontsize=10)
 ax[1].grid(alpha=0.25)
 plt.tight_layout(); plt.savefig(os.path.join(FIG, 'routing.pdf'), bbox_inches='tight'); plt.close()
 

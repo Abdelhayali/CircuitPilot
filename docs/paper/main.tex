@@ -34,7 +34,7 @@
 
 \begin{document}
 
-\title{CircuitPilot: Language Decides, Geometry Guarantees --- An Agent-Operable, Browser-Based Toolchain from Natural Language to Manufacturable Printed Circuit Boards}
+\title{CircuitPilot: An Agent-Operable Toolchain from Natural Language to Manufacturable PCBs}
 
 \author{Abdelhay~Ali%
 \thanks{A.~Ali, e-mail: abdelhay.ali.292@gmail.com.}%
@@ -136,7 +136,7 @@ Fig.~\ref{fig:arch} shows the architecture. The design model is one JSON documen
 \node[ui, minimum width=30mm] (app) at (4.25,0.0) {Browser app\\(web, static site,\\Windows app)};
 \node[data, minimum width=30mm] (db) at (4.25,-1.75) {Parts: JLCPCB/LCSC,\\EasyEDA, KiCad, My Library};
 % engine
-\node[draw=cpgreen, line width=0.8pt, rounded corners=4pt, fill=cpgreen!4, minimum width=58mm, minimum height=36mm] (E) at (9.3,0.55) {};
+\node[draw=cpgreen, line width=0.8pt, rounded corners=4pt, fill=cpgreen!4, minimum width=58mm, minimum height=38mm] (E) at (9.3,0.5) {};
 \node[font=\sffamily\scriptsize\bfseries, text=cpgreen!60!black] at (9.3,2.53) {Shared engine (same code in every host)};
 \node[eng] (sch) at (7.85,1.8) {Schematic model\\ERC, organizer};
 \node[eng] (pl) at (10.75,1.8) {Placement\\annealing, legaliser};
@@ -146,14 +146,14 @@ Fig.~\ref{fig:arch} shows the architecture. The design model is one JSON documen
 \node[eng] (enc) at (10.75,-0.7) {Enclosure 3D\\Manifold kernel};
 \node[data, minimum width=58mm] (proj) at (9.3,-2.0) {Projects + versions (SQLite / IndexedDB), knowledge};
 % outputs
-\node[outn] (o1) at (14.3,2.0) {Gerber, drill,\\BOM, CPL};
-\node[outn] (o2) at (14.3,0.85) {CNC G-code +\\2D/3D preview};
-\node[outn] (o3) at (14.3,-0.3) {STL / OpenSCAD\\enclosure};
-\node[outn] (o4) at (14.3,-1.45) {PDF datasheet,\\EasyEDA, netlist};
+\node[outn] (o1) at (14.3,2.05) {Gerber, drill,\\BOM, CPL};
+\node[outn] (o2) at (14.3,0.95) {CNC G-code +\\2D/3D preview};
+\node[outn] (o3) at (14.3,-0.15) {STL / OpenSCAD\\enclosure};
+\node[outn] (o4) at (14.3,-1.25) {PDF datasheet,\\EasyEDA, netlist};
 % arrows
 \draw[arr] (ext) -- (mcp);
-\draw[arr] (cop.east) -- (app.west |- cop.east);
-\draw[arr] (user.east) -- (app.west |- user.east);
+\draw[arr] (cop.east) -- (app.west);
+\draw[arr] (user.east) -- (app.south west);
 \draw[arr] (mcp.east) -- (E.west |- mcp.east);
 \draw[arr] (app.east) -- (E.west |- app.east);
 \draw[arr, <->] (mcp.south) -- node[right, font=\sffamily\tiny]{live sync} (app.north);
@@ -163,6 +163,14 @@ Fig.~\ref{fig:arch} shows the architecture. The design model is one JSON documen
 \end{tikzpicture}
 \caption{CircuitPilot architecture. Agents (purple) and the user act through the MCP server or the browser app (blue). Both call the same engine (green), which produces fabrication outputs (orange). Long operations run in worker threads; projects are versioned, so an agent's change can be undone.}
 \label{fig:arch}
+\end{figure*}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.86\textwidth]{figs/app_overview.jpg}
+\caption{The CircuitPilot web application: parts library (left), schematic editor (centre) and AI copilot (right). The same editors serve the PCB, enclosure and documentation views.}
+\label{fig:app}
+\vspace{-3mm}
 \end{figure*}
 
 \textbf{Hosts.} The same engine files run in four hosts. (i)~The browser app talks to a small Python server (projects and parts databases in SQLite, proxy to supplier APIs). (ii)~A static deployment on GitHub Pages replaces the server with an in-browser backend: projects in IndexedDB, and part search through a stateless relay worker. (iii)~A Windows application bundles the server. (iv)~The MCP server loads the engine into a Node.js \texttt{vm} context and runs long operations (routing, optimisation, export) in worker threads, returning a job identifier that the agent polls. Edits made through MCP are saved to the same project store and appear live in an open browser tab, so a human can watch and intervene.
@@ -231,7 +239,7 @@ Fig.~\ref{fig:flow} shows the typical agent loop these tools support.
 \node[st, right=4mm of f, minimum width=17mm, fill=cpred!8, draw=cpred] (fix) {read reason:\\\tool{optimize\_pcb},\\\tool{add\_via}, rules};
 \draw[arr] (a)--(b); \draw[arr] (b)--(c); \draw[arr] (c)--(d);
 \draw[arr] (d)--node[right]{yes}(e); \draw[arr] (e)--(f); \draw[arr] (f)--node[right]{yes}(g); \draw[arr] (g)--(h);
-\draw[arr] (d.west) -- node[above]{no} ++(-4mm,0) |- (c.west);
+\draw[arr] (d.west) -- node[above]{no} ($(c.west |- d.west)+(-3mm,0)$) |- (c.west);
 \draw[arr] (f.east) -- node[above]{no} (fix.west);
 \draw[arr] (fix.north) |- (e.east);
 \end{tikzpicture}
@@ -340,6 +348,16 @@ Agents place symbols poorly: they put parts in arbitrary grid positions and conn
 \subsection{Enclosure}
 An enclosure is either a parametric box or a script in a small modelling language evaluated by the Manifold geometry kernel~\cite{manifold} (WebAssembly), with a BSP fallback. It is built around the board's 3D model, with cut-outs for edge connectors, standoffs at mounting holes, and printability checks (wall thickness, overhangs), and it exports STL and OpenSCAD. 3D views use three.js~\cite{threejs}.
 
+\begin{figure*}[t]
+\centering
+\begin{subfigure}[t]{0.28\textwidth}\centering\includegraphics[height=45mm,width=\linewidth,keepaspectratio]{figs/pcb_2d.jpg}\caption{Routed board (top red, bottom blue)}\end{subfigure}\hfill
+\begin{subfigure}[t]{0.40\textwidth}\centering\includegraphics[height=45mm,width=\linewidth,keepaspectratio]{figs/pcb_3d.jpg}\caption{3D view with supplier 3D models}\end{subfigure}\hfill
+\begin{subfigure}[t]{0.28\textwidth}\centering\includegraphics[height=45mm,width=\linewidth,keepaspectratio]{figs/enclosure.jpg}\caption{Generated wearable enclosure}\end{subfigure}
+\caption{End-to-end results: a 26$\times$24\,mm nRF52832 sensor node (49 parts, 37/37 nets routed) and a 3D-printable enclosure for the HBC wearable node.}
+\label{fig:case}
+\vspace{-3mm}
+\end{figure*}
+
 % ============================================================
 \section{Evaluation}
 \label{sec:eval}
@@ -391,6 +409,15 @@ ID & Parts & Nets & Pins & Layers & Board (mm) & Single pass & Rip-up (ours) & V
 
 \textbf{Remaining errors.} The DRC errors in Table~\ref{tab:routing} are of two kinds. ``Unrouted'' entries are nets the router could not complete; for each, it returned the blocked pads and a suggestion, which in interactive use leads the agent to \tool{optimize\_pcb} or to a placement change. ``Via-in-pad'' entries come from vias allowed as a last resort when a pin is boxed in. We report them as errors because the strict rule set forbids them, and the Gerber export refuses such a board until they are fixed.
 
+\begin{figure*}[t]
+\centering
+\begin{subfigure}[b]{0.37\textwidth}\includegraphics[width=\linewidth]{figs/sch_before.png}\caption{As placed by the agent}\end{subfigure}\hfill
+\begin{subfigure}[b]{0.61\textwidth}\includegraphics[width=\linewidth]{figs/sch_after.png}\caption{After \emph{Organize}: parts beside their pins, ground down, supply up}\end{subfigure}
+\caption{Schematic of D1 (AD8310 receiver) before and after the organizer.}
+\label{fig:sch}
+\vspace{-3mm}
+\end{figure*}
+
 \textbf{Fabrication on a desktop CNC.} Table~\ref{tab:cnc} lists the isolation-milling jobs for the two single-sided boards, with and without SMD pad relief, for a 30\textdegree{} V-bit with a 0.1\,mm tip at 0.2\,mm depth (0.207\,mm groove), two passes, 1.0\,mm drills and a 2\,mm end mill for the cutout. The verification found no short at the narrowest groove and no cut net at the widest groove in any job. Pad relief added 21 rings to D1 (each relieved pad gains its own ring) for about one extra minute of milling, and changed nothing on D2, which has no SMD pads on its pour. Fig.~\ref{fig:cnc} shows the toolpaths and both previews; the D1 board was milled on a CNC 3018 desktop machine.
 
 \begin{table}[t]
@@ -413,9 +440,9 @@ ID & Relief & Board & Rings & Path & Holes & Lines & Min & Check & Gen.\\
 
 \begin{figure*}[t]
 \centering
-\begin{subfigure}[b]{0.335\textwidth}\includegraphics[width=\linewidth]{figs/cnc_paths.png}\caption{Toolpaths: isolation (blue), cutout (red), tabs (yellow)}\end{subfigure}\hfill
-\begin{subfigure}[b]{0.31\textwidth}\includegraphics[width=\linewidth]{figs/cnc_2d.jpg}\caption{Result preview (2D)}\end{subfigure}\hfill
-\begin{subfigure}[b]{0.32\textwidth}\includegraphics[width=\linewidth]{figs/cnc_3d.jpg}\caption{Result preview (3D)}\end{subfigure}
+\begin{subfigure}[t]{0.32\textwidth}\centering\includegraphics[height=34mm,width=\linewidth,keepaspectratio]{figs/cnc_paths.png}\caption{Toolpaths: isolation (blue), cutout (red), tabs (yellow)}\end{subfigure}\hfill
+\begin{subfigure}[t]{0.32\textwidth}\centering\includegraphics[height=34mm,width=\linewidth,keepaspectratio]{figs/cnc_2d.jpg}\caption{Result preview (2D)}\end{subfigure}\hfill
+\begin{subfigure}[t]{0.32\textwidth}\centering\includegraphics[height=34mm,width=\linewidth,keepaspectratio]{figs/cnc_3d.jpg}\caption{Result preview (3D)}\end{subfigure}
 \caption{Desktop-CNC output for D1 (AD8310 log-amplifier HBC receiver on a XIAO nRF52840), generated directly from the routed board without an external CAM tool. Through-hole parts go in from the bare side, so the job is mirrored automatically.}
 \label{fig:cnc}
 \vspace{-3mm}
@@ -433,34 +460,10 @@ ID & Relief & Board & Rings & Path & Holes & Lines & Min & Check & Gen.\\
 
 \textbf{Schematic organizer.} Fig.~\ref{fig:sch} shows D1's schematic as first placed by the agent and after one click of \emph{Organize}. Measured on the wires the router draws, total wire length fell from 3580 to 2560 units ($-28\%$) and bends from 36 to 27 ($-25\%$), while crossings rose from 2 to 4: the organizer pulls each part next to its pin, which sometimes forces a crossing that a sparser layout avoided. Organizing and routing took 13--416\,ms across the \DesignCount{} designs (54\,ms for D1), fast enough to rerun on every edit. Most stored wearable designs use net labels instead of wires; organizing them converts labels to drawn wires, which makes them longer by construction, so we do not report a ``before'' figure for those.
 
-\begin{figure*}[t]
-\centering
-\begin{subfigure}[b]{0.37\textwidth}\includegraphics[width=\linewidth]{figs/sch_before.png}\caption{As placed by the agent}\end{subfigure}\hfill
-\begin{subfigure}[b]{0.61\textwidth}\includegraphics[width=\linewidth]{figs/sch_after.png}\caption{After \emph{Organize}: parts beside their pins, ground down, supply up}\end{subfigure}
-\caption{Schematic of D1 (AD8310 receiver) before and after the organizer.}
-\label{fig:sch}
-\vspace{-3mm}
-\end{figure*}
 
 \textbf{End-to-end case study.} Fig.~\ref{fig:app} shows the application with the copilot, and Fig.~\ref{fig:case} shows a 49-part nRF52832 sensor node on a 26$\times$24\,mm two-layer board (37 nets, 101 vias, fully routed) and the wearable enclosure generated for the HBC node. Starting from a natural-language request, the agent selected parts with exact LCSC pinouts, wired the schematic, generated and routed the board, and produced Gerber, BOM and pick-and-place files for assembly at JLCPCB, an STL enclosure for multi-jet-fusion printing and a product datasheet. Where the user disagreed with a decision, they changed it through the same tools, and the agent continued from the edited design.
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.86\textwidth]{figs/app_overview.jpg}
-\caption{The CircuitPilot web application: parts library (left), schematic editor (centre) and AI copilot (right). The same editors serve the PCB, enclosure and documentation views.}
-\label{fig:app}
-\vspace{-3mm}
-\end{figure*}
 
-\begin{figure*}[t]
-\centering
-\begin{subfigure}[b]{0.27\textwidth}\includegraphics[width=\linewidth]{figs/pcb_2d.jpg}\caption{Routed board (top red, bottom blue)}\end{subfigure}\hfill
-\begin{subfigure}[b]{0.39\textwidth}\includegraphics[width=\linewidth]{figs/pcb_3d.jpg}\caption{3D view with supplier 3D models}\end{subfigure}\hfill
-\begin{subfigure}[b]{0.27\textwidth}\includegraphics[width=\linewidth]{figs/enclosure.jpg}\caption{Generated wearable enclosure}\end{subfigure}
-\caption{End-to-end results: a 26$\times$24\,mm nRF52832 sensor node (49 parts, 37/37 nets routed) and a 3D-printable enclosure for the HBC wearable node.}
-\label{fig:case}
-\vspace{-3mm}
-\end{figure*}
 
 % ============================================================
 \section{Discussion and Limitations}

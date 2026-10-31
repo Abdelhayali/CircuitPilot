@@ -1,6 +1,6 @@
 # CircuitPilot paper
 
-IEEE double-column manuscript about CircuitPilot (`main.tex`, references in `refs.bib`, built PDF `CircuitPilot-Paper.pdf`).
+IEEE double-column manuscript about CircuitPilot (`main.tex`, references in `refs.bib`, built PDF `CircuitPilot-Paper-v2.pdf`).
 
 Every number in the paper comes from the scripts in `bench/`, which run the same engine as the app (`mcp/engine-vm.mjs`):
 

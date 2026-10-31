@@ -22,3 +22,19 @@ node bench/run-tokens.mjs > bench/tokens.json
 python bench/make-figs.py
 tectonic main.tex
 ```
+
+## How to cite
+
+```bibtex
+@techreport{ali2026circuitpilot,
+  author      = {Abdelhay Ali},
+  title       = {{CircuitPilot}: An Agent-Operable Toolchain from Natural Language to Manufacturable {PCBs}},
+  institution = {Independent},
+  year        = {2026},
+  month       = oct,
+  url         = {https://github.com/Abdelhayali/CircuitPilot},
+  note        = {Software: https://pcbgo.site}
+}
+```
+
+Plain text: A. Ali, "CircuitPilot: An agent-operable toolchain from natural language to manufacturable PCBs," Technical report, Oct. 2026. [Online]. Available: https://github.com/Abdelhayali/CircuitPilot

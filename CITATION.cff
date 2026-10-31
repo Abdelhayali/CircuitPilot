@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use CircuitPilot or its paper in your work, please cite the paper below."
+title: "CircuitPilot"
+type: software
+authors:
+  - family-names: Ali
+    given-names: Abdelhay
+    email: abdelhay.ali.292@gmail.com
+url: "https://pcbgo.site"
+repository-code: "https://github.com/Abdelhayali/CircuitPilot"
+license-url: "https://polyformproject.org/licenses/strict/1.0.0"
+keywords:
+  - PCB design
+  - electronic design automation
+  - large language models
+  - Model Context Protocol
+  - autorouting
+  - CNC isolation milling
+preferred-citation:
+  type: report
+  title: "CircuitPilot: An Agent-Operable Toolchain from Natural Language to Manufacturable PCBs"
+  authors:
+    - family-names: Ali
+      given-names: Abdelhay
+      email: abdelhay.ali.292@gmail.com
+  year: 2026
+  month: 10
+  institution:
+    name: "Independent"
+  url: "https://github.com/Abdelhayali/CircuitPilot/blob/main/docs/paper/CircuitPilot-Paper-v2.pdf"

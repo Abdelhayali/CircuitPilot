@@ -430,6 +430,29 @@ Options: `--port 5173`, `--server-only` (no window), `--lan --password SECRET` (
 - **Projects → Import → EasyEDA Pro project** moves a whole EasyEDA Pro design here: in EasyEDA Pro use *File → Save As (Local)* / *File → Export → Project* to get a `.epro` or `.epro2` file (a `.zip` works too) and import it. You get the schematic (every sheet, parts placed where they were, real pin names, values, LCSC numbers) and the PCB (board outline, part placement on top and bottom, tracks, arcs, vias, copper pours). If the project holds several boards you choose one. Nets come from the PCB's netlist, or from the schematic wires, net labels and power ports when there is no PCB. CircuitPilot boards have 2 copper layers: tracks on inner layers of a 4+ layer board are skipped (the import says how many), so those nets show as unrouted; run the router or re-route them. Parts rotated at odd angles (e.g. 45°) keep their exact pad positions.
 - **Projects → Import → EasyEDA Standard PCB** opens an EasyEDA Standard PCB (*File → Export → EasyEDA Source* in EasyEDA) as a new project: footprints become library parts (LCSC numbers kept), with placement (top/bottom, rotation), nets, tracks, vias, holes, copper areas and the board outline; a schematic is generated from the nets.
 
+## Paper and how to cite
+
+The technical paper describes the architecture, the router, CNC milling, the schematic organizer and a benchmark on 15 real boards:
+**[CircuitPilot: An Agent-Operable Toolchain from Natural Language to Manufacturable PCBs](docs/paper/CircuitPilot-Paper-v2.pdf)** (IEEE double-column, PDF). Sources, figures and the benchmark scripts are in [`docs/paper`](docs/paper).
+
+If you use CircuitPilot or the paper in your work, please cite:
+
+> A. Ali, "CircuitPilot: An agent-operable toolchain from natural language to manufacturable PCBs," Technical report, Oct. 2026. [Online]. Available: https://github.com/Abdelhayali/CircuitPilot
+
+```bibtex
+@techreport{ali2026circuitpilot,
+  author      = {Abdelhay Ali},
+  title       = {{CircuitPilot}: An Agent-Operable Toolchain from Natural Language to Manufacturable {PCBs}},
+  institution = {Independent},
+  year        = {2026},
+  month       = oct,
+  url         = {https://github.com/Abdelhayali/CircuitPilot},
+  note        = {Software: https://pcbgo.site}
+}
+```
+
+GitHub's **Cite this repository** button (right side of the repository page) gives the same entry from [`CITATION.cff`](CITATION.cff).
+
 ## License
 
 CircuitPilot is **source-available** under the [PolyForm Strict License 1.0.0](LICENSE), © 2026 Abdelhay Ali. The code is public so you can see how it works, but the licence allows **use only**:

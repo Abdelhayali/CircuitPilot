@@ -453,7 +453,7 @@ If CircuitPilot helps your project, please credit it, for example:
 ## Paper and how to cite
 
 The technical paper describes the architecture, the router, CNC milling, the schematic organizer and a benchmark on 15 real boards:
-**[CircuitPilot: An Agent-Operable Toolchain from Natural Language to Manufacturable PCBs](docs/paper/CircuitPilot-Paper-v2.pdf)** (IEEE double-column, PDF). Sources, figures and the benchmark scripts are in [`docs/paper`](docs/paper).
+**[CircuitPilot: An Agent-Operable Toolchain from Natural Language to Manufacturable PCBs](docs/paper/CircuitPilot-Paper-v2.pdf)**
 
 If you use CircuitPilot or the paper in your work, please cite:
 

@@ -1,0 +1,802 @@
+[
+ {
+  "id": "3eb4aab67824",
+  "name": "XIAO_AD8310_RX_CNC_1206_wide",
+  "parts": 15,
+  "placed": 15,
+  "nets": 11,
+  "pins": 37,
+  "layers": 1,
+  "preset": "cnc3018",
+  "board_mm": [
+   51,
+   30
+  ],
+  "area_mm2": 1530,
+  "shape": {
+   "type": "rect"
+  },
+  "pours": 1,
+  "trace_w": 0.9,
+  "clearance": 0.4,
+  "full": {
+   "seconds": 0.56,
+   "routed": 11,
+   "total": 11,
+   "unrouted": 0,
+   "vias": 0,
+   "length_mm": 120.3,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.2,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 0.52,
+   "routed": 11,
+   "total": 11,
+   "unrouted": 0,
+   "vias": 0,
+   "length_mm": 120.3,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.2,
+   "err": null
+  }
+ },
+ {
+  "id": "7ba41634f47c",
+  "name": "XIAO_nRF52840_Carrier_CNC_1206",
+  "parts": 17,
+  "placed": 17,
+  "nets": 15,
+  "pins": 39,
+  "layers": 1,
+  "preset": "home",
+  "board_mm": [
+   52,
+   32
+  ],
+  "area_mm2": 1664,
+  "shape": {
+   "type": "polygon",
+   "pts": [
+    [
+     0,
+     0
+    ],
+    [
+     52,
+     0
+    ],
+    [
+     52,
+     32
+    ],
+    [
+     36.5,
+     32
+    ],
+    [
+     36.5,
+     22.3
+    ],
+    [
+     15.5,
+     22.3
+    ],
+    [
+     15.5,
+     32
+    ],
+    [
+     0,
+     32
+    ]
+   ],
+   "r": 0.5
+  },
+  "pours": 2,
+  "trace_w": 0.5,
+  "clearance": 0.4,
+  "full": {
+   "seconds": 1.35,
+   "routed": 15,
+   "total": 15,
+   "unrouted": 0,
+   "vias": 0,
+   "length_mm": 132,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.2,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 0.93,
+   "routed": 15,
+   "total": 15,
+   "unrouted": 0,
+   "vias": 0,
+   "length_mm": 132,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.2,
+   "err": null
+  }
+ },
+ {
+  "id": "f399d62ea5ba",
+  "name": "HBC_Flex_Electrode_Leads",
+  "parts": 10,
+  "placed": 10,
+  "nets": 10,
+  "pins": 20,
+  "layers": 1,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   120,
+   62
+  ],
+  "area_mm2": 7440,
+  "shape": "rect",
+  "pours": 0,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 1.26,
+   "routed": 10,
+   "total": 10,
+   "unrouted": 0,
+   "vias": 0,
+   "length_mm": 600,
+   "drc_errors": 0,
+   "drc_types": [],
+   "err": null
+  },
+  "noripup": {
+   "seconds": 1.38,
+   "routed": 10,
+   "total": 10,
+   "unrouted": 0,
+   "vias": 0,
+   "length_mm": 600,
+   "drc_errors": 0,
+   "drc_types": [],
+   "err": null
+  }
+ },
+ {
+  "id": "c722d02a101b",
+  "name": "TXOnly_ECG_OptionB",
+  "parts": 20,
+  "placed": 20,
+  "nets": 17,
+  "pins": 54,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   24,
+   20.4
+  ],
+  "area_mm2": 489.6,
+  "shape": {
+   "type": "rounded",
+   "r": 0.5
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 11.88,
+   "routed": 17,
+   "total": 17,
+   "unrouted": 0,
+   "vias": 20,
+   "length_mm": 199.8,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 11.34,
+   "routed": 17,
+   "total": 17,
+   "unrouted": 0,
+   "vias": 20,
+   "length_mm": 199.8,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "81d09c5446cf",
+  "name": "TXOnly_ECG_OptionC_Small",
+  "parts": 22,
+  "placed": 22,
+  "nets": 18,
+  "pins": 61,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   23.4,
+   20
+  ],
+  "area_mm2": 468,
+  "shape": {
+   "type": "rect"
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 11.59,
+   "routed": 18,
+   "total": 18,
+   "unrouted": 0,
+   "vias": 21,
+   "length_mm": 221.1,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 11.16,
+   "routed": 18,
+   "total": 18,
+   "unrouted": 0,
+   "vias": 21,
+   "length_mm": 221.1,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "a03a091fb3c8",
+  "name": "XIAO_Size_RX_ECG",
+  "parts": 32,
+  "placed": 32,
+  "nets": 26,
+  "pins": 85,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   19.6,
+   23.2
+  ],
+  "area_mm2": 454.7,
+  "shape": {
+   "type": "polygon",
+   "pts": [
+    [
+     0,
+     0
+    ],
+    [
+     19.6,
+     0
+    ],
+    [
+     19.6,
+     23.2
+    ],
+    [
+     0,
+     23.2
+    ]
+   ],
+   "r": 0
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 9.19,
+   "routed": 26,
+   "total": 26,
+   "unrouted": 0,
+   "vias": 30,
+   "length_mm": 287.3,
+   "drc_errors": 1,
+   "drc_types": [
+    "via-in-pad"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 8.7,
+   "routed": 26,
+   "total": 26,
+   "unrouted": 0,
+   "vias": 30,
+   "length_mm": 287.3,
+   "drc_errors": 1,
+   "drc_types": [
+    "via-in-pad"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "e28f03c9f70d",
+  "name": "TXRX_ECG_OptionC",
+  "parts": 35,
+  "placed": 35,
+  "nets": 27,
+  "pins": 94,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   24,
+   24
+  ],
+  "area_mm2": 576,
+  "shape": {
+   "type": "rounded",
+   "r": 0.5
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 25.23,
+   "routed": 27,
+   "total": 27,
+   "unrouted": 0,
+   "vias": 43,
+   "length_mm": 401.2,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 25.69,
+   "routed": 26,
+   "total": 27,
+   "unrouted": 1,
+   "vias": 39,
+   "length_mm": 403.8,
+   "drc_errors": 1,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "cb7f22010c83",
+  "name": "ESP32C3_TXRX_ECG_IMU",
+  "parts": 44,
+  "placed": 44,
+  "nets": 32,
+  "pins": 122,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   25.5,
+   26.2
+  ],
+  "area_mm2": 668.1,
+  "shape": {
+   "type": "rounded",
+   "r": 0.5
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 21.61,
+   "routed": 32,
+   "total": 32,
+   "unrouted": 0,
+   "vias": 54,
+   "length_mm": 433.2,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 22.14,
+   "routed": 31,
+   "total": 32,
+   "unrouted": 1,
+   "vias": 53,
+   "length_mm": 425.5,
+   "drc_errors": 1,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "515fe6f2c87a",
+  "name": "RP2040_TXRX_ECG_IMU",
+  "parts": 44,
+  "placed": 44,
+  "nets": 34,
+  "pins": 124,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   26.8,
+   24.3
+  ],
+  "area_mm2": 651.2,
+  "shape": {
+   "type": "rounded",
+   "r": 0.5
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 26.28,
+   "routed": 34,
+   "total": 34,
+   "unrouted": 0,
+   "vias": 54,
+   "length_mm": 486.9,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 22.86,
+   "routed": 33,
+   "total": 34,
+   "unrouted": 1,
+   "vias": 52,
+   "length_mm": 470.5,
+   "drc_errors": 1,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "35246b1b720c",
+  "name": "Custom_nRF52832_TX_OptionC_ECG_IMU",
+  "parts": 49,
+  "placed": 49,
+  "nets": 37,
+  "pins": 150,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   26,
+   24
+  ],
+  "area_mm2": 624,
+  "shape": {
+   "type": "rounded",
+   "r": 1
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 92.47,
+   "routed": 33,
+   "total": 37,
+   "unrouted": 4,
+   "vias": 84,
+   "length_mm": 647.9,
+   "drc_errors": 5,
+   "drc_types": [
+    "via-in-pad",
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 46.15,
+   "routed": 31,
+   "total": 37,
+   "unrouted": 6,
+   "vias": 76,
+   "length_mm": 613.7,
+   "drc_errors": 7,
+   "drc_types": [
+    "via-in-pad",
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "1939c1b685fc",
+  "name": "ESP32C3_WROOM02U_TXRX_ECG_IMU",
+  "parts": 52,
+  "placed": 52,
+  "nets": 36,
+  "pins": 156,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   25,
+   23
+  ],
+  "area_mm2": 575,
+  "shape": {
+   "type": "rounded",
+   "r": 0.5
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 48.56,
+   "routed": 36,
+   "total": 36,
+   "unrouted": 0,
+   "vias": 72,
+   "length_mm": 702.2,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 36.83,
+   "routed": 33,
+   "total": 36,
+   "unrouted": 3,
+   "vias": 60,
+   "length_mm": 648.4,
+   "drc_errors": 3,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "e593f9d93908",
+  "name": "HBC Wearable Node (TX option A)",
+  "parts": 55,
+  "placed": 55,
+  "nets": 32,
+  "pins": 136,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   23.8,
+   30.5
+  ],
+  "area_mm2": 725.9,
+  "shape": {
+   "type": "polygon",
+   "pts": [
+    [
+     0,
+     0
+    ],
+    [
+     23.8,
+     0
+    ],
+    [
+     23.8,
+     30.5
+    ],
+    [
+     0,
+     30.5
+    ]
+   ],
+   "r": 3
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 83.42,
+   "routed": 31,
+   "total": 32,
+   "unrouted": 1,
+   "vias": 57,
+   "length_mm": 610.7,
+   "drc_errors": 1,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 34.61,
+   "routed": 30,
+   "total": 32,
+   "unrouted": 2,
+   "vias": 58,
+   "length_mm": 600.6,
+   "drc_errors": 2,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "c96c17038088",
+  "name": "Custom_RP2040_TX_OptionC_ECG_IMU",
+  "parts": 56,
+  "placed": 56,
+  "nets": 45,
+  "pins": 187,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   32,
+   28
+  ],
+  "area_mm2": 896,
+  "shape": {
+   "type": "rounded",
+   "r": 1
+  },
+  "pours": 2,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 101.42,
+   "routed": 38,
+   "total": 45,
+   "unrouted": 7,
+   "vias": 108,
+   "length_mm": 824.6,
+   "drc_errors": 7,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 60.36,
+   "routed": 36,
+   "total": 45,
+   "unrouted": 9,
+   "vias": 104,
+   "length_mm": 780.7,
+   "drc_errors": 9,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "29aa28ca1787",
+  "name": "EXTAFE_IMU_ECG_Memory_modes_v2_noViaUnderU1",
+  "parts": 56,
+  "placed": 56,
+  "nets": 57,
+  "pins": 235,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   56.943,
+   55.752
+  ],
+  "area_mm2": 3174.7,
+  "shape": {
+   "type": "polygon",
+   "pts": [
+    [
+     0,
+     0
+    ],
+    [
+     56.943,
+     0
+    ],
+    [
+     56.943,
+     55.752
+    ],
+    [
+     0,
+     55.752
+    ]
+   ],
+   "r": 0
+  },
+  "pours": 2,
+  "trace_w": 0.1,
+  "clearance": 0.1,
+  "full": {
+   "seconds": 113.37,
+   "routed": 56,
+   "total": 57,
+   "unrouted": 1,
+   "vias": 294,
+   "length_mm": 2386.5,
+   "drc_errors": 1,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 108.18,
+   "routed": 56,
+   "total": 57,
+   "unrouted": 1,
+   "vias": 294,
+   "length_mm": 2386.5,
+   "drc_errors": 1,
+   "drc_types": [
+    "unrouted"
+   ],
+   "grid_mm": 0.05,
+   "err": null
+  }
+ },
+ {
+  "id": "29b7c0e1111b",
+  "name": "HBC_Test_Modules_Panel_1206",
+  "parts": 101,
+  "placed": 101,
+  "nets": 71,
+  "pins": 272,
+  "layers": 2,
+  "preset": "jlcpcb_free_min",
+  "board_mm": [
+   99.4,
+   89
+  ],
+  "area_mm2": 8846.6,
+  "shape": {
+   "type": "rect"
+  },
+  "pours": 20,
+  "trace_w": 0.2,
+  "clearance": 0.105,
+  "full": {
+   "seconds": 31.86,
+   "routed": 71,
+   "total": 71,
+   "unrouted": 0,
+   "vias": 88,
+   "length_mm": 1636.6,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.1,
+   "err": null
+  },
+  "noripup": {
+   "seconds": 24.09,
+   "routed": 71,
+   "total": 71,
+   "unrouted": 0,
+   "vias": 88,
+   "length_mm": 1636.6,
+   "drc_errors": 0,
+   "drc_types": [],
+   "grid_mm": 0.1,
+   "err": null
+  }
+ }
+]

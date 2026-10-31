@@ -1,0 +1,322 @@
+[
+ {
+  "name": "XIAO_AD8310_RX_CNC_1206_wide",
+  "relief": "off",
+  "ms": 5707,
+  "gcode_lines": 5138,
+  "files": [
+   "1_isolation.nc",
+   "2_drill_1.00mm.nc",
+   "3_cutout.nc",
+   "preview.svg",
+   "result-2d.svg",
+   "result-3d.html",
+   "README-cnc.txt"
+  ],
+  "info": {
+   "drills": [
+    {
+     "file": "2_drill_1.00mm.nc",
+     "bit_mm": 1,
+     "holes": 24
+    }
+   ],
+   "layer": "top",
+   "mirrored": true,
+   "parts_side": "bare side (copper on the bottom of the finished board)",
+   "mirror_choice": "auto — pass parts_side \"bare\" or \"copper\" to choose",
+   "board_mm": [
+    51,
+    30
+   ],
+   "job_mm": [
+    55,
+    34
+   ],
+   "origin": "X0 Y0 = lower-left corner of the PCB; the cutout reaches 2 mm left of and below it",
+   "isolation": {
+    "passes": 2,
+    "rings": 48,
+    "cleared_lines": 236,
+    "length_mm": 2627,
+    "v_bit_mm": 0.207,
+    "depth_mm": 0.2,
+    "v_bit": "30 deg, tip 0.1 mm"
+   },
+   "toolpath_check": {
+    "shorts_at_narrow_groove": 0,
+    "nets_cut_at_wide_groove": 0,
+    "narrow_mm": 0.124,
+    "wide_mm": 0.31
+   },
+   "milled_holes": 0,
+   "cutout": {
+    "end_mill_mm": 2,
+    "depth_mm": 1.7,
+    "passes": 6,
+    "tabs": 4
+   },
+   "board_thickness_mm": 1.6,
+   "est_minutes": 40,
+   "files": [
+    "1_isolation.nc",
+    "2_drill_1.00mm.nc",
+    "3_cutout.nc"
+   ],
+   "previews": [
+    "preview.svg",
+    "result-2d.svg",
+    "result-3d.html"
+   ],
+   "warnings": [
+    "Mirrored: through-hole parts go in from the bare side (soldered on the copper), the 2-pad SMD parts are soldered on the copper side"
+   ],
+   "grid_mm": 0.02,
+   "smd_pad_relief": false
+  }
+ },
+ {
+  "name": "XIAO_AD8310_RX_CNC_1206_wide",
+  "relief": "on",
+  "ms": 5674,
+  "gcode_lines": 5775,
+  "files": [
+   "1_isolation.nc",
+   "2_drill_1.00mm.nc",
+   "3_cutout.nc",
+   "preview.svg",
+   "result-2d.svg",
+   "result-3d.html",
+   "README-cnc.txt"
+  ],
+  "info": {
+   "drills": [
+    {
+     "file": "2_drill_1.00mm.nc",
+     "bit_mm": 1,
+     "holes": 24
+    }
+   ],
+   "layer": "top",
+   "mirrored": true,
+   "parts_side": "bare side (copper on the bottom of the finished board)",
+   "mirror_choice": "auto — pass parts_side \"bare\" or \"copper\" to choose",
+   "board_mm": [
+    51,
+    30
+   ],
+   "job_mm": [
+    55,
+    34
+   ],
+   "origin": "X0 Y0 = lower-left corner of the PCB; the cutout reaches 2 mm left of and below it",
+   "isolation": {
+    "passes": 2,
+    "rings": 69,
+    "cleared_lines": 249,
+    "length_mm": 2712,
+    "v_bit_mm": 0.207,
+    "depth_mm": 0.2,
+    "v_bit": "30 deg, tip 0.1 mm"
+   },
+   "toolpath_check": {
+    "shorts_at_narrow_groove": 0,
+    "nets_cut_at_wide_groove": 0,
+    "narrow_mm": 0.124,
+    "wide_mm": 0.31
+   },
+   "milled_holes": 0,
+   "cutout": {
+    "end_mill_mm": 2,
+    "depth_mm": 1.7,
+    "passes": 6,
+    "tabs": 4
+   },
+   "board_thickness_mm": 1.6,
+   "est_minutes": 41,
+   "files": [
+    "1_isolation.nc",
+    "2_drill_1.00mm.nc",
+    "3_cutout.nc"
+   ],
+   "previews": [
+    "preview.svg",
+    "result-2d.svg",
+    "result-3d.html"
+   ],
+   "warnings": [
+    "Mirrored: through-hole parts go in from the bare side (soldered on the copper), the 2-pad SMD parts are soldered on the copper side"
+   ],
+   "grid_mm": 0.02,
+   "smd_pad_relief": true
+  }
+ },
+ {
+  "name": "XIAO_nRF52840_Carrier_CNC_1206",
+  "relief": "off",
+  "ms": 8061,
+  "gcode_lines": 6065,
+  "files": [
+   "1_isolation.nc",
+   "2_drill_0.80mm.nc",
+   "2_drill_1.00mm.nc",
+   "3_cutout.nc",
+   "preview.svg",
+   "result-2d.svg",
+   "result-3d.html",
+   "README-cnc.txt"
+  ],
+  "info": {
+   "drills": [
+    {
+     "file": "2_drill_0.80mm.nc",
+     "bit_mm": 0.8,
+     "holes": 2
+    },
+    {
+     "file": "2_drill_1.00mm.nc",
+     "bit_mm": 1,
+     "holes": 15
+    }
+   ],
+   "layer": "top",
+   "mirrored": false,
+   "parts_side": "copper side",
+   "mirror_choice": "auto — pass parts_side \"bare\" or \"copper\" to choose",
+   "board_mm": [
+    52,
+    32
+   ],
+   "job_mm": [
+    56,
+    36
+   ],
+   "origin": "X0 Y0 = lower-left corner of the PCB; the cutout reaches 2 mm left of and below it",
+   "isolation": {
+    "passes": 2,
+    "rings": 61,
+    "cleared_lines": 415,
+    "length_mm": 4138,
+    "v_bit_mm": 0.207,
+    "depth_mm": 0.2,
+    "v_bit": "30 deg, tip 0.1 mm"
+   },
+   "toolpath_check": {
+    "shorts_at_narrow_groove": 0,
+    "nets_cut_at_wide_groove": 0,
+    "narrow_mm": 0.124,
+    "wide_mm": 0.31
+   },
+   "milled_holes": 0,
+   "cutout": {
+    "end_mill_mm": 2,
+    "depth_mm": 1.7,
+    "passes": 6,
+    "tabs": 4
+   },
+   "board_thickness_mm": 1.6,
+   "est_minutes": 55,
+   "files": [
+    "1_isolation.nc",
+    "2_drill_0.80mm.nc",
+    "2_drill_1.00mm.nc",
+    "3_cutout.nc"
+   ],
+   "previews": [
+    "preview.svg",
+    "result-2d.svg",
+    "result-3d.html"
+   ],
+   "warnings": [
+    "Not mirrored: U1 would have reversed pins on the copper side, so the through-hole parts sit on the copper side too (leads not through the board)",
+    "Design rules are not \"CNC milling - 3018\" (set_design_rules {preset: \"cnc3018\"}, or Rules in the PCB tab): tracks, gaps and rings may be too fine to mill safely"
+   ],
+   "grid_mm": 0.02,
+   "smd_pad_relief": false
+  }
+ },
+ {
+  "name": "XIAO_nRF52840_Carrier_CNC_1206",
+  "relief": "on",
+  "ms": 7914,
+  "gcode_lines": 6075,
+  "files": [
+   "1_isolation.nc",
+   "2_drill_0.80mm.nc",
+   "2_drill_1.00mm.nc",
+   "3_cutout.nc",
+   "preview.svg",
+   "result-2d.svg",
+   "result-3d.html",
+   "README-cnc.txt"
+  ],
+  "info": {
+   "drills": [
+    {
+     "file": "2_drill_0.80mm.nc",
+     "bit_mm": 0.8,
+     "holes": 2
+    },
+    {
+     "file": "2_drill_1.00mm.nc",
+     "bit_mm": 1,
+     "holes": 15
+    }
+   ],
+   "layer": "top",
+   "mirrored": false,
+   "parts_side": "copper side",
+   "mirror_choice": "auto — pass parts_side \"bare\" or \"copper\" to choose",
+   "board_mm": [
+    52,
+    32
+   ],
+   "job_mm": [
+    56,
+    36
+   ],
+   "origin": "X0 Y0 = lower-left corner of the PCB; the cutout reaches 2 mm left of and below it",
+   "isolation": {
+    "passes": 2,
+    "rings": 61,
+    "cleared_lines": 415,
+    "length_mm": 4142,
+    "v_bit_mm": 0.207,
+    "depth_mm": 0.2,
+    "v_bit": "30 deg, tip 0.1 mm"
+   },
+   "toolpath_check": {
+    "shorts_at_narrow_groove": 0,
+    "nets_cut_at_wide_groove": 0,
+    "narrow_mm": 0.124,
+    "wide_mm": 0.31
+   },
+   "milled_holes": 0,
+   "cutout": {
+    "end_mill_mm": 2,
+    "depth_mm": 1.7,
+    "passes": 6,
+    "tabs": 4
+   },
+   "board_thickness_mm": 1.6,
+   "est_minutes": 55,
+   "files": [
+    "1_isolation.nc",
+    "2_drill_0.80mm.nc",
+    "2_drill_1.00mm.nc",
+    "3_cutout.nc"
+   ],
+   "previews": [
+    "preview.svg",
+    "result-2d.svg",
+    "result-3d.html"
+   ],
+   "warnings": [
+    "Not mirrored: U1 would have reversed pins on the copper side, so the through-hole parts sit on the copper side too (leads not through the board)",
+    "Design rules are not \"CNC milling - 3018\" (set_design_rules {preset: \"cnc3018\"}, or Rules in the PCB tab): tracks, gaps and rings may be too fine to mill safely"
+   ],
+   "grid_mm": 0.02,
+   "smd_pad_relief": true
+  }
+ }
+]

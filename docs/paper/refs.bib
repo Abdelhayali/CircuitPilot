@@ -1,0 +1,411 @@
+% CircuitPilot paper -- verified references (checked Oct. 31, 2026)
+% Verification sources: Crossref API (api.crossref.org), arXiv API (export.arxiv.org), dblp, publisher/project pages.
+
+% ---------------- Routing / shortest paths ----------------
+@article{lee1961,
+  author  = {C. Y. Lee},
+  title   = {An Algorithm for Path Connections and Its Applications},
+  journal = {IRE Transactions on Electronic Computers},
+  volume  = {EC-10},
+  number  = {3},
+  pages   = {346--365},
+  year    = {1961},
+  doi     = {10.1109/TEC.1961.5219222}
+}
+
+@article{dijkstra1959,
+  author  = {E. W. Dijkstra},
+  title   = {A Note on Two Problems in Connexion with Graphs},
+  journal = {Numerische Mathematik},
+  volume  = {1},
+  number  = {1},
+  pages   = {269--271},
+  year    = {1959},
+  doi     = {10.1007/BF01386390}
+}
+
+@article{hart1968,
+  author  = {P. E. Hart and N. J. Nilsson and B. Raphael},
+  title   = {A Formal Basis for the Heuristic Determination of Minimum Cost Paths},
+  journal = {IEEE Transactions on Systems Science and Cybernetics},
+  volume  = {4},
+  number  = {2},
+  pages   = {100--107},
+  year    = {1968},
+  doi     = {10.1109/TSSC.1968.300136}
+}
+
+@article{hadlock1977,
+  author  = {F. O. Hadlock},
+  title   = {A Shortest Path Algorithm for Grid Graphs},
+  journal = {Networks},
+  volume  = {7},
+  number  = {4},
+  pages   = {323--334},
+  year    = {1977},
+  doi     = {10.1002/net.3230070404}
+}
+
+@inproceedings{hightower1969,
+  author    = {D. W. Hightower},
+  title     = {A Solution to Line-Routing Problems on the Continuous Plane},
+  booktitle = {Proc. 6th Annual Design Automation Conference (DAC)},
+  pages     = {1--24},
+  year      = {1969},
+  doi       = {10.1145/800260.809014}
+}
+
+@article{nair1987,
+  author  = {R. Nair},
+  title   = {A Simple Yet Effective Technique for Global Wiring},
+  journal = {IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems},
+  volume  = {6},
+  number  = {2},
+  pages   = {165--172},
+  year    = {1987},
+  doi     = {10.1109/TCAD.1987.1270260}
+}
+
+@inproceedings{mcmurchie1995,
+  author    = {L. McMurchie and C. Ebeling},
+  title     = {{PathFinder}: A Negotiation-Based Performance-Driven Router for {FPGAs}},
+  booktitle = {Proc. 3rd ACM International Symposium on Field-Programmable Gate Arrays (FPGA)},
+  pages     = {111--117},
+  year      = {1995},
+  doi       = {10.1145/201310.201328}
+}
+
+@inproceedings{dees1982,
+  author    = {W. A. Dees and P. G. Karger},
+  title     = {Automated Rip-Up and Reroute Techniques},
+  booktitle = {Proc. 19th Design Automation Conference (DAC)},
+  pages     = {432--439},
+  year      = {1982},
+  doi       = {10.1109/DAC.1982.1585535}
+}
+
+@book{kahng2011,
+  author    = {A. B. Kahng and J. Lienig and I. L. Markov and J. Hu},
+  title     = {{VLSI} Physical Design: From Graph Partitioning to Timing Closure},
+  publisher = {Springer},
+  address   = {Dordrecht, The Netherlands},
+  year      = {2011},
+  doi       = {10.1007/978-90-481-9591-6}
+}
+
+% ---------------- ML for placement / routing ----------------
+@article{mirhoseini2021,
+  author  = {A. Mirhoseini and A. Goldie and M. Yazgan and J. W. Jiang and E. Songhori and S. Wang and Y.-J. Lee and E. Johnson and O. Pathak and A. Nova and J. Pak and A. Tong and K. Srinivasa and W. Hang and others},
+  title   = {A Graph Placement Methodology for Fast Chip Design},
+  journal = {Nature},
+  volume  = {594},
+  number  = {7862},
+  pages   = {207--212},
+  year    = {2021},
+  doi     = {10.1038/s41586-021-03544-w}
+}
+
+@inproceedings{vassallo2024,
+  author    = {L. Vassallo and J. Bajada},
+  title     = {Learning Circuit Placement Techniques Through Reinforcement Learning with Adaptive Rewards},
+  booktitle = {Proc. Design, Automation \& Test in Europe Conference \& Exhibition (DATE)},
+  pages     = {1--6},
+  year      = {2024},
+  doi       = {10.23919/DATE58400.2024.10546526}
+}
+
+@inproceedings{he2022,
+  author    = {Y. He and H. Li and T. Jin and F. S. Bao},
+  title     = {Circuit Routing Using {Monte Carlo} Tree Search and Deep Reinforcement Learning},
+  booktitle = {Proc. International Symposium on VLSI Design, Automation and Test (VLSI-DAT)},
+  pages     = {1--5},
+  year      = {2022},
+  doi       = {10.1109/VLSI-DAT54769.2022.9768074}
+}
+
+% ---------------- LLM agents / tool use ----------------
+@inproceedings{yao2023react,
+  author    = {S. Yao and J. Zhao and D. Yu and N. Du and I. Shafran and K. Narasimhan and Y. Cao},
+  title     = {{ReAct}: Synergizing Reasoning and Acting in Language Models},
+  booktitle = {Proc. International Conference on Learning Representations (ICLR)},
+  year      = {2023},
+  note      = {arXiv:2210.03629}
+}
+
+@inproceedings{schick2023toolformer,
+  author    = {T. Schick and J. Dwivedi-Yu and R. Dess\`{\i} and R. Raileanu and M. Lomeli and E. Hambro and L. Zettlemoyer and N. Cancedda and T. Scialom},
+  title     = {Toolformer: Language Models Can Teach Themselves to Use Tools},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {36},
+  pages     = {68539--68551},
+  year      = {2023},
+  doi       = {10.52202/075280-2997}
+}
+
+@misc{gemini2023,
+  author       = {{Gemini Team}},
+  title        = {Gemini: A Family of Highly Capable Multimodal Models},
+  howpublished = {arXiv preprint arXiv:2312.11805},
+  year         = {2023},
+  url          = {https://arxiv.org/abs/2312.11805}
+}
+
+@misc{anthropic2024mcp,
+  author       = {{Anthropic}},
+  title        = {Introducing the {Model Context Protocol}},
+  year         = {2024},
+  month        = nov,
+  howpublished = {Anthropic News, Nov. 25, 2024},
+  url          = {https://www.anthropic.com/news/model-context-protocol},
+  note         = {Accessed: Oct. 2026}
+}
+
+@misc{mcpspec,
+  author       = {{Model Context Protocol}},
+  title        = {Model Context Protocol Specification, Revision 2026-07-28},
+  year         = {2026},
+  url          = {https://modelcontextprotocol.io/specification/latest},
+  note         = {Accessed: Oct. 2026}
+}
+
+@article{hou2026mcp,
+  author  = {X. Hou and Y. Zhao and S. Wang and H. Wang},
+  title   = {{Model Context Protocol (MCP)}: Landscape, Security Threats, and Future Research Directions},
+  journal = {ACM Transactions on Software Engineering and Methodology},
+  volume  = {35},
+  number  = {10},
+  pages   = {1--37},
+  year    = {2026},
+  doi     = {10.1145/3796519}
+}
+
+% ---------------- LLMs for EDA / hardware ----------------
+@misc{chang2023chipgpt,
+  author       = {K. Chang and Y. Wang and H. Ren and M. Wang and S. Liang and Y. Han and H. Li and X. Li},
+  title        = {{ChipGPT}: How Far Are We from Natural Language Hardware Design},
+  howpublished = {arXiv preprint arXiv:2305.14019},
+  year         = {2023},
+  url          = {https://arxiv.org/abs/2305.14019}
+}
+
+@article{thakur2024verigen,
+  author  = {S. Thakur and B. Ahmad and H. Pearce and B. Tan and B. Dolan-Gavitt and R. Karri and S. Garg},
+  title   = {{VeriGen}: A Large Language Model for {Verilog} Code Generation},
+  journal = {ACM Transactions on Design Automation of Electronic Systems},
+  volume  = {29},
+  number  = {3},
+  pages   = {1--31},
+  year    = {2024},
+  doi     = {10.1145/3643681}
+}
+
+@misc{liu2023chipnemo,
+  author       = {M. Liu and T.-D. Ene and R. Kirby and C. Cheng and N. Pinckney and R. Liang and others},
+  title        = {{ChipNeMo}: Domain-Adapted {LLMs} for Chip Design},
+  howpublished = {arXiv preprint arXiv:2311.00176},
+  year         = {2023},
+  url          = {https://arxiv.org/abs/2311.00176}
+}
+
+@inproceedings{blocklove2023chipchat,
+  author    = {J. Blocklove and S. Garg and R. Karri and H. Pearce},
+  title     = {{Chip-Chat}: Challenges and Opportunities in Conversational Hardware Design},
+  booktitle = {Proc. ACM/IEEE 5th Workshop on Machine Learning for CAD (MLCAD)},
+  pages     = {1--6},
+  year      = {2023},
+  doi       = {10.1109/MLCAD58807.2023.10299874}
+}
+
+@misc{zhong2023llm4eda,
+  author       = {R. Zhong and X. Du and S. Kai and Z. Tang and S. Xu and H.-L. Zhen and J. Hao and Q. Xu and M. Yuan and J. Yan},
+  title        = {{LLM4EDA}: Emerging Progress in Large Language Models for Electronic Design Automation},
+  howpublished = {arXiv preprint arXiv:2401.12224},
+  year         = {2023},
+  url          = {https://arxiv.org/abs/2401.12224}
+}
+
+@article{pan2025survey,
+  author  = {J. Pan and G. Zhou and C.-C. Chang and I. Jacobson and J. Hu and Y. Chen},
+  title   = {A Survey of Research in Large Language Models for Electronic Design Automation},
+  journal = {ACM Transactions on Design Automation of Electronic Systems},
+  volume  = {30},
+  number  = {3},
+  pages   = {1--21},
+  year    = {2025},
+  doi     = {10.1145/3715324}
+}
+
+@article{lai2025analogcoder,
+  author  = {Y. Lai and S. Lee and G. Chen and S. Poddar and M. Hu and D. Z. Pan and P. Luo},
+  title   = {{AnalogCoder}: Analog Circuit Design via Training-Free Code Generation},
+  journal = {Proceedings of the AAAI Conference on Artificial Intelligence},
+  volume  = {39},
+  number  = {1},
+  pages   = {379--387},
+  year    = {2025},
+  doi     = {10.1609/aaai.v39i1.32016}
+}
+
+% ---------------- LLMs for PCB / schematics ----------------
+@inproceedings{matsuo2025schemato,
+  author    = {R. Matsuo and S. Uhlich and A. Venkitaraman and A. Bonetti and C.-Y. Hsieh and A. Momeni and L. Mauch and A. Capone and E. Ohbuchi and L. Servadei},
+  title     = {Schemato -- An {LLM} for Netlist-to-Schematic Conversion},
+  booktitle = {Proc. ACM/IEEE 7th Symposium on Machine Learning for CAD (MLCAD)},
+  pages     = {1--7},
+  year      = {2025},
+  doi       = {10.1109/MLCAD65511.2025.11189059}
+}
+
+@misc{luo2026schgen,
+  author       = {Q. Luo and R. Ma and X. Zhang and L. Qiu},
+  title        = {{SchGen}: {PCB} Schematic Generation with Semantic-Grounded Code Representations},
+  howpublished = {arXiv preprint arXiv:2605.30345},
+  year         = {2026},
+  url          = {https://arxiv.org/abs/2605.30345}
+}
+
+@misc{srinivasan2026pcbqa,
+  author       = {S. Srinivasan and B. Tan and B. Turnbull and H. Pearce},
+  title        = {{PCB-QA}: Evaluating {LLMs} over the First Printed Circuit Board Design Question-Answer Dataset},
+  howpublished = {arXiv preprint arXiv:2606.23704},
+  year         = {2026},
+  url          = {https://arxiv.org/abs/2606.23704}
+}
+
+@misc{song2026pcbworld,
+  author       = {H. Song and J. Park and W.-S. Choi and S. Bae and H.-S. Jeong and Y. Park and S. Lee},
+  title        = {{PCBWorld}: A Benchmark Environment for Engine-Grounded {PCB} Design Automation},
+  howpublished = {arXiv preprint arXiv:2607.05915},
+  year         = {2026},
+  url          = {https://arxiv.org/abs/2607.05915}
+}
+
+@misc{lu2026omnilayout,
+  author       = {T. Lu and K. Lin and M. Wang and H. Ye and R. Liu and Y. Tian and others},
+  title        = {{OmniLayout}: A Schematic-Coupled Multimodal Benchmark for Constraint-Aware Geometric Reasoning in {PCB} Layout},
+  howpublished = {arXiv preprint arXiv:2607.03261},
+  year         = {2026},
+  url          = {https://arxiv.org/abs/2607.03261}
+}
+
+% ---------------- Schematic drawing / graph drawing ----------------
+@inproceedings{arya1985,
+  author    = {A. Arya and A. Kumar and V. V. Swaminathan and A. Misra},
+  title     = {Automatic Generation of Digital System Schematic Diagrams},
+  booktitle = {Proc. 22nd ACM/IEEE Design Automation Conference (DAC)},
+  pages     = {388--395},
+  year      = {1985},
+  doi       = {10.1145/317825.317917}
+}
+
+@article{sugiyama1981,
+  author  = {K. Sugiyama and S. Tagawa and M. Toda},
+  title   = {Methods for Visual Understanding of Hierarchical System Structures},
+  journal = {IEEE Transactions on Systems, Man, and Cybernetics},
+  volume  = {SMC-11},
+  number  = {2},
+  pages   = {109--125},
+  year    = {1981},
+  doi     = {10.1109/TSMC.1981.4308636}
+}
+
+@article{tamassia1987,
+  author  = {R. Tamassia},
+  title   = {On Embedding a Graph in the Grid with the Minimum Number of Bends},
+  journal = {SIAM Journal on Computing},
+  volume  = {16},
+  number  = {3},
+  pages   = {421--444},
+  year    = {1987},
+  doi     = {10.1137/0216030}
+}
+
+% ---------------- Geometry ----------------
+@article{felzenszwalb2012,
+  author  = {P. F. Felzenszwalb and D. P. Huttenlocher},
+  title   = {Distance Transforms of Sampled Functions},
+  journal = {Theory of Computing},
+  volume  = {8},
+  pages   = {415--428},
+  year    = {2012},
+  doi     = {10.4086/toc.2012.v008a019}
+}
+
+@inproceedings{lorensen1987,
+  author    = {W. E. Lorensen and H. E. Cline},
+  title     = {Marching Cubes: A High Resolution {3D} Surface Construction Algorithm},
+  booktitle = {Proc. 14th Annual Conference on Computer Graphics and Interactive Techniques (SIGGRAPH)},
+  pages     = {163--169},
+  year      = {1987},
+  doi       = {10.1145/37401.37422}
+}
+
+% ---------------- PCB fabrication / milling ----------------
+@inproceedings{sterian2001,
+  author    = {A. Sterian},
+  title     = {A Closer Look at Printed Circuit Board Milling},
+  booktitle = {Proc. ASEE Annual Conference},
+  pages     = {6.12.1--6.12.8},
+  year      = {2001},
+  doi       = {10.18260/1-2--8999}
+}
+
+% ---------------- Standards ----------------
+@misc{gerber2026,
+  author       = {{Ucamco}},
+  title        = {The {Gerber} Layer Format Specification, Revision 2026.05},
+  year         = {2026},
+  url          = {https://www.ucamco.com/en/gerber/downloads},
+  note         = {Accessed: Oct. 2026}
+}
+
+@misc{ipc2221b,
+  author       = {{IPC}},
+  title        = {{IPC-2221B}: Generic Standard on Printed Board Design},
+  year         = {2012},
+  month        = nov,
+  howpublished = {IPC, Bannockburn, IL, USA},
+  note         = {Superseded by IPC-2221C (Dec. 2023)}
+}
+
+% ---------------- Software ----------------
+@misc{kicad,
+  author       = {{KiCad Developers}},
+  title        = {{KiCad} {EDA}: Schematic Capture \& {PCB} Design Software},
+  url          = {https://www.kicad.org/},
+  note         = {Accessed: Oct. 2026}
+}
+
+@misc{freerouting,
+  author       = {{Freerouting contributors}},
+  title        = {Freerouting: Advanced {PCB} Auto-Router},
+  url          = {https://github.com/freerouting/freerouting},
+  note         = {Accessed: Oct. 2026}
+}
+
+@misc{flatcam,
+  title        = {{FlatCAM}: {PCB} Prototyping {CAD/CAM}},
+  url          = {https://flatcam.org/},
+  note         = {Accessed: Oct. 2026}
+}
+
+@misc{pcb2gcode,
+  author       = {{pcb2gcode contributors}},
+  title        = {pcb2gcode: Command-Line Tool for Isolation, Routing and Drilling of {PCBs}},
+  url          = {https://github.com/pcb2gcode/pcb2gcode},
+  note         = {Accessed: Oct. 2026}
+}
+
+@misc{threejs,
+  author       = {{three.js authors}},
+  title        = {three.js: {JavaScript} {3D} Library},
+  url          = {https://threejs.org/},
+  note         = {Accessed: Oct. 2026}
+}
+
+@misc{manifold,
+  author       = {E. Lalish and others},
+  title        = {Manifold: Geometry Library for Topological Robustness},
+  url          = {https://github.com/elalish/manifold},
+  note         = {Accessed: Oct. 2026}
+}

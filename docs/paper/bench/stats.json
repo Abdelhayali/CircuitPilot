@@ -1,0 +1,11 @@
+{
+ "designs": 15,
+ "full_ok": 11,
+ "nr_ok": 7,
+ "nets_full": 455,
+ "nets_nr": 444,
+ "nets_all": 468,
+ "med_s": 25.23,
+ "max_s": 113.37,
+ "parts": 608
+}

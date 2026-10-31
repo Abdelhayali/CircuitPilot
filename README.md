@@ -430,6 +430,26 @@ Options: `--port 5173`, `--server-only` (no window), `--lan --password SECRET` (
 - **Projects → Import → EasyEDA Pro project** moves a whole EasyEDA Pro design here: in EasyEDA Pro use *File → Save As (Local)* / *File → Export → Project* to get a `.epro` or `.epro2` file (a `.zip` works too) and import it. You get the schematic (every sheet, parts placed where they were, real pin names, values, LCSC numbers) and the PCB (board outline, part placement on top and bottom, tracks, arcs, vias, copper pours). If the project holds several boards you choose one. Nets come from the PCB's netlist, or from the schematic wires, net labels and power ports when there is no PCB. CircuitPilot boards have 2 copper layers: tracks on inner layers of a 4+ layer board are skipped (the import says how many), so those nets show as unrouted; run the router or re-route them. Parts rotated at odd angles (e.g. 45°) keep their exact pad positions.
 - **Projects → Import → EasyEDA Standard PCB** opens an EasyEDA Standard PCB (*File → Export → EasyEDA Source* in EasyEDA) as a new project: footprints become library parts (LCSC numbers kept), with placement (top/bottom, rotation), nets, tracks, vias, holes, copper areas and the board outline; a schematic is generated from the nets.
 
+## License
+
+CircuitPilot is **source-available** under the [PolyForm Strict License 1.0.0](LICENSE), © 2026 Abdelhay Ali. The code is public so you can see how it works, but the licence allows **use only**:
+
+| | Allowed? |
+|---|---|
+| Use the website, the Windows app or the code for personal projects, hobby, study, teaching and research | ✅ Yes |
+| Use it at a school, university, public research body, charity or government institution | ✅ Yes |
+| Use it in or for a business, or to earn money (commercial use) | ❌ No, unless you have a commercial licence |
+| Change the code, or make new software based on it | ❌ No |
+| Share or publish copies (changed or not), or offer it as your own service | ❌ No |
+
+**Commercial licence**: for use in a company, for products you sell or for any other commercial purpose, write to abdelhay@eng.aun.edu.eg.
+
+Versions up to and including v2026.10.30.6 were published under the Apache License 2.0 and stay under it; v2026.10.30.7 and later are under PolyForm Strict. Third-party components keep their own licences, see [NOTICE](NOTICE) and below.
+
+If CircuitPilot helps your project, please credit it, for example:
+
+> Designed with [CircuitPilot](https://pcbgo.site) by Abdelhay Ali
+
 ## Paper and how to cite
 
 The technical paper describes the architecture, the router, CNC milling, the schematic organizer and a benchmark on 15 real boards:
@@ -452,26 +472,6 @@ If you use CircuitPilot or the paper in your work, please cite:
 ```
 
 GitHub's **Cite this repository** button (right side of the repository page) gives the same entry from [`CITATION.cff`](CITATION.cff).
-
-## License
-
-CircuitPilot is **source-available** under the [PolyForm Strict License 1.0.0](LICENSE), © 2026 Abdelhay Ali. The code is public so you can see how it works, but the licence allows **use only**:
-
-| | Allowed? |
-|---|---|
-| Use the website, the Windows app or the code for personal projects, hobby, study, teaching and research | ✅ Yes |
-| Use it at a school, university, public research body, charity or government institution | ✅ Yes |
-| Use it in or for a business, or to earn money (commercial use) | ❌ No, unless you have a commercial licence |
-| Change the code, or make new software based on it | ❌ No |
-| Share or publish copies (changed or not), or offer it as your own service | ❌ No |
-
-**Commercial licence**: for use in a company, for products you sell or for any other commercial purpose, write to abdelhay@eng.aun.edu.eg.
-
-Versions up to and including v2026.10.30.6 were published under the Apache License 2.0 and stay under it; v2026.10.30.7 and later are under PolyForm Strict. Third-party components keep their own licences, see [NOTICE](NOTICE) and below.
-
-If CircuitPilot helps your project, please credit it, for example:
-
-> Designed with [CircuitPilot](https://pcbgo.site) by Abdelhay Ali
 
 ## Data sources & licenses
 

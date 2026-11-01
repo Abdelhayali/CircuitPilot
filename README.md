@@ -432,19 +432,9 @@ Options: `--port 5173`, `--server-only` (no window), `--lan --password SECRET` (
 
 ## License
 
-CircuitPilot is **source-available** under the [PolyForm Strict License 1.0.0](LICENSE), © 2026 Abdelhay Ali. The code is public so you can see how it works, but the licence allows **use only**:
-
-| | Allowed? |
-|---|---|
-| Use the website, the Windows app or the code for personal projects, hobby, study, teaching and research | ✅ Yes |
-| Use it at a school, university, public research body, charity or government institution | ✅ Yes |
-| Use it in or for a business, or to earn money (commercial use) | ❌ No, unless you have a commercial licence |
-| Change the code, or make new software based on it | ❌ No |
-| Share or publish copies (changed or not), or offer it as your own service | ❌ No |
+CircuitPilot is **source-available** under the [PolyForm Strict License 1.0.0](LICENSE), © 2026 Abdelhay Ali. The code is public so you can see how it works, but the licence allows **use only**.
 
 **Commercial licence**: for use in a company, for products you sell or for any other commercial purpose, write to abdelhay@eng.aun.edu.eg.
-
-Versions up to and including v2026.10.30.6 were published under the Apache License 2.0 and stay under it; v2026.10.30.7 and later are under PolyForm Strict. Third-party components keep their own licences, see [NOTICE](NOTICE) and below.
 
 If CircuitPilot helps your project, please credit it, for example:
 

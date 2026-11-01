@@ -355,6 +355,8 @@ Live feedback: the coordinate bar shows X/Y, layer, width, net, and warns when t
 
 Make the board at home on a desktop CNC such as the **CNC 3018 Pro** (GRBL): CircuitPilot writes the G-code itself, with no FlatCAM or Gerber conversion step.
 
+![From a text prompt to CNC G-code](docs/media/text-to-cnc.gif)
+
 ![CNC milling dialog](docs/media/cnc-dialog.jpg)
 
 | Toolpaths | Result 2D | Result 3D |

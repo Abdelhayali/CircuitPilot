@@ -351,6 +351,25 @@ Live feedback: the coordinate bar shows X/Y, layer, width, net, and warns when t
 | CNC milling (3018 Pro …) | **CNC ⤓** makes GRBL G-code to mill the board yourself on a desktop CNC: `1_isolation.nc` (V-bit rings around the copper — pours, clearances and keep-outs exactly as in the Gerbers), `2_drill_<size>.nc` (one file per bit), `3_cutout.nc` (holes bigger than the end mill, then the outline in steps with holding tabs), `preview.svg` (toolpaths), `result-2d.svg` / `result-3d.html` (the finished board as milled, flat and in 3D — also the **Result 2D / Result 3D** tabs of the dialog, to check it before you start) and a README with the bit order and set-up. SMD pads on the GND pour get a milled outline with 4 spokes (rule `smdPadRelief`, on in the CNC and home presets; dialog: *SMD pads on pour*), so each pad is a visible solder spot. Settings: V-bit angle / tip, depth (default 0.2 mm; the groove width follows), passes, the drill bits you have (default 0.8 and 1.0 mm: each hole gets the smallest bit that fits, bigger holes are drilled then widened in a small circle), feeds, end mill, step down, tabs, board thickness, **Parts go on**: bare side (through-hole parts from the side without copper → milled mirrored) or copper side (not mirrored); the AI passes `parts_side` and asks you when it does not know and X0 Y0 (default the PCB's lower-left corner, or the job corner); Z0 = copper surface. No pour and no copper under SMD parts (the copper between the pads of a 1206 and in keep-outs such as the antenna end is milled away). It checks its own toolpaths (no shorts with a narrower groove, no net cut in two with a wider one) and warns about vias (wire links). Design for it with **⚙ Rules → CNC milling — 3018** (`set_design_rules {preset: "cnc3018"}`): 1 layer, 0.9 mm tracks (power 1.0), 0.4 mm gaps, 0.6 mm pour gap, 1.5 mm from the edge, holes ≥ 0.8 mm, rings ≥ 0.35 mm; DRC then refuses vias and tracks on both layers and warns about pin pitch under 1.2 mm and pads smaller than 0805. On one layer, auto-size makes the board 25 % bigger when the first layout does not route. Claude / MCP: `export_cnc_gcode {out_dir}`. See [docs/CNC_MILLING.md](docs/CNC_MILLING.md). |
 | Export everything | **Export ▾ → Everything (.zip)** puts every file of the project in one zip: project file (.circuit.json), Gerbers + drill (also zipped for the fab), JLCPCB BOM + pick-and-place (CPL), BOM, netlist, schematic / PCB SVG, enclosure STL + OpenSCAD, EasyEDA schematic + PCB, PCB drawing PDF, datasheet PDF and images (schematic sheets, 2D PCB, 3D angled / top / bottom, enclosure). Claude Desktop / Claude Code: `export_project` writes the same files into `Documents/CircuitPilot exports/<project>/` (or `out_dir`), with a README listing them. `include` picks only some, e.g. `["gerbers", "jlcpcb"]`. PDFs and images are drawn by the CircuitPilot window, which is opened on the project if needed. |
 
+## Mill your board on a desktop CNC
+
+Make the board at home on a desktop CNC such as the **CNC 3018 Pro** (GRBL): CircuitPilot writes the G-code itself, with no FlatCAM or Gerber conversion step.
+
+![CNC milling dialog](docs/media/cnc-dialog.jpg)
+
+| Toolpaths | Result 2D | Result 3D |
+|---|---|---|
+| ![Toolpaths: isolation (blue), cutout (red), tabs (yellow), X0 Y0 (green)](docs/media/cnc-toolpaths.png) | ![The board as it comes off the machine](docs/media/cnc-result-2d.jpg) | ![The milled board in 3D](docs/media/cnc-result-3d.jpg) |
+| Isolation rings (blue), cutout (red), holding tabs (yellow), X0 Y0 (green) | The copper side as milled, with part names | The same board in 3D, to check before you start |
+
+1. **Design for the machine**: ⚙ **Rules → CNC milling — 3018** (1 layer, 0.9 mm tracks, 0.4 mm gaps, holes ≥ 0.8 mm). DRC then refuses vias and warns about pins and pads too small to mill.
+2. **Generate and route** the PCB as usual.
+3. **CNC ⤓** in the PCB tab: set your V-bit (angle, tip, depth), your drill bits, the end mill and where the parts go (*bare side*: through-hole parts from the side without copper, milled mirrored; *copper side*: not mirrored). Check the **Toolpaths / Result 2D / Result 3D** tabs.
+4. **Download G-code ⤓** gives a zip: `1_isolation.nc` (V-bit), `2_drill_<size>.nc` (one file per bit), `3_cutout.nc` (end mill, with tabs) and a README with the bit order.
+5. On the machine: **X0 Y0 = lower-left corner of the PCB**, **Z0 = copper surface**; run the files in order, changing the bit between them.
+
+CircuitPilot checks its own toolpaths before you mill (no short with a narrower groove, no net cut in two with a wider one). From Claude or any MCP client: `export_cnc_gcode {out_dir}`. Every setting is described in [docs/CNC_MILLING.md](docs/CNC_MILLING.md).
+
 ## Enclosure (3D print)
 
 The **Enclosure** tab builds a printable case around the current PCB and previews it in 3D (drag to orbit, right-drag to pan, wheel to zoom; *Explode*, *X-ray*, *Lid*, *PCB* and *Section* toggles — Section cuts the model in half, cut walls in red, to check wall thickness, the lid lip and how the board and battery sit).

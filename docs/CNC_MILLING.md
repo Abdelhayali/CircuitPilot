@@ -14,7 +14,7 @@ CircuitPilot writes the G-code itself: no FlatCAM, no Gerber conversion step.
 | `3_cutout.nc` | flat end mill | Holes ≥ end mill + 0.1 mm milled as circles (G2), then the outline at `cut_dia/2` outside the board, `cut_step` per pass to `−(thickness + 0.1)`, with tabs |
 | `preview.svg` | | Toolpaths: copper sheet, isolation (blue), cutout (red), tabs (yellow), holes, X0 Y0 (green) |
 | `result-2d.svg` | | The finished board as it comes off the machine (copper side up, as milled): copper, grooves, holes, part names |
-| `result-3d.html` | | The same board in 3D (open in a browser: drag to turn, Copper side / Angled / Other side). In the app: **Result 2D** / **Result 3D** tabs in the CNC dialog |
+| `result-3d.html` | | The same board in 3D with the parts (open in a browser: drag to turn, Copper side / Angled / Other side, **Parts** shows or hides them: through-hole parts on the bare side with their leads through the board when mirrored, SMD parts on the copper). In the app: **Result 2D** / **Result 3D** tabs in the CNC dialog |
 | `README-cnc.txt` | | Bit order, job size, set-up steps, warnings |
 
 Every file: `G21 G90 G94`, `G0 Z5`, `M3 S1000`, `G4 P3` … `G0 Z5`, `M5`, `G0 X0 Y0`, `M2`.

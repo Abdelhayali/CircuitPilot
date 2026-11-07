@@ -173,10 +173,10 @@ const Cnc = (() => {
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${ascii(v.name)} - milled board 3D</title>
 <style>html,body{margin:0;height:100%;background:#1b1d22;color:#ddd;font:12px sans-serif;overflow:hidden}#bar{position:absolute;left:8px;top:8px;display:flex;gap:6px;flex-wrap:wrap}
-#bar button{background:#2b2e36;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 9px;cursor:pointer}#bar button:hover{background:#3a3e48}
+#bar button{background:#2b2e36;color:#ddd;border:1px solid #444;border-radius:6px;padding:4px 9px;cursor:pointer}#bar button:hover{background:#3a3e48}#bar button[data-p]{margin-left:8px}#bar button[data-p].on{background:#2563eb;border-color:#2563eb;color:#fff}
 #tip{position:absolute;left:8px;bottom:8px;opacity:.7}canvas{position:fixed;inset:0;width:100%!important;height:100%!important;display:block}#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}</style></head>
-<body><div id="msg">Loading 3D…</div><div id="bar"><button data-v="top">Copper side</button><button data-v="iso">Angled</button><button data-v="bottom">Other side</button></div>
-<div id="tip">${v.mirrored ? 'Copper side as milled (mirrored: the parts go in from the other side). ' : 'Copper side as milled. '}Drag to turn, wheel to zoom.</div>
+<body><div id="msg">Loading 3D…</div><div id="bar"><button data-v="top">Copper side</button><button data-v="iso">Angled</button><button data-v="bottom">Other side</button><button data-p class="on" title="Show or hide the parts">Parts</button></div>
+<div id="tip">${v.mirrored ? 'Copper side as milled (mirrored: the parts go in from the other side). ' : 'Copper side as milled. '}Parts shows or hides the parts. Drag to turn, wheel to zoom.</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const V = ${data};
@@ -199,6 +199,38 @@ const V = ${data};
   const body = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: V.thick, bevelEnabled: false, curveSegments: 24 }), fr4); body.position.z = -V.thick;
   const top = new THREE.Mesh(new THREE.ShapeGeometry(sh, 24), new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: 0.6, roughness: 0.45, metalness: 0.35 })); top.position.z = 0.01;
   const g = new THREE.Group(); g.add(body, top); S.add(g);
+  // the parts as simple shapes: copper side from z = 0 up, bare side from z = -thick down
+  const parts = new THREE.Group(); g.add(parts);
+  const mat = (color, metal) => new THREE.MeshStandardMaterial({ color, roughness: metal ? 0.35 : 0.6, metalness: metal ? 0.3 : 0.05, emissive: metal ? 0x202020 : 0 });
+  for (const p of V.parts || []) {
+    const s = p.side === 'bare' ? -1 : 1, z0 = p.side === 'bare' ? -V.thick : 0, [x0, y0, x1, y1] = p.box, w = x1 - x0, d = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    let h = Math.max(0.3, p.h);
+    const box = (sx, sy, a, b, col, metal, x = cx, y = cy) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, b - a), mat(col, metal)); m.position.set(x, y, z0 + s * (a + b) / 2); parts.add(m); };
+    const cyl = (r, a, b, col, metal, x = cx, y = cy) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, b - a, 20), mat(col, metal)); m.rotation.x = Math.PI / 2; m.position.set(x, y, z0 + s * (a + b) / 2); parts.add(m); };
+    const smd = col => box(Math.max(0.5, w * (w > d ? 0.62 : 0.85)), Math.max(0.4, d * (d > w ? 0.62 : 0.85)), 0, h, col);
+    if (p.kind === 'can') { const r = Math.max(1.5, Math.min(w, d) / 2 * 0.95); cyl(r, 0, h, 0x1c2f73); cyl(r * 0.98, h, h + 0.2, 0xcfd4da, 1); }
+    else if (p.kind === 'header') { box(w * 0.98, d * 0.98, 0, 2.5, 0x161616); for (const l of p.leads) box(0.64, 0.64, 2.5, h, 0xd8b04a, 1, l[0], l[1]); }
+    else if (p.kind === 'module' && p.leads.length > 2 && h > 4) {
+      // a module on pin headers: header strips and pins, the module board on top, its shield
+      box(w * 0.98, d * 0.98, 0, 2.5, 0x161616); for (const l of p.leads) box(0.64, 0.64, 2.5, h - 2.3, 0xd8b04a, 1, l[0], l[1]);
+      box(w * 0.98, d * 0.98, h - 2.3, h - 1.5, 0x1d4d8a); box(w * 0.6, d * 0.5, h - 1.5, h, 0xc0c4c8, 1);
+    }
+    else if (p.kind === 'module') { box(w * 0.98, d * 0.98, 0, 0.8, 0x1d4d8a); box(w * 0.7, d * 0.6, 0.8, h, 0xc0c4c8, 1); }
+    else if (p.kind === 'metal') box(w * 0.92, d * 0.85, 0, h, 0xc8ccd0, 1);
+    else if (p.kind === 'led') smd(0xeeeeee);
+    else if (p.kind === 'res') smd(0x151515);
+    else if (p.kind === 'cap') smd(0xb98a52);
+    else if (p.kind === 'ind') { h = Math.max(h, 0.6); smd(0x3a3a3a); }
+    else { box(Math.max(0.6, w * 0.82), Math.max(0.6, d * 0.82), 0, h, 0x1a1a1a); }
+    // through-hole leads: through the board, with a solder joint on the copper
+    for (const l of p.leads) {
+      const r = Math.min(0.45, l[2] * 0.4), a = p.side === 'bare' ? -V.thick - 0.5 : 0, lead = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1 - a, 10), mat(0xd8d8d8, 1));
+      lead.rotation.x = Math.PI / 2; lead.position.set(l[0], l[1], (a + 1) / 2); parts.add(lead);
+      const j = new THREE.Mesh(new THREE.ConeGeometry(Math.min(0.9, l[2] * 0.9), 0.6, 16), mat(0xbfc3c7, 1)); j.rotation.x = Math.PI / 2; j.position.set(l[0], l[1], 0.3); parts.add(j);
+    }
+  }
+  const pb = document.querySelector('[data-p]');
+  if (pb) { pb.hidden = !parts.children.length; pb.onclick = () => { parts.visible = !parts.visible; pb.classList.toggle('on', parts.visible); put(); }; }
   const xs = V.outline.map(q => q[0]), ys = V.outline.map(q => q[1]), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
   g.position.set(-cx, -cy, 0);
   const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
@@ -481,8 +513,25 @@ const V = ${data};
       labels ? cs.map(c => { const q = T([c.pcb.x, c.pcb.y]); return `<text x="${q[0].toFixed(2)}" y="${sy(q[1]).toFixed(2)}" font-size="1.2" fill="#fff" fill-opacity="0.75" stroke="#000" stroke-opacity="0.35" stroke-width="0.08" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif">${ascii(c.ref)}</text>`; }).join('') : '',
       '</svg>'].join('\n') + '\n';
     files['result-2d.svg'] = resultSvg('#c98a5e', '#b4bba6', '#151515', '#1b1d22', true);
+    // the parts as simple shapes for the 3D view: through-hole parts on the bare side when mirrored (leads through the
+    // board, soldered on the copper), everything else on the copper side
+    const hp = typeof Enclosure !== 'undefined' ? Enclosure.params() : null;
+    const parts3d = cs.map(c => {
+      const b = Pcb.fpBox(c), q0 = T([b[0], b[1]]), q1 = T([b[2], b[3]]), lib = c.lcsc && S.lib[c.lcsc];
+      const txt = [c.footprint, c.value, c.type, lib && lib.name, lib && lib.package].filter(Boolean).join(' ').toUpperCase();
+      const leads = pads.filter(p => p.ref === c.ref && p.drill), r2 = v => +v.toFixed(2);
+      let h = 1; try { if (hp) h = +Enclosure.partHeight(c, hp) || 1; } catch (e) { }
+      const kind = /CAPACITOR_POLARIZED|ELECTROLYTIC|CP_RADIAL/.test(txt) || c.type === 'capacitor_polarized' ? 'can'
+        : /XIAO|ESP32|WROOM|MINI-1|MODULE|WIFIM|ARDUINO|PICO/.test(txt) && c.type !== 'connector' ? 'module'
+        : /PINHEADER|HEADER/.test(txt) || c.type === 'connector' || c.type === 'battery' ? 'header'
+        : /TYPE-?C|USB|MICRO-?B|CRYSTAL|HC49/.test(txt) || c.type === 'crystal' ? 'metal'
+        : c.type === 'led' ? 'led' : c.type === 'resistor' ? 'res' : c.type === 'capacitor' ? 'cap' : c.type === 'inductor' ? 'ind' : 'ic';
+      return { ref: ascii(c.ref), kind, side: mirror && leads.length ? 'bare' : 'copper', h: r2(Math.min(h, 25)),
+        box: [r2(Math.min(q0[0], q1[0])), r2(Math.min(q0[1], q1[1])), r2(Math.max(q0[0], q1[0])), r2(Math.max(q0[1], q1[1]))],
+        leads: leads.map(p => { const q = T([p.x, p.y]); return [r2(q[0]), r2(q[1]), p.drill]; }) };
+    }).filter(p => p.box[2] > p.box[0] && p.box[3] > p.box[1]);
     const view = { outline: bo.map(q => [+q[0].toFixed(3), +q[1].toFixed(3)]), holes: holes.map(h => [+h.p[0].toFixed(3), +h.p[1].toFixed(3), h.d]), thick, vb: bvb, top,
-      tex: resultSvg('#c98a5e', '#b4bba6', '#151515', '#000', false), bump: resultSvg('#ffffff', '#000000', '#000000', '#000', false), mirrored: mirror, name };
+      tex: resultSvg('#c98a5e', '#b4bba6', '#151515', '#000', false), bump: resultSvg('#ffffff', '#000000', '#000000', '#000', false), mirrored: mirror, name, parts: parts3d };
     files['result-3d.html'] = view3d(view);
     const mins = (isoLen / fz + passes.flat().length * (o.iso_depth / o.plunge_feed) + Lc * steps / o.cut_feed + drilled.length * (thick + 0.2) / o.drill_feed * 2 + wide.reduce((a, h) => a + Math.PI * (h.d - h.bit) * wz.length / o.widen_feed, 0) + milled.reduce((a, h) => a + Math.PI * (h.d - o.cut_dia) * steps / o.cut_feed, 0)) * 1.15;
     const fl = Object.keys(files).filter(f => f.endsWith('.nc'));

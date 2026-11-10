@@ -13,12 +13,16 @@ const Exports = (() => {
     }
     return 'Comment,Designator,Footprint,LCSC Part #\n' + Object.entries(g).map(([k, refs]) => { const [v, f, code] = k.split('|'); return [q(v), q(refs.join(',')), q(f), q(code)].join(','); }).join('\n') + '\n';
   }
-  // pick-and-place in JLCPCB's CPL format: Gerber coordinates (origin bottom-left, mm), part centre = centre of its pads
+  // pick-and-place in JLCPCB's CPL format: Gerber coordinates (origin bottom-left, mm), part centre = centre of the
+  // box around its pads (the footprint origin of the JLCPCB / EasyEDA library parts; a pad average would pull a
+  // SOT-23 toward its 2-pad side). Rotation counter-clockwise, as JLCPCB and EasyEDA count it (CircuitPilot turns
+  // clockwise in its y-down frame, the same 360 - r the EasyEDA export writes)
   function cpl() {
-    const S = Model.S, idx = Model.pinIndex(), H = S.board.h, f = v => (Math.round(v * 1000) / 1000).toFixed(3) + 'mm';
+    const S = Model.S, H = S.board.h, f = v => (Math.round(v * 1000) / 1000).toFixed(3) + 'mm';
     const rows = Pcb.placed().map(c => {
-      const pads = Pcb.padsOf(c, idx), x = pads.length ? pads.reduce((a, p) => a + p.x, 0) / pads.length : c.pcb.x, y = pads.length ? pads.reduce((a, p) => a + p.y, 0) / pads.length : c.pcb.y;
-      return [c.ref, f(x), f(H - y), Pcb.isBottom(c) ? 'Bottom' : 'Top', ((c.pcb.rot || 0) % 360 + 360) % 360].join(',');
+      const pads = Pcb.padsOf(c), xs = pads.map(p => p.x), ys = pads.map(p => p.y);
+      const x = pads.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : c.pcb.x, y = pads.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : c.pcb.y;
+      return [c.ref, f(x), f(H - y), Pcb.isBottom(c) ? 'Bottom' : 'Top', (360 - ((c.pcb.rot || 0) % 360 + 360) % 360) % 360].join(',');
     });
     return 'Designator,Mid X,Mid Y,Layer,Rotation\n' + rows.join('\n') + '\n';
   }

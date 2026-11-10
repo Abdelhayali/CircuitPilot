@@ -63,7 +63,7 @@ const PcbPdf = (() => {
     function silk(side, c = COL.silk, labels = true) {
       P.setLineCap('round');
       rgb(c); P.setLineWidth(Math.max(0.08, 0.15 * k));
-      for (const p of cs) if ((Pcb.isBottom(p) ? 'B' : 'F') === side) { const b = Pcb.fpBox(p); P.rect(X(b[0]), Y(b[1]), (b[2] - b[0]) * k, (b[3] - b[1]) * k, 'S'); }
+      for (const p of cs) if ((Pcb.isBottom(p) ? 'B' : 'F') === side) { const b = Pcb.fpBox(p); P.rect(X(b[0]), Y(b[1]), (b[2] - b[0]) * k, (b[3] - b[1]) * k, 'S'); const d = Pcb.pin1Dot(p); if (d) { fill(c); P.circle(X(d.x), Y(d.y), d.d / 2 * k, 'F'); } }
       if (labels) for (const l of Pcb.silkLabels(side)) for (const pl of l.lines) polyline(pl.length > 1 ? pl : [pl[0], pl[0]], l.w, c);
     }
     function titleBlock(title, note) {

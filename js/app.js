@@ -1155,6 +1155,7 @@ const App = (() => {
       if (kind === 'pcbpdf') { toast('Making the PCB drawing…', 8000); PcbPdf.export().then(r => toast(`PCB drawing saved: ${r.pages} pages, ${r.scale === 1 ? 'true scale 1:1 — print at 100% (actual size)' : 'scaled to fit the page'}`, 9000)).catch(e => toast('PDF failed: ' + e.message, 8000)); return; }
       if (kind === 'pcbsvg') { if (!S.board.w) throw new Error('No PCB yet'); if (view !== 'pcb') Pcb.render(); download(fname('-pcb.svg'), Pcb.exportSVG(), 'image/svg+xml'); }
       if (kind === 'bomjlc') { jlcBom(); return; }
+      if (kind === 'cpl') { download(fname('-CPL-JLCPCB.csv'), cplCsv(), 'text/csv'); toast('CPL saved: on JLCPCB click “Add CPL File” next to the BOM, then check the part rotations in the preview', 8000); return; }
       if (kind === 'bom') {
         const g = {};
         for (const c of S.components) { const k = [c.type, c.value, c.footprint].join('|'); (g[k] = g[k] || []).push(c.ref); }

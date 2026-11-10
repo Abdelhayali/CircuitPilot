@@ -714,6 +714,7 @@ const PcbView = (() => {
       const sl = Pcb.isBottom(c) ? 'BS' : 'FS'; if (!vis(sl)) continue;
       const b = Pcb.fpBox(c);
       out.push(`<rect data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="${col(sl)}" stroke-width="0.15" pointer-events="none"/>`);
+      const d = Pcb.pin1Dot(c); if (d) out.push(`<circle data-o="${esc(c.ref)}" cx="${d.x}" cy="${d.y}" r="${d.d / 2}" fill="${col(sl)}" pointer-events="none"/>`);
     }
     // silkscreen text exactly as exported (part labels, board name, free text); drag to move, red = covers pads
     const lblHits = [];

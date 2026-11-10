@@ -112,6 +112,7 @@ const Pcb3D = (() => {
       if ((Pcb.isBottom(c) ? 'B' : 'F') !== L) continue;
       const b = Pcb.fpBox(c);
       o.push(`<rect x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="${silk}" stroke-width="0.15"/>`);
+      const d = Pcb.pin1Dot(c); if (d) o.push(`<circle cx="${d.x}" cy="${d.y}" r="${d.d / 2}" fill="${silk}"/>`);
     }
     // part references and board name: the same strokes as the Gerber silkscreen
     for (const l of Pcb.silkLabels(L)) o.push(`<path d="${l.lines.map(pl => 'M' + pl.map(q => q.join(' ')).join('L')).join('')}" fill="none" stroke="${silk}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round"/>`);

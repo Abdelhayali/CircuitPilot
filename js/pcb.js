@@ -38,6 +38,30 @@ const Pcb = (() => {
     const fp = Lib.footprint(c.footprint), b0 = fp.box, m = isBottom(c) ? [-b0[2], b0[1], -b0[0], b0[3]] : b0, b = Lib.rotBox(m, c.pcb.rot || 0);
     return [c.pcb.x + b[0] - pad, c.pcb.y + b[1] - pad, c.pcb.x + b[2] + pad, c.pcb.y + b[3] + pad];
   }
+  // pin-1 dot on the silkscreen for ICs and other parts with 3 or more pads (diameter 0.5 mm, over JLCPCB's 0.15 mm
+  // line minimum): outside the part outline at the corner nearest pin 1, else beside pin 1 outside the outline, else
+  // inside the outline between pin 1 and the centre — the first spot on the board (0.3 mm from the edge) and off the
+  // copper of every pad (silkscreen on pads is removed by the fab). null for 2-pad parts, no pin 1 or no free spot
+  const dotCache = { key: '', m: new Map() };
+  function pin1Dot(c) {
+    const S = Model.S, key = JSON.stringify([S.board, placed().map(o => [o.ref, o.footprint, o.pcb.x, o.pcb.y, o.pcb.rot, o.pcb.side])]);
+    if (dotCache.key !== key) { dotCache.key = key; dotCache.m = new Map(); }
+    if (!dotCache.m.has(c.ref)) dotCache.m.set(c.ref, pin1DotRaw(c));
+    return dotCache.m.get(c.ref);
+  }
+  function pin1DotRaw(c) {
+    const pads = padsOf(c); if (pads.length < 3) return null;
+    const p1 = pads.find(p => String(p.num) === '1') || pads.find(p => String(p.num).toUpperCase() === 'A1'); if (!p1) return null;
+    const b = fpBox(c), g = 0.45, d = 0.5, side = isBottom(c) ? 'B' : 'F', poly = boardPoly(), idx = Model.pinIndex();
+    const L = p1.x - b[0] <= b[2] - p1.x, T = p1.y - b[1] <= b[3] - p1.y, ex = L ? b[0] - g : b[2] + g, ey = T ? b[1] - g : b[3] + g;
+    const near = placed().filter(o => { const q = fpBox(o); return q[0] < b[2] + 2 && q[2] > b[0] - 2 && q[1] < b[3] + 2 && q[3] > b[1] - 2; }).flatMap(o => padsOf(o, idx));
+    const cands = [[ex, ey], [ex, p1.y], [p1.x, ey]];
+    for (const t of [0.25, 0.4, 0.55, 0.7]) cands.push([p1.x + ((b[0] + b[2]) / 2 - p1.x) * t, p1.y + ((b[1] + b[3]) / 2 - p1.y) * t]);
+    const ok = ([x, y]) => inPoly(x, y, poly) && poly.every((q, i) => ptSeg([x, y], q, poly[(i + 1) % poly.length]) >= 0.3)
+      && near.every(p => !(p.drill || (p.layer || 'F') === side) || Math.max(Math.abs(x - p.x) - p.w / 2, Math.abs(y - p.y) - p.h / 2) >= d / 2 + 0.15);
+    const at = cands.find(ok);
+    return at ? { x: at[0], y: at[1], d } : null;
+  }
   const padCu = (p, L2) => p.drill ? L2 : [p.layer || 'F'];
 
   // ---------- board outline (rectangle, rounded rectangle, ellipse, custom polygon with rounded corners) ----------
@@ -2778,6 +2802,7 @@ const Pcb = (() => {
     const rectPath = (b, x0, y0, x1, y1) => { b.push(X(x0, y0) + 'D02*'); b.push(X(x1, y0) + 'D01*'); b.push(X(x1, y1) + 'D01*'); b.push(X(x0, y1) + 'D01*'); b.push(X(x0, y0) + 'D01*'); };
     const silk = side => (A, b) => {
       b.push(A('C,0.150000') + '*'); for (const c of cs) if ((isBottom(c) ? 'B' : 'F') === side) { const bb = fpBox(c); rectPath(b, bb[0], bb[1], bb[2], bb[3]); }
+      b.push(A('C,0.500000') + '*'); for (const c of cs) if ((isBottom(c) ? 'B' : 'F') === side) { const d = pin1Dot(c); if (d) b.push(X(d.x, d.y) + 'D03*'); }
       // part references and the board name, as strokes
       for (const l of silkLabels(side)) { b.push(A(`C,${f6(l.w)}`) + '*'); for (const pl of l.lines) { b.push(X(...pl[0]) + 'D02*'); for (const q of (pl.length > 1 ? pl.slice(1) : pl)) b.push(X(...q) + 'D01*'); } }
     };
@@ -3118,7 +3143,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

@@ -8,5 +8,5 @@ window.CP_CONFIG = {
   googleClientId: '773131004199-8ajg71r8fuv8l0463qmajip7o8bjeqjp.apps.googleusercontent.com',
   // GitHub sign-in: the Client ID of the GitHub OAuth app (callback URL https://pcbgo.site/). Public, not a secret.
   // The client secret lives in the relay (GITHUB_CLIENT_SECRET). Empty = the sign-in button stays hidden.
-  githubClientId: '',
+  githubClientId: 'Ov23li0Owt2MkdkwsTOy',
 };

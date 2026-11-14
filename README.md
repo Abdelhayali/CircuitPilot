@@ -17,8 +17,9 @@ Pick one of the three options. You need an AI key for the copilot. A free Google
 1. Download **[CircuitPilot-Windows.zip](https://github.com/Abdelhayali/CircuitPilot/releases/latest/download/CircuitPilot-Windows.zip)** from the [latest release](https://github.com/Abdelhayali/CircuitPilot/releases/latest).
 2. Unzip it anywhere, for example on your Desktop.
 3. Double-click **CircuitPilot.exe**. Windows may warn that the app is not code-signed: click **More info → Run anyway**.
-4. In the app, press **🔑 Connect AI** and paste your key.
-5. Type what you want to build in the AI Copilot box and press **Send**.
+4. Choose how you want to design:
+   - **With Claude Desktop (recommended, no AI key needed):** install [Claude Desktop](https://claude.com/download) and sign in. Then in CircuitPilot press **⚙ Settings → Claude Desktop → Connect** (or run `CircuitPilot.exe --connect-claude`). Quit Claude Desktop completely (also from the system tray) and open it again. Claude Desktop now controls CircuitPilot's design tools: start a chat, pick **Design a board with CircuitPilot** from the **+** menu or just describe the board, and the CircuitPilot window follows along. CircuitPilot starts by itself when Claude needs it.
+   - **With the built-in copilot:** press **🔑 Connect AI** and paste a free Google Gemini key, then type what you want to build in the AI Copilot box and press **Send**.
 
 Windows 10 or 11, 64-bit. Your projects are saved in `%LOCALAPPDATA%\CircuitPilot`.
 

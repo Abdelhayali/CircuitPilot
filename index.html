@@ -28,6 +28,7 @@
         <button data-exp="all" title="Every file of this project in one zip: project, Gerbers, JLCPCB BOM + pick-and-place, BOM, netlist, enclosure STL, EasyEDA files, PDFs, images">Everything (.zip)</button>
         <button data-exp="json">Project file (.json)</button>
         <button data-exp="gerber">Gerber + drill (.zip)</button>
+        <button data-exp="github" title="Every file of this project (project, Gerbers, BOM + CPL, enclosure, PDFs, images) in a new private repository in your GitHub account">Upload to GitHub (new private repo)</button>
         <button data-exp="bomjlc">BOM for JLCPCB assembly (.csv)</button>
         <button data-exp="cpl" title="Pick-and-place file for JLCPCB assembly: upload it as the CPL file next to the BOM">Pick-and-place / CPL for JLCPCB (.csv)</button>
         <button data-exp="bom">Bill of materials (.csv)</button>
@@ -364,6 +365,22 @@
     <div class="row end"><button id="shDraw">✎ Draw outline</button><button id="shApply" class="primary">Apply</button></div>
   </div>
 </div>
+<div id="ghModal" class="hidden modal">
+  <div class="dlg">
+    <div class="row-h"><h2>Upload to GitHub</h2><button id="ghClose">✕</button></div>
+    <p class="muted" style="margin:2px 0 8px;font-size:12px">Creates a <b>private</b> repository in your GitHub account named after the project and commits every file of the design in one commit: the project file, Gerbers and drill, JLCPCB BOM and CPL, netlist, enclosure files, EasyEDA files, images and PDFs, plus a README.</p>
+    <p class="muted" style="margin:2px 0 8px;font-size:12px">You need a <b>classic personal access token with the <code>repo</code> scope</b> (GitHub: Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token). Fine-grained tokens cannot create repositories. The token stays in this browser and is sent only to api.github.com.</p>
+    <label class="muted small" for="ghToken">Token</label>
+    <input id="ghToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… (leave empty to use the saved token)" style="width:100%;margin-bottom:4px">
+    <div class="muted small" id="ghTokenSaved"></div>
+    <div class="row-h" style="margin-top:10px">
+      <button id="ghForget" style="display:none">Forget token</button>
+      <button id="ghGo" class="primary">Upload to GitHub</button>
+    </div>
+    <p id="ghStatus" class="small" style="margin:10px 0 0;min-height:1.2em"></p>
+    <p id="ghLink" style="margin:6px 0 0"></p>
+  </div>
+</div>
 <div id="cncModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>CNC milling (GRBL)</h2><button id="cncClose">✕</button></div>
@@ -447,6 +464,7 @@
 <script src="js/cloud.js?v=202610301800"></script>
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
+<script src="js/github.js?v=202611140900"></script>
 <script src="js/app.js?v=202611111200"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

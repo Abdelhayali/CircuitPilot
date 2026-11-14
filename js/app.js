@@ -1115,11 +1115,11 @@ const App = (() => {
     Model.load(d); Projects.markLoaded(); await Projects.saveNow(); Projects.close(); Sch.fit();
   }
   // ---------- everything at once: one zip with every file of the project, sorted in folders ----------
-  async function exportAll(opts = {}) {
+  // every file of the project (the Everything zip and the GitHub upload): { base, files: { 'base/name': data }, skipped }
+  async function buildAll(opts = {}) {
     const S = Model.S, base = Exports.slug(S.name), files = {}, skipped = [], hasPcb = !!(S.board.w && Pcb.placed().length);
     const add = (n, d) => { files[base + '/' + n] = d; };
     const b64bytes = d => Uint8Array.from(atob(d), ch => ch.charCodeAt(0));
-    toast('Exporting everything…', 30000);
     add(base + '.circuit.json', Exports.project()); add(base + '-bom.csv', Exports.bom()); add(base + '.net', Exports.netlist());
     if (S.components.length) add(base + '-schematic.svg', Sch.exportSVG());
     if (hasPcb) {
@@ -1136,9 +1136,38 @@ const App = (() => {
       if (hasPcb) try { const r = await PcbPdf.export({ blob: true }); add(base + '-pcb-drawing.pdf', new Uint8Array(await r.blob.arrayBuffer())); } catch (e) { skipped.push('PCB drawing PDF: ' + e.message); }
       try { const b = await DocView.pdf({ blob: true }); if (b) add(base + '-datasheet.pdf', new Uint8Array(await b.arrayBuffer())); } catch (e) { skipped.push('datasheet PDF: ' + e.message); }
     }
+    return { base, files, skipped };
+  }
+  async function exportAll(opts = {}) {
+    toast('Exporting everything…', 30000);
+    const { base, files, skipped } = await buildAll(opts);
     download(base + '-all.zip', makeZip(files));
     toast(`Exported ${Object.keys(files).length} files in ${base}-all.zip${skipped.length ? ' · skipped: ' + skipped.join('; ') : ''}`, 12000);
     return { zip: base + '-all.zip', files: Object.keys(files).map(n => n.slice(base.length + 1)), skipped };
+  }
+
+  // ---------- upload the whole project to a new private GitHub repository (js/github.js) ----------
+  function openGithub() {
+    const m = $('#ghModal'); if (!m) return;
+    $('#ghToken').value = ''; $('#ghTokenSaved').textContent = GitHub.getToken() ? 'A token is saved in this browser.' : 'No token saved yet.';
+    $('#ghForget').style.display = GitHub.getToken() ? '' : 'none';
+    $('#ghStatus').textContent = ''; $('#ghLink').innerHTML = ''; $('#ghGo').disabled = false;
+    m.classList.remove('hidden');
+  }
+  async function uploadGithub() {
+    const typed = $('#ghToken').value.trim();
+    if (typed) GitHub.setToken(typed);
+    if (!GitHub.getToken()) { $('#ghStatus').textContent = 'Paste your GitHub token first.'; return; }
+    const st = $('#ghStatus'), go = $('#ghGo'); go.disabled = true; $('#ghLink').innerHTML = '';
+    try {
+      const { base, files, skipped } = await buildAll({});
+      const out = {}; for (const [n, d] of Object.entries(files)) out[n.slice(base.length + 1)] = d;
+      const r = await GitHub.uploadDesign({ name: Model.S.name, files: out }, t => st.textContent = t);
+      st.textContent = `Uploaded ${r.files} files to your GitHub account.${skipped.length ? ' Not included: ' + skipped.join('; ') : ''}`;
+      $('#ghLink').innerHTML = `<a href="${r.url}" target="_blank" rel="noopener">Open ${r.repo} on GitHub ↗</a>`;
+      $('#ghForget').style.display = '';
+    } catch (e) { st.textContent = e.message; }
+    finally { go.disabled = false; }
   }
   function exportAs(kind) {
     const S = Model.S;
@@ -1152,6 +1181,7 @@ const App = (() => {
         return;
       }
       if (kind === 'all') { exportAll().catch(e => toast('Export failed: ' + e.message, 8000)); return; }
+      if (kind === 'github') { openGithub(); return; }
       if (kind === 'pcbpdf') { toast('Making the PCB drawing…', 8000); PcbPdf.export().then(r => toast(`PCB drawing saved: ${r.pages} pages, ${r.scale === 1 ? 'true scale 1:1 — print at 100% (actual size)' : 'scaled to fit the page'}`, 9000)).catch(e => toast('PDF failed: ' + e.message, 8000)); return; }
       if (kind === 'pcbsvg') { if (!S.board.w) throw new Error('No PCB yet'); if (view !== 'pcb') Pcb.render(); download(fname('-pcb.svg'), Pcb.exportSVG(), 'image/svg+xml'); }
       if (kind === 'bomjlc') { jlcBom(); return; }
@@ -1341,6 +1371,9 @@ const App = (() => {
       $('#cncModal').classList.remove('hidden'); cncRun();
     };
     $('#cncClose').onclick = () => $('#cncModal').classList.add('hidden');
+    $('#ghClose').onclick = () => $('#ghModal').classList.add('hidden');
+    $('#ghGo').onclick = uploadGithub;
+    $('#ghForget').onclick = () => { GitHub.setToken(''); $('#ghTokenSaved').textContent = 'The token was removed from this browser.'; $('#ghForget').style.display = 'none'; };
     $('#cncUpdate').onclick = cncRun;
     for (const id of Object.values(CNC_F)) $('#' + id).onchange = cncRun;
     $('#cncDownload').onclick = () => {

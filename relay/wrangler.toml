@@ -9,4 +9,4 @@ ALLOWED_ORIGINS = "https://pcbgo.site,https://www.pcbgo.site,https://bodynet.net
 # GitHub sign-in (optional). The client ID is public; the client secret is NOT stored here:
 #   npx wrangler secret put GITHUB_CLIENT_SECRET
 # and set GITHUB_CLIENT_ID below to the OAuth app's Client ID.
-GITHUB_CLIENT_ID = ""
+GITHUB_CLIENT_ID = "Ov23li0Owt2MkdkwsTOy"

@@ -8,6 +8,42 @@ An AI copilot for electronics design: describe a circuit in plain language and i
 
 **▶ Try it online: [pcbgo.site](https://pcbgo.site)**: nothing to install. The **🔑 Connect AI** window walks you through getting a free Google Gemini or Ollama Cloud key in about a minute (Claude, OpenAI, OpenRouter and others work too). Your key stays in your browser. Then describe your circuit. Projects are saved in your browser. For local models, knowledge folders and Claude Code control, run the desktop version (below).
 
+## How to install and run
+
+Pick one of the three options. You need an AI key for the copilot. A free Google Gemini key takes about a minute at [aistudio.google.com/apikey](https://aistudio.google.com/apikey); the **🔑 Connect AI** window in the app walks you through it.
+
+### 1. Easiest: Windows app (nothing else to install)
+
+1. Download **[CircuitPilot-Windows.zip](https://github.com/Abdelhayali/CircuitPilot/releases/latest/download/CircuitPilot-Windows.zip)** from the [latest release](https://github.com/Abdelhayali/CircuitPilot/releases/latest).
+2. Unzip it anywhere, for example on your Desktop.
+3. Double-click **CircuitPilot.exe**. Windows may warn that the app is not code-signed: click **More info → Run anyway**.
+4. In the app, press **🔑 Connect AI** and paste your key.
+5. Type what you want to build in the AI Copilot box and press **Send**.
+
+Windows 10 or 11, 64-bit. Your projects are saved in `%LOCALAPPDATA%\CircuitPilot`.
+
+### 2. Run from the source code
+
+You need **Python 3** (no extra packages to install). Git is optional.
+
+1. Get the code: `git clone https://github.com/Abdelhayali/CircuitPilot.git`, or on the GitHub page click **Code → Download ZIP** and unzip it.
+2. Open a terminal in the `CircuitPilot` folder.
+3. Start the server:
+
+   ```bash
+   python server.py 5173
+   ```
+
+   On macOS or Linux, use `python3`. On Windows you can double-click **`start.bat`** instead.
+4. Open **http://localhost:5173** in your browser.
+5. Press **🔑 Connect AI** and paste your key (or add it under **⚙ Settings**).
+
+Stop the server with **Ctrl+C**. To protect it with a password, add `--password YOUR_PASSWORD` to the command in step 3.
+
+### 3. Use the online version (no install)
+
+Open **[pcbgo.site](https://pcbgo.site)**, press **🔑 Connect AI**, paste your key and start designing. It also works on a phone or tablet. Your projects are kept in this browser, so export the `.json` file from the Export menu to back them up.
+
 ## See it in action
 
 **From one prompt to a routed board and a 3D-printed case** — the copilot (Gemini Flash Lite) designs an ESP32 board from *"create PCB for ESP"*: real JLCPCB parts, schematic, placement, rip-up autorouting (21/21 nets, DRC 0 errors), GND pours, then a fitted enclosure and a Whoop-style wristband pod (sped up 5×).

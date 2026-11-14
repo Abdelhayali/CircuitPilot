@@ -102,7 +102,14 @@ const GitHub = (() => {
 
   // ---------- save one design into its folder of the repository ----------
   // files: { 'name': string | Uint8Array } relative to the design folder. Returns { changed, folder, url }.
-  async function saveDesign({ repo, folder, name, files, onStep = () => { } }) {
+  // another device may have saved in between (GitHub answers 422 "not a fast forward"): read the branch again and retry
+  async function saveDesign(o) {
+    for (let attempt = 1; ; attempt++) {
+      try { return await commitOnce(o); }
+      catch (e) { if (e.status !== 422 || attempt >= 3) throw e; }
+    }
+  }
+  async function commitOnce({ repo, folder, name, files, onStep = () => { } }) {
     const base = `/repos/${repo}`, prefix = folder ? folder + '/' : '';
     const head = await api('GET', `${base}/git/ref/heads/${BRANCH}`);
     const commit = await api('GET', `${base}/git/commits/${head.object.sha}`);
@@ -137,9 +144,29 @@ const GitHub = (() => {
     return { changed: todo.length + gone.length, folder, url };
   }
 
+  // ---------- load designs back from the repository ----------
+  // every design folder: { folder, path, sha } for its .circuit.json (the project file)
+  async function listDesigns(repo) {
+    const base = `/repos/${repo}`, head = await api('GET', `${base}/git/ref/heads/${BRANCH}`);
+    const commit = await api('GET', `${base}/git/commits/${head.object.sha}`);
+    const tree = await api('GET', `${base}/git/trees/${commit.tree.sha}?recursive=1`);
+    const out = new Map();
+    for (const e of tree.tree) {
+      const m = /^([^/]+)\/([^/]+\.circuit\.json)$/.exec(e.path);
+      if (e.type === 'blob' && m && !out.has(m[1])) out.set(m[1], { folder: m[1], path: e.path, sha: e.sha });
+    }
+    return [...out.values()];
+  }
+  // the text of one file in the repository (by its blob id)
+  async function readBlob(repo, sha) {
+    const j = await api('GET', `/repos/${repo}/git/blobs/${sha}`);
+    const bin = atob(String(j.content || '').replace(/\s/g, ''));
+    return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+  }
+
   // Check the token; returns the account name (or throws)
   async function check() { const login = (await api('GET', '/user')).login; try { localStorage.setItem('cp.github.login', login); } catch (e) { } return login; }
   const account = () => { try { return localStorage.getItem('cp.github.login') || ''; } catch (e) { return ''; } };
 
-  return { getToken, setToken, getRepo, setRepo, check, account, listRepos, createRepo, saveDesign, slug, oauthAvailable, signIn, finishSignIn, signOut };
+  return { getToken, setToken, getRepo, setRepo, check, account, listRepos, createRepo, saveDesign, listDesigns, readBlob, gitSha, slug, oauthAvailable, signIn, finishSignIn, signOut };
 })();

@@ -1155,14 +1155,85 @@ const App = (() => {
     if (!map[key]) { map[key] = GitHub.slug(S.name, 'design'); try { localStorage.setItem('cp.github.folders', JSON.stringify(map)); } catch (e) { } }
     return map[key];
   }
+  // one GitHub operation at a time (save, autosave, sync): two of them at once would fight over the branch
+  let ghChain = Promise.resolve();
+  const ghQueued = fn => { const p = ghChain.then(fn); ghChain = p.catch(() => { }); return p; };
+  // what each design looked like the last time it was saved to or loaded from GitHub: { folder: { sha, local } }
+  const ghSynced = () => { try { return JSON.parse(localStorage.getItem('cp.github.synced') || '{}'); } catch (e) { return {}; } };
+  const ghSetSynced = m => { try { localStorage.setItem('cp.github.synced', JSON.stringify(m)); } catch (e) { } };
+  // hash of the project as the local store holds it (null: no such project here)
+  async function localHash(pid) {
+    const r = await fetch('/api/projects/' + encodeURIComponent(pid)); if (!r.ok) return null;
+    return GitHub.gitSha(JSON.stringify(await r.json()));
+  }
+  async function putProject(pid, data) {
+    const r = await fetch('/api/projects/' + encodeURIComponent(pid), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    if (!r.ok) throw new Error('could not store the project here (' + r.status + ')');
+  }
   // one save: every file of the open design, or without images, PDFs and enclosure files when light (autosave)
-  async function ghSave({ light = false, onStep = () => { } } = {}) {
+  async function ghSaveRaw({ light = false, onStep = () => { } } = {}) {
     const repo = GitHub.getRepo(); if (!repo) throw new Error('Choose a repository first');
     const folder = ghFolder(), name = Model.S.name || folder;
     const { base, files, skipped } = await buildAll({ light });
     const out = {}; for (const [n, d] of Object.entries(files)) out[n.slice(base.length + 1)] = d;
     const r = await GitHub.saveDesign({ repo, folder, name, files: out, onStep });
+    const dk = Object.keys(out).find(k => /\.circuit\.json$/.test(k));
+    if (dk && Model.S.id) { const m = ghSynced(); m[folder] = { sha: await GitHub.gitSha(out[dk]), local: (await localHash(Model.S.id)) || '' }; ghSetSynced(m); }
     return Object.assign(r, { skipped, repo });
+  }
+  const ghSave = opts => ghQueued(() => ghSaveRaw(opts));
+  // load every design of the repository into this PC (designs changed here since the last sync are kept and reported),
+  // then save the open design
+  async function ghSyncRaw() {
+    const repo = GitHub.getRepo(); if (!repo) throw new Error('Choose a repository first');
+    const say = t => { $('#ghStatus').textContent = t; };
+    say('Reading the designs in ' + repo + '…');
+    const designs = await GitHub.listDesigns(repo), map = ghMap(), synced = ghSynced(), open = Model.S.id || '';
+    const folderOf = {}; for (const [pid, f] of Object.entries(map)) folderOf[f] = pid;
+    const rep = { loaded: 0, kept: [], skipped: [] }, conflicts = new Set(); let reopen = '';
+    for (const d of designs) {
+      const rec = synced[d.folder] || {}; let pid = folderOf[d.folder] || '';
+      if (pid && rec.sha === d.sha) continue;   // unchanged on GitHub since the last sync
+      say(`Loading ${d.folder}…`);
+      const text = await GitHub.readBlob(repo, d.sha), data = JSON.parse(text);
+      if (!pid) {
+        // a design made on another PC: it keeps its id unless that id is already used here by another design
+        pid = typeof data.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(data.id) ? data.id : '';
+        if (!pid || (map[pid] && map[pid] !== d.folder) || (!map[pid] && await localHash(pid) !== null)) { rep.skipped.push(d.folder); continue; }
+        await putProject(pid, data); map[pid] = d.folder;
+      } else {
+        const r = await fetch('/api/projects/' + encodeURIComponent(pid)), here = r.ok ? await r.json() : null;
+        if (here) {
+          const changedHere = rec.local ? (await GitHub.gitSha(JSON.stringify(here))) !== rec.local : JSON.stringify(here) !== JSON.stringify(JSON.parse(text));
+          if (changedHere) { rep.kept.push(d.folder); conflicts.add(d.folder); continue; }
+        }
+        await putProject(pid, data);
+      }
+      synced[d.folder] = { sha: d.sha, local: (await localHash(pid)) || '' };
+      rep.loaded++; if (pid === open) reopen = pid;
+    }
+    try { localStorage.setItem('cp.github.folders', JSON.stringify(map)); } catch (e) { }
+    ghSetSynced(synced);
+    // the open design changed on GitHub: show that version (it was saved first when it had changes here)
+    if (reopen && Projects.openId) await Projects.openId(reopen);
+    // then the open design goes up (light: images and PDFs come with “Save design now”), unless it changed on GitHub and here too
+    let pushed = null;
+    if (Model.S.components.length && !conflicts.has(ghFolder())) { say('Saving the open design…'); pushed = await ghSaveRaw({ light: true, onStep: say }); }
+    return { ...rep, pushed, conflict: conflicts.has(ghFolder()) };
+  }
+  const ghSync = () => ghQueued(ghSyncRaw);
+  async function ghSyncNow() {
+    const st = $('#ghStatus'), btn = $('#ghSync'); btn.disabled = true; $('#ghLink').innerHTML = '';
+    try {
+      const r = await ghSync();
+      const parts = [`${r.loaded} design${r.loaded === 1 ? '' : 's'} loaded from GitHub`];
+      parts.push(r.pushed ? (r.pushed.changed ? `open design saved (${r.pushed.changed} changed files)` : 'open design already up to date') : (r.conflict ? 'open design NOT saved: it changed here and on GitHub' : 'nothing to save'));
+      if (r.kept.length) parts.push(`kept here (changed on this PC and on GitHub): ${r.kept.join(', ')}`);
+      if (r.skipped.length) parts.push(`skipped: ${r.skipped.join(', ')}`);
+      st.textContent = parts.join(' · ') + '. Open Projects to see every design.';
+      ghPaintIdle();
+    } catch (e) { st.textContent = e.message; }
+    finally { btn.disabled = false; }
   }
   const ghAutoOn = () => { try { return localStorage.getItem('cp.github.auto') === '1'; } catch (e) { return false; } };
   let ghAutoT = null, ghAutoBusy = false, ghAutoAgain = false;
@@ -1455,6 +1526,7 @@ const App = (() => {
     $('#ghClose').onclick = () => $('#ghModal').classList.add('hidden');
     $('#ghBtn').onclick = openGithub;
     $('#ghGo').onclick = ghSaveNow;
+    $('#ghSync').onclick = ghSyncNow;
     $('#ghUse').onclick = ghUseRepo;
     $('#ghRepo').onchange = ghRepoChanged;
     $('#ghSignOut').onclick = () => { GitHub.signOut(); $('#ghStatus').textContent = 'Signed out of GitHub in this browser.'; ghRefresh(); };

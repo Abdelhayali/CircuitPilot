@@ -56,25 +56,35 @@ const GitHub = (() => {
   // Needs an OAuth app whose callback URL is https://pcbgo.site/.
   const clientId = () => (window.CP_CONFIG && CP_CONFIG.githubClientId) || '';
   const relayUrl = () => (window.CP_CONFIG && CP_CONFIG.relay) || '';
-  const oauthAvailable = () => !!clientId() && /(^|\.)pcbgo\.site$/.test(location.hostname) && !!relayUrl();
-  const callback = () => location.origin + '/';
+  // GitHub only returns to the callback URL of the OAuth app. A page on localhost (server.py, the desktop version) is
+  // sent through that callback: pcbgo.site hands the code on to the localhost page (state carries its address).
+  const CALLBACK = 'https://pcbgo.site/';
+  const localOrigin = o => /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o);
+  const onSite = () => /(^|\.)pcbgo\.site$/.test(location.hostname);
+  const oauthAvailable = () => !!clientId() && (onSite() || localOrigin(location.origin)) && !!relayUrl();
   const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
   function signIn() {
     if (!oauthAvailable()) throw new Error('GitHub sign-in is not set up for this site');
-    const state = rnd();
+    const state = rnd() + (onSite() ? '' : '_' + encodeURIComponent(location.origin));
     try { sessionStorage.setItem('cp-github-state', state); } catch (e) { }
-    const q = new URLSearchParams({ client_id: clientId(), redirect_uri: callback(), scope: 'repo', state, allow_signup: 'true' });
+    const q = new URLSearchParams({ client_id: clientId(), redirect_uri: CALLBACK, scope: 'repo', state, allow_signup: 'true' });
     location.href = 'https://github.com/login/oauth/authorize?' + q;
   }
   // called when the page loads: if GitHub sent the user back with a code, finish the sign-in
   async function finishSignIn() {
     const u = new URL(location.href), code = u.searchParams.get('code'), state = u.searchParams.get('state');
     if (!code || !state || !oauthAvailable()) return null;
+    // GitHub sent the code to pcbgo.site for a page on localhost: hand it on to that page, with the same query
+    const back = /^[0-9a-f]{32}_(.+)$/.exec(state);
+    if (onSite() && back) {
+      let origin = ''; try { origin = decodeURIComponent(back[1]); } catch (e) { }
+      if (localOrigin(origin)) { location.replace(origin + '/' + location.search + location.hash); return null; }
+    }
     const want = (() => { try { return sessionStorage.getItem('cp-github-state'); } catch (e) { return null; } })();
     history.replaceState(null, '', location.pathname + location.hash);
     try { sessionStorage.removeItem('cp-github-state'); } catch (e) { }
     if (!want || want !== state) throw new Error('GitHub sign-in was cancelled or did not match (try again)');
-    const r = await fetch(relayUrl().replace(/\/$/, '') + '/github/token', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, redirect_uri: callback() }) });
+    const r = await fetch(relayUrl().replace(/\/$/, '') + '/github/token', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, redirect_uri: CALLBACK }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.access_token) throw new Error('GitHub sign-in failed: ' + (j.error || r.statusText));
     setToken(j.access_token);

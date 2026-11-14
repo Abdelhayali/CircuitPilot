@@ -1324,6 +1324,39 @@ const App = (() => {
     } catch (e) { st.textContent = e.message; }
     finally { go.disabled = false; }
   }
+  // every design stored on this PC, each in its own folder: a design that is not open is opened in turn (its unsaved
+  // edits are stored first, as always), then the design that was open is opened again
+  async function ghSaveAllRaw(st) {
+    const repo = GitHub.getRepo(); if (!repo) throw new Error('Choose a repository first');
+    if (!Projects.online) throw new Error('Saving all designs needs the app to run with server.py (the designs are read from this PC)');
+    const list = await (await fetch('/api/projects')).json();
+    const first = Model.S.id || '', res = { saved: 0, same: 0, empty: [], failed: [] };
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i], label = p.name || 'Untitled';
+      st.textContent = `Design ${i + 1} of ${list.length}: ${label}…`;
+      try {
+        if (Model.S.id !== p.id) await Projects.openId(p.id);
+        if (!Model.S.components.length) { res.empty.push(label); continue; }
+        const r = await ghSaveRaw({ light: false, onStep: t => st.textContent = `${i + 1}/${list.length} ${label}: ${t}` });
+        if (r.changed) res.saved++; else res.same++;
+      } catch (e) { res.failed.push(label + ' (' + e.message + ')'); }
+    }
+    if (first && Model.S.id !== first) { try { await Projects.openId(first); } catch (e) { } }
+    return res;
+  }
+  const ghSaveAll = st => ghQueued(() => ghSaveAllRaw(st));
+  async function ghSaveAllNow() {
+    const st = $('#ghStatus'), btn = $('#ghSaveAll'), go = $('#ghGo'); btn.disabled = go.disabled = true; $('#ghLink').innerHTML = '';
+    try {
+      const r = await ghSaveAll(st);
+      const parts = [`${r.saved} saved`, `${r.same} unchanged`];
+      if (r.empty.length) parts.push('empty, not saved: ' + r.empty.join(', '));
+      if (r.failed.length) parts.push('failed: ' + r.failed.join('; '));
+      st.textContent = parts.join(' · ') + '.';
+      ghPaintIdle();
+    } catch (e) { st.textContent = e.message; }
+    finally { btn.disabled = go.disabled = false; }
+  }
   async function ghPasteToken() {
     const t = $('#ghToken').value.trim(), st = $('#ghStatus'); if (!t) { st.textContent = 'Paste a token first.'; return; }
     GitHub.setToken(t);
@@ -1536,6 +1569,7 @@ const App = (() => {
     $('#ghClose').onclick = () => $('#ghModal').classList.add('hidden');
     $('#ghBtn').onclick = openGithub;
     $('#ghGo').onclick = ghSaveNow;
+    $('#ghSaveAll').onclick = ghSaveAllNow;
     $('#ghSync').onclick = ghSyncNow;
     $('#ghUse').onclick = ghUseRepo;
     $('#ghRepo').onchange = ghRepoChanged;

@@ -396,9 +396,10 @@
       </div>
       <div class="row-h">
         <label class="small"><input type="checkbox" id="ghAuto"> Auto-save after changes</label>
+        <button id="ghSaveAll">Save all designs</button>
         <button id="ghGo" class="primary">Save design now</button>
       </div>
-      <p class="muted small" style="margin:6px 0 0">Auto-save sends the design, Gerbers, BOM and CPL, EasyEDA files and netlist a few seconds after each change. Images, PDFs and enclosure files come with “Save design now”. Only changed files are uploaded.</p>
+      <p class="muted small" style="margin:6px 0 0">Auto-save sends the design, Gerbers, BOM and CPL, EasyEDA files and netlist a few seconds after each change. Images, PDFs and enclosure files come with “Save design now”. Only changed files are uploaded. “Save all designs” saves every design stored on this PC, each in its own folder.</p>
     </div>
     <p id="ghStatus" class="small" style="margin:10px 0 0;min-height:1.2em"></p>
     <p id="ghLink" style="margin:6px 0 0"></p>
@@ -487,8 +488,8 @@
 <script src="js/cloud.js?v=202610301800"></script>
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
-<script src="js/github.js?v=202611151000"></script>
-<script src="js/app.js?v=202611151000"></script>
+<script src="js/github.js?v=202611151230"></script>
+<script src="js/app.js?v=202611151230"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

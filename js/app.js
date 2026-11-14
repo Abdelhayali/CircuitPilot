@@ -241,6 +241,16 @@ const App = (() => {
   // mode: 'sch' (schematic .json), 'pcb' (PCB .json) or 'project' (both in one .zip, for EasyEDA Pro / Standard import)
   // pads the exported pour copper does not join (EasyEDA would report them unconnected)
   const pourWarn = () => { const w = EasyEDA.exportPcb.warnings || []; return w.length ? ' · ⚠ ' + w.join(' · ') : ''; };
+  // the design's parts linked to their EasyEDA library entries (so EasyEDA shows the same footprints on import)
+  async function linkEasyEDA() {
+    const S = Model.S, codes = [...new Set(S.components.map(c => Model.lcscOf(c)).filter(Boolean))], ids = {}, failed = [];
+    toast(`Linking ${codes.length} parts to the EasyEDA library…`, 20000);
+    await Promise.all(codes.map(async code => {
+      try { const p = await Engine.partsApi('get/' + encodeURIComponent(code)); if (p && p.puuid) ids[code] = { uuid: p.uuid, puuid: p.puuid, package: p.package || (p.footprint && p.footprint.name) }; else failed.push(code); }
+      catch (e) { failed.push(code); }
+    }));
+    return { ids, failed };
+  }
   async function easyedaExport(mode = 'sch') {
     // filling the pours for EasyEDA takes a while on big boards: say so before the page is busy
     const filling = () => (Model.S.pcb.pours || []).length ? (toast('Filling the copper pours for EasyEDA…', 60000), new Promise(r => setTimeout(r, 60))) : null;
@@ -250,12 +260,7 @@ const App = (() => {
       toast('EasyEDA PCB saved: footprints, tracks, vias, copper pours and the board outline. EasyEDA Pro: File → Import → EasyEDA (Standard) · Standard: File → Open → EasyEDA Source · the copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B) · EasyEDA Pro checks with its own rules: set the clearance to ' + Pcb.rules().clearance + ' mm (Design → Design Rule) or it reports gaps under 6 mil as errors' + pourWarn(), 20000);
       return;
     }
-    const S = Model.S, codes = [...new Set(S.components.map(c => Model.lcscOf(c)).filter(Boolean))], ids = {}, failed = [];
-    toast(`Linking ${codes.length} parts to the EasyEDA library…`, 20000);
-    await Promise.all(codes.map(async code => {
-      try { const p = await Engine.partsApi('get/' + encodeURIComponent(code)); if (p && p.puuid) ids[code] = { uuid: p.uuid, puuid: p.puuid, package: p.package || (p.footprint && p.footprint.name) }; else failed.push(code); }
-      catch (e) { failed.push(code); }
-    }));
+    const { ids, failed } = await linkEasyEDA(), S = Model.S;
     const sch = EasyEDA.exportSchematic(ids);
     let pcb = null;
     if (mode === 'project') { await filling(); try { pcb = EasyEDA.exportPcb(ids); } catch (e) { pcb = null; } }
@@ -1128,8 +1133,13 @@ const App = (() => {
       add(base + '-pcb.svg', Pcb.exportSVG());
       if (!opts.light) try { const e = await EncView.exportFiles(); for (const [n, d] of Object.entries(e)) add('enclosure/' + n, d); } catch (e) { skipped.push('enclosure: ' + e.message); }
     } else skipped.push('PCB files (no PCB yet)');
-    if (S.components.length) try { add('easyeda/SCH_' + base + '.json', EasyEDA.exportSchematic({})); } catch (e) { skipped.push('EasyEDA schematic: ' + e.message); }
-    if (hasPcb) try { add('easyeda/PCB_' + base + '.json', EasyEDA.exportPcb()); } catch (e) { skipped.push('EasyEDA PCB: ' + e.message); }
+    // EasyEDA import: one zip with the schematic and the PCB (parts linked to the EasyEDA library, as the EasyEDA menu export)
+    if (S.components.length) try {
+      const { ids } = await linkEasyEDA(), eb = (S.name || 'Project').replace(/[\/:*?"<>|]+/g, '_'), ez = { ['SCH_' + eb + '.json']: EasyEDA.exportSchematic(ids) };
+      if (hasPcb) ez['PCB_' + eb + '.json'] = EasyEDA.exportPcb(ids);
+      add('easyeda/' + base + '-EasyEDA-import.zip', new Uint8Array(await makeZip(ez).arrayBuffer()));
+      if (!hasPcb) skipped.push('EasyEDA PCB (no PCB yet)');
+    } catch (e) { skipped.push('EasyEDA: ' + e.message); }
     const shots = [['schematic', 'schematic.png', { sheet: 1 }]].concat(Sch.sheets().slice(1).map((_, i) => ['schematic', `schematic-sheet${i + 2}.png`, { sheet: i + 2 }]))
       .concat(hasPcb ? [['pcb', 'pcb-2d.png', {}], ['pcb_3d', 'pcb-3d.png', { side: 'iso' }], ['pcb_3d', 'pcb-3d-top.png', { side: 'top' }], ['pcb_3d', 'pcb-3d-bottom.png', { side: 'bottom' }], ['enclosure', 'enclosure.png', {}]] : []);
     if (opts.images !== false && !opts.light) for (const [view, name, a] of shots) { try { const r = await renderForAI(Object.assign({ view, full: true }, a)); add('images/' + name, b64bytes(r.data)); } catch (e) { skipped.push(name + ': ' + e.message); } }

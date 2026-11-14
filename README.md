@@ -37,7 +37,9 @@ You need **Python 3** (no extra packages to install). Git is optional.
 
    On macOS or Linux, use `python3`. On Windows you can double-click **`start.bat`** instead.
 4. Open **http://localhost:5173** in your browser.
-5. Press **🔑 Connect AI** and paste your key (or add it under **⚙ Settings**).
+5. Choose how you want to design:
+   - **With Claude Desktop (recommended, no AI key needed):** install [Claude Desktop](https://claude.com/download) and sign in, then press **⚙ Settings → Claude Desktop → Connect** (or, in the folder, run `node mcp/install-claude-desktop.mjs`; this needs [Node.js](https://nodejs.org) installed). Quit Claude Desktop completely and open it again. Claude now controls CircuitPilot's design tools: pick **Design a board with CircuitPilot** from the **+** menu or just describe the board.
+   - **With the built-in copilot:** press **🔑 Connect AI** and paste your key (or add it under **⚙ Settings**).
 
 Stop the server with **Ctrl+C**. To protect it with a password, add `--password YOUR_PASSWORD` to the command in step 3.
 

@@ -1,12 +1,16 @@
 'use strict';
-// Upload a design to a new private GitHub repository in the user's own account. The browser calls the GitHub REST API
-// directly with the user's personal access token (classic, scope "repo": GitHub only lets classic tokens create
-// repositories). The token is kept in this browser's localStorage and sent to api.github.com and nowhere else.
-// One commit holds every file: blobs → tree → commit → branch update (the Git Data API, so binary files work too).
+// Designs in the user's own GitHub account. Every design is a folder in one repository the user chooses (or creates):
+// repo/<design>/ holds the project file, Gerbers, BOM and CPL, EasyEDA files, netlist, images, PDFs and a README.
+// The browser calls the GitHub REST API directly. Sign-in: OAuth on pcbgo.site (the relay holds the client secret), or a
+// classic personal access token (scope "repo") anywhere. The token is kept in this browser's localStorage and sent only
+// to api.github.com. A save is one commit: only changed files are uploaded (blobs → tree → commit → branch).
 const GitHub = (() => {
-  const API = 'https://api.github.com', KEY = 'cp-github-token', BRANCH = 'main';
+  const API = 'https://api.github.com', KEY = 'cp-github-token', BRANCH = 'main', REPO_KEY = 'cp.github.repo';
+  const enc = new TextEncoder();
   const getToken = () => { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
   const setToken = t => { try { if (t) localStorage.setItem(KEY, t); else localStorage.removeItem(KEY); } catch (e) { } };
+  const getRepo = () => { try { return localStorage.getItem(REPO_KEY) || ''; } catch (e) { return ''; } };
+  const setRepo = r => { try { if (r) localStorage.setItem(REPO_KEY, r); else localStorage.removeItem(REPO_KEY); } catch (e) { } };
 
   async function api(method, path, body) {
     const r = await fetch(API + path, {
@@ -16,75 +20,40 @@ const GitHub = (() => {
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      const why = r.status === 401 ? 'the token is not valid (create a new one)' : r.status === 403 ? 'the token may lack the repo scope, or GitHub is rate-limiting: ' + (j.message || '') : j.message || r.statusText;
+      const why = r.status === 401 ? 'the sign-in expired or the token is not valid (sign in again)' : r.status === 403 ? 'the token may lack the repo scope, or GitHub is rate-limiting: ' + (j.message || '') : j.message || r.statusText;
       const err = new Error(`GitHub ${r.status}: ${why}`); err.status = r.status; throw err;
     }
     return j;
   }
-  // a file as base64 (strings are UTF-8 encoded first; Uint8Array is taken as is)
+  // a file as bytes (strings are UTF-8 encoded first)
+  const bytesOf = d => typeof d === 'string' ? enc.encode(d) : d;
   function b64(d) {
-    const bytes = typeof d === 'string' ? new TextEncoder().encode(d) : d;
+    const bytes = bytesOf(d);
     let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
     return btoa(s);
   }
-  const slugRepo = n => String(n || 'circuitpilot-design').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 90) || 'circuitpilot-design';
+  // git's blob id (SHA-1 of "blob <size>\0<content>"): lets an unchanged file be skipped without uploading it
+  async function gitSha(d) {
+    const bytes = bytesOf(d), head = enc.encode('blob ' + bytes.length + '\0'), all = new Uint8Array(head.length + bytes.length);
+    all.set(head); all.set(bytes, head.length);
+    return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-1', all)), b => b.toString(16).padStart(2, '0')).join('');
+  }
+  const slug = (n, fb) => String(n || fb).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 90) || fb;
 
-  // the README that goes into the repository: what the files are and where they came from
+  // the README of one design folder: what the files are and where they came from (paths relative to the folder)
   function readme(name, paths) {
     const groups = [['Design', p => /\.json$/.test(p)], ['Gerbers and drill (fabrication)', p => p.startsWith('gerbers/')], ['JLCPCB assembly (BOM + CPL)', p => p.startsWith('jlcpcb/')],
-      ['Netlist and BOM', p => /\.(net|csv)$/.test(p) && !p.startsWith('jlcpcb/')], ['Enclosure (3D print / sheet metal)', p => p.startsWith('enclosure/')], ['EasyEDA', p => p.startsWith('easyeda/')],
-      ['Images', p => p.startsWith('images/') || /\.svg$/.test(p)], ['PDF drawings and datasheet', p => /\.pdf$/.test(p)]];
+      ['EasyEDA (import in EasyEDA Pro / Standard)', p => p.startsWith('easyeda/')], ['Netlist and BOM', p => /\.(net|csv)$/.test(p) && !p.startsWith('jlcpcb/')],
+      ['Enclosure (3D print / sheet metal)', p => p.startsWith('enclosure/')], ['Images', p => p.startsWith('images/') || /\.svg$/.test(p)], ['PDF drawings and datasheet', p => /\.pdf$/.test(p)]];
     const used = new Set(), rows = [];
     for (const [title, test] of groups) { const list = paths.filter(p => !used.has(p) && test(p)); list.forEach(p => used.add(p)); if (list.length) rows.push(`### ${title}\n\n` + list.map(p => `- \`${p}\``).join('\n')); }
     const rest = paths.filter(p => !used.has(p)); if (rest.length) rows.push('### Other\n\n' + rest.map(p => `- \`${p}\``).join('\n'));
-    return `# ${name}\n\nCircuit design made with [CircuitPilot](https://pcbgo.site) (source: https://github.com/Abdelhayali/CircuitPilot).\n\nOpen the \`.circuit.json\` file in CircuitPilot (Projects → Open, or Folder → Import) to edit the design again.\n\n${rows.join('\n\n')}\n`;
+    return `# ${name}\n\nCircuit design made with [CircuitPilot](https://pcbgo.site) (source: https://github.com/Abdelhayali/CircuitPilot).\n\nOpen the \`.circuit.json\` file in CircuitPilot to edit the design again.\n\n${rows.join('\n\n')}\n`;
   }
 
-  // Uploads { name, files: { 'path/in/repo': string | Uint8Array } } to a new private repository.
-  // onStep(text) reports progress. Returns { url, repo, files }.
-  async function uploadDesign({ name, files }, onStep = () => { }) {
-    if (!getToken()) throw new Error('Paste your GitHub token first');
-    onStep('Checking your GitHub account…');
-    const me = await api('GET', '/user');
-    let repo = slugRepo('circuitpilot-' + (name || 'design')), made = null;
-    for (let n = 1; !made && n < 50; n++) {
-      const rn = n === 1 ? repo : `${repo}-${n}`;
-      try { made = await api('POST', '/user/repos', { name: rn, private: true, auto_init: true, description: `CircuitPilot design: ${name || rn}` }); repo = rn; }
-      catch (e) { if (e.status !== 422) throw e; }   // 422: the name is taken, try the next one
-    }
-    if (!made) throw new Error('Could not find a free repository name');
-    const owner = made.owner && made.owner.login || me.login, base = `/repos/${owner}/${repo}`;
-    onStep('Creating the repository…');
-    // auto_init creates the first commit a moment after the repository: wait for the branch
-    let head = null;
-    for (let i = 0; i < 20 && !head; i++) { try { head = await api('GET', `${base}/git/ref/heads/${BRANCH}`); } catch (e) { if (e.status !== 404) throw e; await new Promise(r => setTimeout(r, 700)); } }
-    if (!head) throw new Error('GitHub did not create the first commit in time (open the repository and try again)');
-    const parent = await api('GET', `${base}/git/commits/${head.object.sha}`);
-
-    const paths = Object.keys(files), entries = [];
-    const all = Object.assign({}, files, { 'README.md': readme(name || repo, paths.concat(['README.md'])) });
-    const names = Object.keys(all), total = names.length;
-    let done = 0;
-    // blobs, four at a time (GitHub asks clients not to hammer the API)
-    let next = 0;
-    await Promise.all(Array.from({ length: 4 }, async () => {
-      while (next < names.length) {
-        const p = names[next++], d = all[p];
-        const blob = await api('POST', `${base}/git/blobs`, { content: b64(d), encoding: 'base64' });
-        entries.push({ path: p, mode: '100644', type: 'blob', sha: blob.sha });
-        onStep(`Uploading files… ${++done}/${total}`);
-      }
-    }));
-    onStep('Saving one commit…');
-    const tree = await api('POST', `${base}/git/trees`, { base_tree: parent.tree.sha, tree: entries });
-    const commit = await api('POST', `${base}/git/commits`, { message: `CircuitPilot design: ${name || repo}`, tree: tree.sha, parents: [head.object.sha] });
-    await api('PATCH', `${base}/git/refs/heads/${BRANCH}`, { sha: commit.sha, force: false });
-    return { url: made.html_url || `https://github.com/${owner}/${repo}`, repo: `${owner}/${repo}`, files: names.length };
-  }
-
-  // ---------- sign in with GitHub (OAuth web flow; pcbgo.site only, the relay holds the client secret) ----------
-  // The page sends the user to github.com; GitHub returns to this page with ?code= and ?state=; the relay swaps the code
-  // for an access token; the token is saved like a pasted one. Needs an OAuth app whose callback URL is https://pcbgo.site/.
+  // ---------- sign in (OAuth web flow on pcbgo.site; the relay holds the client secret) ----------
+  // GitHub sends the user back to this page with ?code= and ?state=; the relay swaps the code for a token.
+  // Needs an OAuth app whose callback URL is https://pcbgo.site/.
   const clientId = () => (window.CP_CONFIG && CP_CONFIG.githubClientId) || '';
   const relayUrl = () => (window.CP_CONFIG && CP_CONFIG.relay) || '';
   const oauthAvailable = () => !!clientId() && /(^|\.)pcbgo\.site$/.test(location.hostname) && !!relayUrl();
@@ -111,10 +80,66 @@ const GitHub = (() => {
     setToken(j.access_token);
     return check();
   }
-  const signOut = () => setToken('');
+  const signOut = () => { setToken(''); setRepo(''); try { localStorage.removeItem('cp.github.login'); } catch (e) { } };
+
+  // ---------- repositories ----------
+  // the signed-in account's repositories (most recently updated first)
+  async function listRepos() {
+    const r = await api('GET', '/user/repos?per_page=100&sort=updated&affiliation=owner');
+    return r.map(x => ({ full: x.full_name, private: x.private }));
+  }
+  // a new private repository with a first commit (auto_init), named by the user
+  async function createRepo(name, desc) {
+    const rn = slug(name, 'circuitpilot-designs');
+    let made;
+    try { made = await api('POST', '/user/repos', { name: rn, private: true, auto_init: true, description: desc || 'CircuitPilot designs' }); }
+    catch (e) { if (e.status === 422) throw new Error(`A repository named “${rn}” already exists in your account — choose it from the list, or type another name`); throw e; }
+    const full = made.full_name, base = `/repos/${full}`;
+    // auto_init creates the first commit a moment after the repository: wait for the branch
+    for (let i = 0; i < 20; i++) { try { await api('GET', `${base}/git/ref/heads/${BRANCH}`); return full; } catch (e) { if (e.status !== 404) throw e; await new Promise(r => setTimeout(r, 700)); } }
+    throw new Error('GitHub did not create the first commit in time (open the repository on GitHub, then try again)');
+  }
+
+  // ---------- save one design into its folder of the repository ----------
+  // files: { 'name': string | Uint8Array } relative to the design folder. Returns { changed, folder, url }.
+  async function saveDesign({ repo, folder, name, files, onStep = () => { } }) {
+    const base = `/repos/${repo}`, prefix = folder ? folder + '/' : '';
+    const head = await api('GET', `${base}/git/ref/heads/${BRANCH}`);
+    const commit = await api('GET', `${base}/git/commits/${head.object.sha}`);
+    const tree = await api('GET', `${base}/git/trees/${commit.tree.sha}?recursive=1`);
+    const remote = new Map(tree.tree.filter(e => e.type === 'blob' && e.path.startsWith(prefix)).map(e => [e.path, e.sha]));
+    const want = Object.assign({}, files, { 'README.md': readme(name || folder, Object.keys(files).concat(['README.md'])) });
+    const todo = [];
+    for (const rel of Object.keys(want)) {
+      const path = prefix + rel, sha = await gitSha(want[rel]);
+      if (remote.get(path) === sha) { remote.delete(path); continue; }
+      todo.push([path, want[rel]]); remote.delete(path);
+    }
+    const gone = [...remote.keys()];   // files of this design that are no longer made: removed from the folder
+    const url = `https://github.com/${repo}/tree/${BRANCH}/${folder}`;
+    if (!todo.length && !gone.length) return { changed: 0, folder, url };
+    const entries = [];
+    // blobs, four at a time (GitHub asks clients not to hammer the API)
+    let next = 0, done = 0;
+    await Promise.all(Array.from({ length: 4 }, async () => {
+      while (next < todo.length) {
+        const [path, d] = todo[next++];
+        const blob = await api('POST', `${base}/git/blobs`, { content: b64(d), encoding: 'base64' });
+        entries.push({ path, mode: '100644', type: 'blob', sha: blob.sha });
+        onStep(`Uploading ${++done}/${todo.length} changed files…`);
+      }
+    }));
+    for (const path of gone) entries.push({ path, mode: '100644', type: 'blob', sha: null });
+    onStep('Saving one commit…');
+    const nt = await api('POST', `${base}/git/trees`, { base_tree: commit.tree.sha, tree: entries });
+    const nc = await api('POST', `${base}/git/commits`, { message: `Save ${name || folder} (${todo.length} changed${gone.length ? ', ' + gone.length + ' removed' : ''})`, tree: nt.sha, parents: [head.object.sha] });
+    await api('PATCH', `${base}/git/refs/heads/${BRANCH}`, { sha: nc.sha, force: false });
+    return { changed: todo.length + gone.length, folder, url };
+  }
 
   // Check the token; returns the account name (or throws)
-  async function check() { return (await api('GET', '/user')).login; }
+  async function check() { const login = (await api('GET', '/user')).login; try { localStorage.setItem('cp.github.login', login); } catch (e) { } return login; }
+  const account = () => { try { return localStorage.getItem('cp.github.login') || ''; } catch (e) { return ''; } };
 
-  return { getToken, setToken, uploadDesign, check, oauthAvailable, signIn, finishSignIn, signOut };
+  return { getToken, setToken, getRepo, setRepo, check, account, listRepos, createRepo, saveDesign, slug, oauthAvailable, signIn, finishSignIn, signOut };
 })();

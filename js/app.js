@@ -1126,13 +1126,14 @@ const App = (() => {
       for (const [n, t] of Object.entries(Pcb.gerbers())) add('gerbers/' + n, t);
       add('jlcpcb/' + base + '-BOM-JLCPCB.csv', Exports.bomJlc()); add('jlcpcb/' + base + '-CPL-JLCPCB.csv', Exports.cpl());
       add(base + '-pcb.svg', Pcb.exportSVG());
-      try { const e = await EncView.exportFiles(); for (const [n, d] of Object.entries(e)) add('enclosure/' + n, d); } catch (e) { skipped.push('enclosure: ' + e.message); }
-      try { const sch = EasyEDA.exportSchematic({}), pcb = EasyEDA.exportPcb(); add('easyeda/SCH_' + base + '.json', sch); add('easyeda/PCB_' + base + '.json', pcb); } catch (e) { skipped.push('EasyEDA: ' + e.message); }
+      if (!opts.light) try { const e = await EncView.exportFiles(); for (const [n, d] of Object.entries(e)) add('enclosure/' + n, d); } catch (e) { skipped.push('enclosure: ' + e.message); }
     } else skipped.push('PCB files (no PCB yet)');
+    if (S.components.length) try { add('easyeda/SCH_' + base + '.json', EasyEDA.exportSchematic({})); } catch (e) { skipped.push('EasyEDA schematic: ' + e.message); }
+    if (hasPcb) try { add('easyeda/PCB_' + base + '.json', EasyEDA.exportPcb()); } catch (e) { skipped.push('EasyEDA PCB: ' + e.message); }
     const shots = [['schematic', 'schematic.png', { sheet: 1 }]].concat(Sch.sheets().slice(1).map((_, i) => ['schematic', `schematic-sheet${i + 2}.png`, { sheet: i + 2 }]))
       .concat(hasPcb ? [['pcb', 'pcb-2d.png', {}], ['pcb_3d', 'pcb-3d.png', { side: 'iso' }], ['pcb_3d', 'pcb-3d-top.png', { side: 'top' }], ['pcb_3d', 'pcb-3d-bottom.png', { side: 'bottom' }], ['enclosure', 'enclosure.png', {}]] : []);
-    if (opts.images !== false) for (const [view, name, a] of shots) { try { const r = await renderForAI(Object.assign({ view, full: true }, a)); add('images/' + name, b64bytes(r.data)); } catch (e) { skipped.push(name + ': ' + e.message); } }
-    if (opts.pdf !== false) {
+    if (opts.images !== false && !opts.light) for (const [view, name, a] of shots) { try { const r = await renderForAI(Object.assign({ view, full: true }, a)); add('images/' + name, b64bytes(r.data)); } catch (e) { skipped.push(name + ': ' + e.message); } }
+    if (opts.pdf !== false && !opts.light) {
       if (hasPcb) try { const r = await PcbPdf.export({ blob: true }); add(base + '-pcb-drawing.pdf', new Uint8Array(await r.blob.arrayBuffer())); } catch (e) { skipped.push('PCB drawing PDF: ' + e.message); }
       try { const b = await DocView.pdf({ blob: true }); if (b) add(base + '-datasheet.pdf', new Uint8Array(await b.arrayBuffer())); } catch (e) { skipped.push('datasheet PDF: ' + e.message); }
     }
@@ -1146,32 +1147,109 @@ const App = (() => {
     return { zip: base + '-all.zip', files: Object.keys(files).map(n => n.slice(base.length + 1)), skipped };
   }
 
-  // ---------- upload the whole project to a new private GitHub repository (js/github.js) ----------
+  // ---------- save designs to GitHub (js/github.js): one folder per design in the repository the user chooses ----------
+  const ghMap = () => { try { return JSON.parse(localStorage.getItem('cp.github.folders') || '{}'); } catch (e) { return {}; } };
+  // the design's folder in the repository: chosen once, kept when the design is renamed
+  function ghFolder() {
+    const S = Model.S, map = ghMap(), key = S.id || 'new:' + (S.name || '');
+    if (!map[key]) { map[key] = GitHub.slug(S.name, 'design'); try { localStorage.setItem('cp.github.folders', JSON.stringify(map)); } catch (e) { } }
+    return map[key];
+  }
+  // one save: every file of the open design, or without images, PDFs and enclosure files when light (autosave)
+  async function ghSave({ light = false, onStep = () => { } } = {}) {
+    const repo = GitHub.getRepo(); if (!repo) throw new Error('Choose a repository first');
+    const folder = ghFolder(), name = Model.S.name || folder;
+    const { base, files, skipped } = await buildAll({ light });
+    const out = {}; for (const [n, d] of Object.entries(files)) out[n.slice(base.length + 1)] = d;
+    const r = await GitHub.saveDesign({ repo, folder, name, files: out, onStep });
+    return Object.assign(r, { skipped, repo });
+  }
+  const ghAutoOn = () => { try { return localStorage.getItem('cp.github.auto') === '1'; } catch (e) { return false; } };
+  let ghAutoT = null, ghAutoBusy = false, ghAutoAgain = false;
+  function ghPaint(text, cls) { const b = $('#ghBtn'); if (b) { b.textContent = text; b.className = 'cloudbtn ghbtn ' + (cls || ''); } }
+  function ghPaintIdle() { ghPaint(GitHub.getToken() ? '⌥ ' + (GitHub.account() || 'GitHub') : '⌥ GitHub', GitHub.getToken() && GitHub.getRepo() ? 'ok' : ''); }
+  // after every project autosave: a few seconds later the design goes to GitHub (only when auto-save is on)
+  function ghAutoSaved() {
+    if (!ghAutoOn() || !GitHub.getToken() || !GitHub.getRepo()) return;
+    clearTimeout(ghAutoT); ghAutoT = setTimeout(ghAutoRun, 15000);
+  }
+  async function ghAutoRun() {
+    if (ghAutoBusy) { ghAutoAgain = true; return; }
+    ghAutoBusy = true; ghPaint('⌥ saving…', 'busy');
+    try { const r = await ghSave({ light: true }); ghPaint('⌥ ' + (GitHub.account() || 'GitHub') + ' ✓', 'ok'); if (r.changed) toast(`Saved to GitHub: ${r.folder} (${r.changed} changed files)`, 4000); }
+    catch (e) { ghPaint('⌥ GitHub !', 'error'); toast('GitHub auto-save: ' + e.message, 9000); }
+    finally { ghAutoBusy = false; if (ghAutoAgain) { ghAutoAgain = false; ghAutoRun(); } }
+  }
+  window.GitHubAuto = { saved: ghAutoSaved };
+
+  // the dialog: sign in (or paste a token) → choose or create a repository → save the design
+  function ghRepoChanged() {
+    const v = $('#ghRepo').value, isNew = v === '__new';
+    $('#ghNewBox').style.display = isNew ? '' : 'none';
+    $('#ghUse').textContent = isNew ? 'Create private repository' : 'Use this repository';
+    $('#ghUse').disabled = !v;
+    $('#ghRepoHint').textContent = isNew ? 'It is created as a private repository in your account.' : '';
+  }
+  async function ghLoadRepos() {
+    const sel = $('#ghRepo'), cur = GitHub.getRepo();
+    sel.innerHTML = '<option value="">Loading your repositories…</option>';
+    try {
+      const list = await GitHub.listRepos();
+      sel.innerHTML = '<option value="">— choose a repository —</option>' + list.map(r => `<option value="${esc(r.full)}">${esc(r.full)}${r.private ? ' (private)' : ''}</option>`).join('') + '<option value="__new">+ New repository…</option>';
+      sel.value = cur && list.some(r => r.full === cur) ? cur : '';
+    } catch (e) { sel.innerHTML = '<option value="">Could not load repositories</option><option value="__new">+ New repository…</option>'; $('#ghStatus').textContent = e.message; }
+    ghRepoChanged(); ghShowSave();
+  }
+  function ghShowSave() {
+    const repo = GitHub.getRepo(), box = $('#ghSaveBox');
+    box.style.display = repo ? '' : 'none';
+    if (repo) $('#ghWhere').textContent = `Saved in ${repo}, in the folder “${ghFolder()}” (each design has its own folder).`;
+    $('#ghAuto').checked = ghAutoOn();
+  }
+  function ghRefresh() {
+    const signedIn = !!GitHub.getToken();
+    $('#ghOut').style.display = signedIn ? 'none' : '';
+    $('#ghIn').style.display = signedIn ? '' : 'none';
+    $('#ghOauth').style.display = GitHub.oauthAvailable() ? '' : 'none';
+    $('#ghWho').textContent = signedIn ? 'Signed in as ' + (GitHub.account() || 'GitHub account') : '';
+    if (signedIn) ghLoadRepos(); else $('#ghSaveBox').style.display = 'none';
+    ghPaintIdle();
+  }
   function openGithub() {
     const m = $('#ghModal'); if (!m) return;
-    $('#ghToken').value = ''; $('#ghTokenSaved').textContent = GitHub.getToken() ? 'A token is saved in this browser.' : 'No token saved yet.';
-    $('#ghForget').style.display = GitHub.getToken() ? '' : 'none';
-    $('#ghStatus').textContent = ''; $('#ghLink').innerHTML = ''; $('#ghGo').disabled = false;
-    const sign = $('#ghSignin'), acct = $('#ghAccount');
-    sign.style.display = GitHub.oauthAvailable() ? '' : 'none';
-    acct.textContent = GitHub.getToken() ? 'Signed in.' : '';
+    $('#ghStatus').textContent = ''; $('#ghLink').innerHTML = ''; $('#ghToken').value = '';
+    ghRefresh();
     m.classList.remove('hidden');
   }
-  async function uploadGithub() {
-    const typed = $('#ghToken').value.trim();
-    if (typed) GitHub.setToken(typed);
-    if (!GitHub.getToken()) { $('#ghStatus').textContent = 'Paste your GitHub token first.'; return; }
+  async function ghUseRepo() {
+    const v = $('#ghRepo').value, st = $('#ghStatus'), btn = $('#ghUse'); btn.disabled = true;
+    try {
+      if (v === '__new') {
+        st.textContent = 'Creating the repository…';
+        const full = await GitHub.createRepo($('#ghNewName').value);
+        GitHub.setRepo(full); st.textContent = `Created ${full}. Press Save design now.`;
+      } else { GitHub.setRepo(v); st.textContent = `Designs will be saved in ${v}.`; }
+      await ghLoadRepos(); ghPaintIdle();
+    } catch (e) { st.textContent = e.message; }
+    finally { btn.disabled = false; }
+  }
+  async function ghSaveNow() {
     const st = $('#ghStatus'), go = $('#ghGo'); go.disabled = true; $('#ghLink').innerHTML = '';
     try {
-      const { base, files, skipped } = await buildAll({});
-      const out = {}; for (const [n, d] of Object.entries(files)) out[n.slice(base.length + 1)] = d;
-      const r = await GitHub.uploadDesign({ name: Model.S.name, files: out }, t => st.textContent = t);
-      st.textContent = `Uploaded ${r.files} files to your GitHub account.${skipped.length ? ' Not included: ' + skipped.join('; ') : ''}`;
-      $('#ghLink').innerHTML = `<a href="${r.url}" target="_blank" rel="noopener">Open ${r.repo} on GitHub ↗</a>`;
-      $('#ghForget').style.display = '';
+      const r = await ghSave({ light: false, onStep: t => st.textContent = t });
+      st.textContent = r.changed ? `Saved ${r.changed} changed files to ${r.repo}/${r.folder}.${r.skipped.length ? ' Not included: ' + r.skipped.join('; ') : ''}` : `No changes since the last save (${r.repo}/${r.folder}).`;
+      $('#ghLink').innerHTML = `<a href="${r.url}" target="_blank" rel="noopener">Open the folder on GitHub ↗</a>`;
+      ghPaintIdle();
     } catch (e) { st.textContent = e.message; }
     finally { go.disabled = false; }
   }
+  async function ghPasteToken() {
+    const t = $('#ghToken').value.trim(), st = $('#ghStatus'); if (!t) { st.textContent = 'Paste a token first.'; return; }
+    GitHub.setToken(t);
+    try { await GitHub.check(); st.textContent = 'Signed in.'; ghRefresh(); }
+    catch (e) { GitHub.setToken(''); st.textContent = e.message; }
+  }
+
   function exportAs(kind) {
     const S = Model.S;
     try {
@@ -1375,11 +1453,21 @@ const App = (() => {
     };
     $('#cncClose').onclick = () => $('#cncModal').classList.add('hidden');
     $('#ghClose').onclick = () => $('#ghModal').classList.add('hidden');
-    $('#ghGo').onclick = uploadGithub;
-    $('#ghForget').onclick = () => { GitHub.signOut(); $('#ghAccount').textContent = ''; $('#ghTokenSaved').textContent = 'The token was removed from this browser.'; $('#ghForget').style.display = 'none'; };
+    $('#ghBtn').onclick = openGithub;
+    $('#ghGo').onclick = ghSaveNow;
+    $('#ghUse').onclick = ghUseRepo;
+    $('#ghRepo').onchange = ghRepoChanged;
+    $('#ghSignOut').onclick = () => { GitHub.signOut(); $('#ghStatus').textContent = 'Signed out of GitHub in this browser.'; ghRefresh(); };
+    $('#ghSaveToken').onclick = ghPasteToken;
     $('#ghOauth').onclick = () => { try { GitHub.signIn(); } catch (e) { $('#ghStatus').textContent = e.message; } };
-    // back from github.com with a code: finish the sign-in, then open the upload dialog
+    $('#ghAuto').onchange = e => {
+      try { localStorage.setItem('cp.github.auto', e.target.checked ? '1' : ''); } catch (err) { }
+      if (e.target.checked && !GitHub.getRepo()) $('#ghStatus').textContent = 'Choose a repository to turn auto-save on.';
+      else if (e.target.checked) ghAutoSaved();
+    };
+    // back from github.com with a code: finish the sign-in, then open the dialog
     GitHub.finishSignIn().then(login => { if (login) { toast(`Signed in to GitHub as ${login}`, 6000); openGithub(); } }).catch(e => toast(e.message, 9000));
+    ghPaintIdle();
     $('#cncUpdate').onclick = cncRun;
     for (const id of Object.values(CNC_F)) $('#' + id).onchange = cncRun;
     $('#cncDownload').onclick = () => {

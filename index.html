@@ -28,7 +28,7 @@
         <button data-exp="all" title="Every file of this project in one zip: project, Gerbers, JLCPCB BOM + pick-and-place, BOM, netlist, enclosure STL, EasyEDA files, PDFs, images">Everything (.zip)</button>
         <button data-exp="json">Project file (.json)</button>
         <button data-exp="gerber">Gerber + drill (.zip)</button>
-        <button data-exp="github" title="Every file of this project (project, Gerbers, BOM + CPL, enclosure, PDFs, images) in a new private repository in your GitHub account">Upload to GitHub (new private repo)</button>
+        <button data-exp="github" title="Save this design to your GitHub account: one folder per design in a repository you choose">Save to GitHub…</button>
         <button data-exp="bomjlc">BOM for JLCPCB assembly (.csv)</button>
         <button data-exp="cpl" title="Pick-and-place file for JLCPCB assembly: upload it as the CPL file next to the BOM">Pick-and-place / CPL for JLCPCB (.csv)</button>
         <button data-exp="bom">Bill of materials (.csv)</button>
@@ -48,6 +48,7 @@
   <input id="projName" spellcheck="false" title="Project name — click to rename">
   <span id="saveState"></span><span id="folderState" class="hidden folderstate"></span>
   <span class="cloudwrap"><button id="cloudBtn" class="cloudbtn">☁ Sign in</button><div id="cloudPanel" class="cloudpanel hidden"></div></span>
+  <button id="ghBtn" class="cloudbtn ghbtn" title="Save your designs to GitHub: one folder per design in a repository you choose">⌥ GitHub</button>
   <button id="btnTheme" title="Theme"></button>
   <a id="btnGuide" class="guidebtn" href="https://pcbgo.site/docs/CircuitPilot-Tutorial.pdf" target="_blank" rel="noopener" title="Tutorial and user guide (PDF): getting started, every tool, Claude Desktop, the Windows app">📖 Guide</a>
   <button id="btnSettings">⚙ Settings</button>
@@ -367,19 +368,34 @@
 </div>
 <div id="ghModal" class="hidden modal">
   <div class="dlg">
-    <div class="row-h"><h2>Upload to GitHub</h2><button id="ghClose">✕</button></div>
-    <p class="muted" style="margin:2px 0 8px;font-size:12px">Creates a <b>private</b> repository in your GitHub account named after the project and commits every file of the design in one commit: the project file, Gerbers and drill, JLCPCB BOM and CPL, netlist, enclosure files, EasyEDA files, images and PDFs, plus a README.</p>
-    <p class="muted" style="margin:2px 0 8px;font-size:12px">You need a <b>classic personal access token with the <code>repo</code> scope</b> (GitHub: Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token). Fine-grained tokens cannot create repositories. The token stays in this browser and is sent only to api.github.com.</p>
-    <div id="ghSignin" style="display:none;margin:4px 0 12px">
-      <button id="ghOauth" class="primary">Sign in with GitHub</button>
-      <span class="muted small" id="ghAccount" style="margin-left:8px"></span>
+    <div class="row-h"><h2>GitHub</h2><button id="ghClose">✕</button></div>
+    <p class="muted" style="margin:2px 0 8px;font-size:12px">Save your designs in your own GitHub account. Each design is a folder in one repository you choose: the project file, Gerbers, BOM and CPL, EasyEDA files, netlist, images, PDFs and a README.</p>
+
+    <div id="ghOut">
+      <button id="ghOauth" class="primary" style="display:none">Sign in with GitHub</button>
+      <p class="muted small" style="margin:8px 0 4px">Or paste a classic personal access token with the <code>repo</code> scope (GitHub: Settings → Developer settings → Personal access tokens → Tokens (classic)). Fine-grained tokens cannot create repositories. The token stays in this browser.</p>
+      <input id="ghToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_…" style="width:100%">
+      <div class="row-h" style="margin-top:8px"><span></span><button id="ghSaveToken">Use this token</button></div>
     </div>
-    <label class="muted small" for="ghToken">Token (or sign in above)</label>
-    <input id="ghToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… (leave empty to use the saved token)" style="width:100%;margin-bottom:4px">
-    <div class="muted small" id="ghTokenSaved"></div>
-    <div class="row-h" style="margin-top:10px">
-      <button id="ghForget" style="display:none">Sign out / forget token</button>
-      <button id="ghGo" class="primary">Upload to GitHub</button>
+
+    <div id="ghIn" style="display:none">
+      <div class="row-h"><span id="ghWho" class="small"></span><button id="ghSignOut">Sign out</button></div>
+      <label class="muted small" for="ghRepo" style="display:block;margin-top:8px">Repository</label>
+      <select id="ghRepo" style="width:100%"></select>
+      <div id="ghNewBox" style="display:none;margin-top:6px">
+        <label class="muted small" for="ghNewName">Name of the new repository</label>
+        <input id="ghNewName" value="circuitpilot-designs" spellcheck="false" style="width:100%">
+      </div>
+      <div class="row-h" style="margin-top:8px"><span class="muted small" id="ghRepoHint"></span><button id="ghUse" class="primary">Use this repository</button></div>
+    </div>
+
+    <div id="ghSaveBox" style="display:none;margin-top:12px;padding-top:10px;border-top:1px solid var(--line, #333)">
+      <p class="small" style="margin:0 0 8px" id="ghWhere"></p>
+      <div class="row-h">
+        <label class="small"><input type="checkbox" id="ghAuto"> Auto-save after changes</label>
+        <button id="ghGo" class="primary">Save design now</button>
+      </div>
+      <p class="muted small" style="margin:6px 0 0">Auto-save sends the design, Gerbers, BOM and CPL, EasyEDA files and netlist a few seconds after each change. Images, PDFs and enclosure files come with “Save design now”. Only changed files are uploaded.</p>
     </div>
     <p id="ghStatus" class="small" style="margin:10px 0 0;min-height:1.2em"></p>
     <p id="ghLink" style="margin:6px 0 0"></p>
@@ -464,12 +480,12 @@
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202610301800"></script>
-<script src="js/projects.js?v=202610301800"></script>
+<script src="js/projects.js?v=202611151000"></script>
 <script src="js/cloud.js?v=202610301800"></script>
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
-<script src="js/github.js?v=202611141200"></script>
-<script src="js/app.js?v=202611141200"></script>
+<script src="js/github.js?v=202611151000"></script>
+<script src="js/app.js?v=202611151000"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

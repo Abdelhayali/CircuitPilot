@@ -45,6 +45,7 @@ const Projects = (() => {
       remember();
       setStatus(Model.snapshot() === lastSaved ? 'saved' : 'dirty');
       if (typeof Cloud !== 'undefined') Cloud.saved(Model.S.id);   // signed in with Google: the project goes to Drive too
+      if (window.GitHubAuto) GitHubAuto.saved();   // auto-save to GitHub, if turned on
       return true;
     } catch (e) { setStatus('error', e.message); return false; }
     finally { saving = false; if (again) { again = false; schedule(); } }

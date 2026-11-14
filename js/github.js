@@ -82,8 +82,39 @@ const GitHub = (() => {
     return { url: made.html_url || `https://github.com/${owner}/${repo}`, repo: `${owner}/${repo}`, files: names.length };
   }
 
+  // ---------- sign in with GitHub (OAuth web flow; pcbgo.site only, the relay holds the client secret) ----------
+  // The page sends the user to github.com; GitHub returns to this page with ?code= and ?state=; the relay swaps the code
+  // for an access token; the token is saved like a pasted one. Needs an OAuth app whose callback URL is https://pcbgo.site/.
+  const clientId = () => (window.CP_CONFIG && CP_CONFIG.githubClientId) || '';
+  const relayUrl = () => (window.CP_CONFIG && CP_CONFIG.relay) || '';
+  const oauthAvailable = () => !!clientId() && /(^|\.)pcbgo\.site$/.test(location.hostname) && !!relayUrl();
+  const callback = () => location.origin + '/';
+  const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+  function signIn() {
+    if (!oauthAvailable()) throw new Error('GitHub sign-in is not set up for this site');
+    const state = rnd();
+    try { sessionStorage.setItem('cp-github-state', state); } catch (e) { }
+    const q = new URLSearchParams({ client_id: clientId(), redirect_uri: callback(), scope: 'repo', state, allow_signup: 'true' });
+    location.href = 'https://github.com/login/oauth/authorize?' + q;
+  }
+  // called when the page loads: if GitHub sent the user back with a code, finish the sign-in
+  async function finishSignIn() {
+    const u = new URL(location.href), code = u.searchParams.get('code'), state = u.searchParams.get('state');
+    if (!code || !state || !oauthAvailable()) return null;
+    const want = (() => { try { return sessionStorage.getItem('cp-github-state'); } catch (e) { return null; } })();
+    history.replaceState(null, '', location.pathname + location.hash);
+    try { sessionStorage.removeItem('cp-github-state'); } catch (e) { }
+    if (!want || want !== state) throw new Error('GitHub sign-in was cancelled or did not match (try again)');
+    const r = await fetch(relayUrl().replace(/\/$/, '') + '/github/token', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, redirect_uri: callback() }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.access_token) throw new Error('GitHub sign-in failed: ' + (j.error || r.statusText));
+    setToken(j.access_token);
+    return check();
+  }
+  const signOut = () => setToken('');
+
   // Check the token; returns the account name (or throws)
   async function check() { return (await api('GET', '/user')).login; }
 
-  return { getToken, setToken, uploadDesign, check };
+  return { getToken, setToken, uploadDesign, check, oauthAvailable, signIn, finishSignIn, signOut };
 })();

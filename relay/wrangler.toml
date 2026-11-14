@@ -5,3 +5,8 @@ compatibility_date = "2025-01-01"
 [vars]
 # Websites allowed to use this relay (comma separated). Add your own GitHub Pages address if you fork the project.
 ALLOWED_ORIGINS = "https://pcbgo.site,https://www.pcbgo.site,https://bodynet.net,https://www.bodynet.net,https://abdelhayali.github.io,http://localhost:5173,http://127.0.0.1:5173"
+
+# GitHub sign-in (optional). The client ID is public; the client secret is NOT stored here:
+#   npx wrangler secret put GITHUB_CLIENT_SECRET
+# and set GITHUB_CLIENT_ID below to the OAuth app's Client ID.
+GITHUB_CLIENT_ID = ""

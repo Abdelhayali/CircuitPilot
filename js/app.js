@@ -1152,6 +1152,9 @@ const App = (() => {
     $('#ghToken').value = ''; $('#ghTokenSaved').textContent = GitHub.getToken() ? 'A token is saved in this browser.' : 'No token saved yet.';
     $('#ghForget').style.display = GitHub.getToken() ? '' : 'none';
     $('#ghStatus').textContent = ''; $('#ghLink').innerHTML = ''; $('#ghGo').disabled = false;
+    const sign = $('#ghSignin'), acct = $('#ghAccount');
+    sign.style.display = GitHub.oauthAvailable() ? '' : 'none';
+    acct.textContent = GitHub.getToken() ? 'Signed in.' : '';
     m.classList.remove('hidden');
   }
   async function uploadGithub() {
@@ -1373,7 +1376,10 @@ const App = (() => {
     $('#cncClose').onclick = () => $('#cncModal').classList.add('hidden');
     $('#ghClose').onclick = () => $('#ghModal').classList.add('hidden');
     $('#ghGo').onclick = uploadGithub;
-    $('#ghForget').onclick = () => { GitHub.setToken(''); $('#ghTokenSaved').textContent = 'The token was removed from this browser.'; $('#ghForget').style.display = 'none'; };
+    $('#ghForget').onclick = () => { GitHub.signOut(); $('#ghAccount').textContent = ''; $('#ghTokenSaved').textContent = 'The token was removed from this browser.'; $('#ghForget').style.display = 'none'; };
+    $('#ghOauth').onclick = () => { try { GitHub.signIn(); } catch (e) { $('#ghStatus').textContent = e.message; } };
+    // back from github.com with a code: finish the sign-in, then open the upload dialog
+    GitHub.finishSignIn().then(login => { if (login) { toast(`Signed in to GitHub as ${login}`, 6000); openGithub(); } }).catch(e => toast(e.message, 9000));
     $('#cncUpdate').onclick = cncRun;
     for (const id of Object.values(CNC_F)) $('#' + id).onchange = cncRun;
     $('#cncDownload').onclick = () => {

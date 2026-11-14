@@ -34,7 +34,7 @@ function publicUrl(raw) {
   return u;
 }
 
-async function relay(req, url) {
+async function relay(req, url, env) {
   const p = url.pathname;
   let m;
   if (p === '/jlcpcb/search' && req.method === 'POST')
@@ -64,6 +64,19 @@ async function relay(req, url) {
     if (+(r.headers.get('content-length') || 0) > MAX_BYTES) throw new Error('Document larger than 15 MB');
     const out = new Response(r.body, r); out.headers.set('x-final-url', r.url); return out;
   }
+  // GitHub sign-in: the browser sends the code it got from github.com; the client secret stays here (a Worker secret,
+  // never in the page). The access token goes back to the browser only; nothing is stored.
+  if (p === '/github/token' && req.method === 'POST') {
+    if (!env || !env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) return json({ error: 'GitHub sign-in is not set up on this relay' }, 503, {});
+    const body = await req.json().catch(() => ({}));
+    const code = String(body.code || '');
+    if (!/^[A-Za-z0-9_-]{6,128}$/.test(code)) return json({ error: 'Bad code' }, 400, {});
+    const r = await fetch('https://github.com/login/oauth/access_token', { method: 'POST', headers: { 'content-type': 'application/json', 'accept': 'application/json', 'user-agent': UA },
+      body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code, redirect_uri: String(body.redirect_uri || '') }) });
+    const j = await r.json().catch(() => ({}));
+    if (!j.access_token) return json({ error: j.error_description || j.error || 'GitHub did not return a token' }, 400, {});
+    return json({ access_token: j.access_token, scope: j.scope || '' }, 200, {});
+  }
   if (p === '/' || p === '/health') return json({ ok: true, service: 'circuitpilot-relay' }, 200, {});
   return null;
 }
@@ -78,7 +91,7 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: ok ? 204 : 403, headers: cors });
     if (!ok && url.pathname !== '/' && url.pathname !== '/health') return json({ error: 'This relay only serves the CircuitPilot web app (origin not allowed: ' + (origin || 'none') + ')' }, 403, {});
     try {
-      const r = await relay(req, url);
+      const r = await relay(req, url, env);
       if (!r) return json({ error: 'Unknown relay route ' + url.pathname }, 404, cors);
       const h = new Headers(cors);
       for (const k of ['content-type', 'x-final-url']) { const v = r.headers.get(k); if (v) h.set(k, v); }

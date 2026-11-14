@@ -6,4 +6,7 @@ window.CP_CONFIG = {
   // Google sign-in (projects in the user's own Google Drive): the OAuth "Web application" client ID from Google Cloud
   // Console, with the authorized JavaScript origins https://pcbgo.site and http://localhost:5173. Not a secret.
   googleClientId: '773131004199-8ajg71r8fuv8l0463qmajip7o8bjeqjp.apps.googleusercontent.com',
+  // GitHub sign-in: the Client ID of the GitHub OAuth app (callback URL https://pcbgo.site/). Public, not a secret.
+  // The client secret lives in the relay (GITHUB_CLIENT_SECRET). Empty = the sign-in button stays hidden.
+  githubClientId: '',
 };

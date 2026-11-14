@@ -370,11 +370,15 @@
     <div class="row-h"><h2>Upload to GitHub</h2><button id="ghClose">✕</button></div>
     <p class="muted" style="margin:2px 0 8px;font-size:12px">Creates a <b>private</b> repository in your GitHub account named after the project and commits every file of the design in one commit: the project file, Gerbers and drill, JLCPCB BOM and CPL, netlist, enclosure files, EasyEDA files, images and PDFs, plus a README.</p>
     <p class="muted" style="margin:2px 0 8px;font-size:12px">You need a <b>classic personal access token with the <code>repo</code> scope</b> (GitHub: Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token). Fine-grained tokens cannot create repositories. The token stays in this browser and is sent only to api.github.com.</p>
-    <label class="muted small" for="ghToken">Token</label>
+    <div id="ghSignin" style="display:none;margin:4px 0 12px">
+      <button id="ghOauth" class="primary">Sign in with GitHub</button>
+      <span class="muted small" id="ghAccount" style="margin-left:8px"></span>
+    </div>
+    <label class="muted small" for="ghToken">Token (or sign in above)</label>
     <input id="ghToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_… (leave empty to use the saved token)" style="width:100%;margin-bottom:4px">
     <div class="muted small" id="ghTokenSaved"></div>
     <div class="row-h" style="margin-top:10px">
-      <button id="ghForget" style="display:none">Forget token</button>
+      <button id="ghForget" style="display:none">Sign out / forget token</button>
       <button id="ghGo" class="primary">Upload to GitHub</button>
     </div>
     <p id="ghStatus" class="small" style="margin:10px 0 0;min-height:1.2em"></p>
@@ -433,7 +437,7 @@
 </div>
 <div id="toast"></div>
 
-<script src="js/config.js?v=202610301800"></script>
+<script src="js/config.js?v=202611141200"></script>
 <script src="js/static-backend.js?v=202610301800"></script>
 <script src="js/lib.js?v=202610301800"></script>
 <script src="js/view.js?v=202610301800"></script>
@@ -464,8 +468,8 @@
 <script src="js/cloud.js?v=202610301800"></script>
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
-<script src="js/github.js?v=202611140900"></script>
-<script src="js/app.js?v=202611140915"></script>
+<script src="js/github.js?v=202611141200"></script>
+<script src="js/app.js?v=202611141200"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

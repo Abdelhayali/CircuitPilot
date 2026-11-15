@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202610301800">
+<link rel="stylesheet" href="styles.css?v=202611160900">
 </head>
 <body>
 <header id="top">
@@ -74,6 +74,7 @@
         <button class="tab" data-view="doc">Documentation</button>
       </div>
       <div id="schTools" class="tools">
+        <button id="btnComps" title="Every component of the design in one list: search by reference, value, part, footprint, LCSC number, sheet, net or pin. Click one to go to it">☰ Components</button>
         <button id="btnOrganize" title="Readable schematic: ICs in a row, every small part next to the pin it connects to, GND parts vertical with GND down, supply parts vertical with 3V3 / VDD up, wires routed around the symbols">✨ Organize</button>
         <button id="btnLayout">Auto-layout</button>
         <button id="btnDbParts" title="Give every built-in part the footprint and pinout of a real JLCPCB part">⇄ JLCPCB parts</button>
@@ -366,6 +367,15 @@
     <div class="row end"><button id="shDraw">✎ Draw outline</button><button id="shApply" class="primary">Apply</button></div>
   </div>
 </div>
+<div id="compModal" class="hidden modal">
+  <div class="dlg comp-dlg">
+    <div class="row-h"><h2>Components</h2><button id="compClose">✕</button></div>
+    <input id="compSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search: reference, value, part, footprint, LCSC, sheet, net or pin…" style="width:100%">
+    <p class="muted small" id="compCount" style="margin:6px 0"></p>
+    <div id="compList" class="comp-list"></div>
+    <p class="muted small" style="margin:8px 0 0">Every word must match (e.g. “esp 3v3”). Enter goes to the first result; click a part to see it in the schematic.</p>
+  </div>
+</div>
 <div id="ghModal" class="hidden modal">
   <div class="dlg">
     <div class="row-h"><h2>GitHub</h2><button id="ghClose">✕</button></div>
@@ -489,7 +499,7 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
 <script src="js/github.js?v=202611151230"></script>
-<script src="js/app.js?v=202611152030"></script>
+<script src="js/app.js?v=202611160900"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

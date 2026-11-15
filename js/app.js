@@ -1368,6 +1368,39 @@ const App = (() => {
     } catch (e) { return { error: e.message }; }
   }
   window.CPGitHubFromClaude = ghFromClaude;
+  // ---------- Components: every part of the design in one searchable list ----------
+  let compHits = [];
+  function compRows() {
+    const S = Model.S, sheets = Sch.sheets(), netsOf = {};
+    for (const [n, pins] of Object.entries(S.nets || {})) for (const p of pins) {
+      const i = p.lastIndexOf('.'), ref = p.slice(0, i); (netsOf[ref] = netsOf[ref] || []).push({ net: n, pin: p.slice(i + 1) });
+    }
+    return S.components.map(c => {
+      const nets = netsOf[c.ref] || [], sheet = (sheets[Model.sheetOf(c)] || {}).name || 'Main', lcsc = Model.lcscOf(c) || '';
+      const text = [c.ref, c.type, c.value, c.footprint, c.name, lcsc, sheet, ...nets.flatMap(x => [x.net, x.pin, c.ref + '.' + x.pin])].join(' ').toLowerCase();
+      return { c, nets, sheet, lcsc, text };
+    });
+  }
+  function compShow() {
+    const q = $('#compSearch').value.trim().toLowerCase().split(/\s+/).filter(Boolean), all = compRows();
+    compHits = all.filter(r => q.every(t => r.text.includes(t)));
+    $('#compCount').textContent = all.length ? `${compHits.length} of ${all.length} parts` : 'No parts in this design yet';
+    $('#compList').innerHTML = all.length ? `<div class="comp-row comp-head"><span>Ref</span><span>Value</span><span>Part</span><span>Footprint</span><span>LCSC</span><span>Sheet</span></div>` +
+      compHits.map((r, i) => `<button class="comp-row" data-i="${i}"><span><b>${esc(r.c.ref)}</b></span><span>${esc(r.c.value || '')}</span><span>${esc(r.c.type || '')}</span><span>${esc(r.c.footprint || '')}</span><span>${esc(r.lcsc)}</span><span>${esc(r.sheet)}</span>` +
+        `<span class="cnets">${r.nets.length ? esc([...new Set(r.nets.map(x => x.net))].join(', ')) : 'no nets'}</span></button>`).join('') : '';
+    $('#compList').querySelectorAll('.comp-row[data-i]').forEach(b => b.onclick = () => compGo(compHits[+b.dataset.i]));
+  }
+  // go to a part in the schematic: switch view and sheet, select it, zoom to it
+  function compGo(r) {
+    if (!r) return;
+    $('#compModal').classList.add('hidden');
+    if (view !== 'sch') showView('sch');
+    const sh = Model.sheetOf(r.c);
+    if (Sch.ui.sheet !== sh) Sch.setSheet(sh);
+    Sch.select(r.c.ref);
+    if (r.c.x != null) Sch.vp.fit([r.c.x - 25, r.c.y - 25, r.c.x + 25, r.c.y + 25], 60);
+  }
+  function compOpen() { $('#compModal').classList.remove('hidden'); const s = $('#compSearch'); s.value = ''; compShow(); s.focus(); }
   async function ghPasteToken() {
     const t = $('#ghToken').value.trim(), st = $('#ghStatus'); if (!t) { st.textContent = 'Paste a token first.'; return; }
     GitHub.setToken(t);
@@ -1486,6 +1519,10 @@ const App = (() => {
     $('#connStyle').value = Model.S.connStyle || 'auto';
     $('#connStyle').onchange = e => Model.mutate(() => { Model.S.connStyle = e.target.value; });
     $('#btnErc').onclick = () => { renderStatus(); $('#ercLink').click(); };
+    $('#btnComps').onclick = compOpen;
+    $('#compClose').onclick = () => $('#compModal').classList.add('hidden');
+    $('#compSearch').oninput = compShow;
+    $('#compSearch').onkeydown = e => { if (e.key === 'Enter') compGo(compHits[0]); if (e.key === 'Escape') $('#compModal').classList.add('hidden'); };
     const routeMsg = r => r && r.routing && r.routing.stopped ? `Stopped — kept the best routing found (${r.routing.unrouted ? r.routing.unrouted + ' nets unrouted' : 'all nets routed'})` : r && r.routing ? `Routed ${r.routing.routed}/${r.routing.total} nets${r.routing.failed.length ? ' — unrouted: ' + r.routing.failed.join(', ') : ''}${r.routing.necked_down && r.routing.necked_down.length ? ' · necked down: ' + r.routing.necked_down.join(', ') : ''}${r.routing.seconds ? ` · ${r.routing.seconds}s` : ''}${r.routing.failed.length ? ' — try ✨ Optimize (moves parts) or ⬛ Pour GND' : ''}` : 'Placed — press Route';
     const runPcb = async (place, noRoute) => { try { const r = await runRouter({ place, opt: { noRoute } }); Pcb.fit(); const pl = r && r.placement, bad = pl && pl.fits === false; toast(routeMsg(r) + (bad ? ' · ⚠ ' + pl.hint : ''), bad ? 12000 : 6000); if (!noRoute) showDrc(); } catch (e) { toast(e.message); } };
     // empty Board W×H boxes = size the board to the parts; otherwise the outline is kept and the parts are fitted inside

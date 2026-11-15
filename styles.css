@@ -185,6 +185,16 @@ details.tool pre.res { color: var(--tool-res); } details.tool.err pre.res { colo
 
 /* modal & toast */
 #modal, .modal { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 50; }
+.comp-dlg { width: min(900px, 94vw); }
+.comp-list { max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.comp-row { display: grid; grid-template-columns: 60px 1fr 1.2fr 1.4fr 84px 96px; gap: 4px 10px; width: 100%; text-align: left; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.comp-row:hover, .comp-row.on { background: rgba(127, 127, 127, .14); }
+.comp-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.comp-row b { font-weight: 600; }
+.comp-row .cnets { grid-column: 1 / -1; color: var(--muted, #888); font-size: 11px; }
+.comp-head { font-weight: 600; cursor: default; position: sticky; top: 0; background: var(--panel); }
+.comp-head:hover { background: var(--panel); }
+@media (max-width: 700px) { .comp-row { grid-template-columns: 56px 1fr; } .comp-row > span:nth-child(n+3):not(.cnets) { display: none; } }
 .dlg { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; width: min(560px, 94vw); max-height: 90vh; overflow: auto; }
 .dlg h2 { margin: 0 0 4px; } .dlg fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; }
 .dlg legend { color: var(--muted); font-size: 12px; padding: 0 4px; }

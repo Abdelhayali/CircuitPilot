@@ -182,6 +182,11 @@ const Projects = (() => {
       } catch (e) { if (!ctl.signal.aborted) await sleep(10000); continue; }
       if (job && Model.S.id !== pid) { try { await fetch('/api/render/result', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: job.id, error: 'The project was closed in the browser' }) }); } catch (e) { } continue; }
       if (!job) continue;
+      if (job.args && job.args.kind === 'github') {   // Claude asked to save to GitHub: done with this tab's sign-in (js/app.js)
+        let res; try { res = window.CPGitHubFromClaude ? await window.CPGitHubFromClaude(job.args) : { error: 'This app has no GitHub support' }; } catch (e) { res = { error: e.message || String(e) }; }
+        try { await fetch('/api/render/result', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ id: job.id }, res)) }); } catch (e) { }
+        continue;
+      }
       if (job.focus) {   // Claude (MCP) is working on another project: follow it so the user sees the work live
         since = job.t;
         if (job.focus !== Model.S.id) { try { await open(job.focus); App.toast('Following Claude: opened the project it is working on', 5000); } catch (e) { } }

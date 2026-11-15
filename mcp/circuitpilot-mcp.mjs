@@ -129,6 +129,33 @@ async function showProject(id) {
   try { const t = await api('GET', '/api/render/tabs'); if (!t.tabs && !browserOpened) openBrowser(BASE + '/?project=' + encodeURIComponent(id)); } catch { }
 }
 
+// like api(), without Node's response timeout (a GitHub save of every design can take minutes)
+function apiLong(method, p, body) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(BASE + p), data = body ? JSON.stringify(body) : null;
+    const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname + u.search, method,
+      headers: Object.assign({}, headers, data ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) } : {}) }, res => {
+      let s = ''; res.setEncoding('utf8'); res.on('data', c => s += c);
+      res.on('end', () => {
+        let j; try { j = JSON.parse(s); } catch { j = { error: res.statusCode === 401 ? 'Unauthorized — set CP_PASSWORD to the app password' : s.slice(0, 200) }; }
+        if (res.statusCode >= 400) reject(new Error(j.error || res.statusMessage)); else resolve(j);
+      });
+    });
+    req.on('error', reject); req.setTimeout(0); if (data) req.write(data); req.end();
+  });
+}
+// the GitHub save runs in the app window (its sign-in and export code); the window is opened when it is not open
+async function saveToGithub(input) {
+  const pid = currentId;
+  if (!pid) throw new Error('No current project: open or create one first');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  if (!(await tabProjects()).projects.includes(pid)) {
+    const t = await tabProjects();
+    if (t.n) await showProject(pid); else openBrowser(BASE + '/?project=' + encodeURIComponent(pid));
+    for (let i = 0; i < 30 && !(await tabProjects()).projects.includes(pid); i++) await sleep(1000);
+  }
+  return apiLong('POST', '/api/render/request', { project: pid, args: { kind: 'github', all: !!input.all, full: !!input.full } });
+}
 // one drawing at a time through the app window: concurrent requests (two exports, an export and a view_design) queue up
 let renderChain = Promise.resolve();
 function renderSerial(pid, args) {
@@ -353,6 +380,7 @@ async function exportJob(job, project, input) {
 // ---------- extra tools (projects & exports) ----------
 const EXTRA = [
   { name: 'start_here', description: 'CALL THIS FIRST whenever the user asks for anything about electronics: designing a circuit, schematic, PCB or board, choosing parts, routing, Gerbers, an enclosure / case, or a datasheet. It starts the CircuitPilot app if needed, opens it in the browser, and returns the step-by-step workflow and the current project.', input_schema: { type: 'object', properties: {} } },
+  { name: 'save_to_github', description: 'Save the current design to the GitHub repository chosen in the CircuitPilot app (one folder per design, one commit, only changed files are uploaded). By default the design files, Gerbers, BOM, CPL, EasyEDA files, netlist and README (no images, PDFs or enclosure files, which change on every export; full: true includes them). all: true saves every design stored on this PC instead (can take several minutes). The app must be signed in to GitHub with a repository chosen (⌥ GitHub button); the app window is opened if it is not open.', input_schema: { type: 'object', properties: { all: { type: 'boolean', description: 'every design instead of the current one' }, full: { type: 'boolean', description: 'also images, PDFs and enclosure files' } } } },
   { name: 'list_projects', description: 'List all CircuitPilot projects (id, name, parts, nets, whether a PCB exists, last update). The current project is marked.', input_schema: { type: 'object', properties: {} } },
   { name: 'open_project', description: 'Make a project current (by id or name). All design tools act on the current project; the browser app shows changes live.', input_schema: { type: 'object', required: ['project'], properties: { project: { type: 'string', description: 'Project id or name' } } } },
   { name: 'create_project', description: 'Create a new empty project and make it current.', input_schema: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, knowledge_folder: { type: 'string', description: 'Optional knowledge folder path' } } } },
@@ -396,6 +424,7 @@ async function callTool(name, input = {}) {
   }
   if (isLong(name, input)) { const j = await startJob(name, input); return awaitJob(j, JOB_WAIT); }
   switch (name) {
+    case 'save_to_github': return saveToGithub(input);
     case 'add_to_report': return withProject(async () => {
       const S = Model.S, file = path.resolve(String(input.path || path.join(os.homedir(), 'Documents', 'CircuitPilot exports', 'report.json'))), kind = input.kind || 'design';
       const st = S.board.w ? Pcb.status() : null, d = S.board.w ? Pcb.drc() : null, doc = S.doc || {}, notes = S.notes || {};
@@ -633,7 +662,7 @@ Keep-outs: add_keepout (antenna end, under a coin cell …), strict rule set_des
 JLCPCB: jlcpcb_parts gives live stock / price for LCSC parts; jlcpcb_quote uploads the Gerbers and returns the live board price, build times and shipping. Orders are placed by the user with the Order at JLCPCB button in the app.
 Draw single tracks yourself with add_track (pads "U1.3" + [x, y] corners, {x, y, via: true} to change layer; route_pcb keeps them), list them with get_tracks, delete with remove_tracks.
 Vias: add_via {near: "U2.9"} (a pad) or {near: [x, y], net} finds the closest legal spot itself (all clearances, hole to hole, edge, keep-outs, no via in pad) and, from a pad, adds the short track to it — prefer it over guessing x, y. When run_drc says "Net GND is not routed" on a board with GND pours (pads the pour cannot reach with the full clearance), or the EasyEDA export warns about pads reached only through thin pour copper: connect_pads_to_pour {net: "GND"} joins every cut-off pad group with a via to the other layer's pour; then run_drc.
-Look at your work: view_design returns a screenshot (schematic, pcb, pcb_3d, enclosure) drawn by the CircuitPilot tab open in the browser. Check the result after changes and fix what looks wrong.
+GitHub: save_to_github saves the open design (all: true: every design on this PC) to the user's GitHub repository, set up in the app's ⌥ GitHub dialog. Look at your work: view_design returns a screenshot (schematic, pcb, pcb_3d, enclosure) drawn by the CircuitPilot tab open in the browser. Check the result after changes and fix what looks wrong.
 Datasheet: get_documentation / set_documentation write the product text of the Documentation tab (the user exports the PDF there). For a readable schematic run organize_schematic (parts next to the pins they connect to, GND down, supplies up, wires routed); auto_layout sparingly.`;
 
 // ---------- MCP over stdio (JSON-RPC 2.0, newline delimited) ----------

@@ -1326,7 +1326,7 @@ const App = (() => {
   }
   // every design stored on this PC, each in its own folder: a design that is not open is opened in turn (its unsaved
   // edits are stored first, as always), then the design that was open is opened again
-  async function ghSaveAllRaw(st) {
+  async function ghSaveAllRaw(st, light = false) {
     const repo = GitHub.getRepo(); if (!repo) throw new Error('Choose a repository first');
     if (!Projects.online) throw new Error('Saving all designs needs the app to run with server.py (the designs are read from this PC)');
     const list = await (await fetch('/api/projects')).json();
@@ -1337,14 +1337,14 @@ const App = (() => {
       try {
         if (Model.S.id !== p.id) await Projects.openId(p.id);
         if (!Model.S.components.length) { res.empty.push(label); continue; }
-        const r = await ghSaveRaw({ light: false, onStep: t => st.textContent = `${i + 1}/${list.length} ${label}: ${t}` });
+        const r = await ghSaveRaw({ light, onStep: t => st.textContent = `${i + 1}/${list.length} ${label}: ${t}` });
         if (r.changed) res.saved++; else res.same++;
       } catch (e) { res.failed.push(label + ' (' + e.message + ')'); }
     }
     if (first && Model.S.id !== first) { try { await Projects.openId(first); } catch (e) { } }
     return res;
   }
-  const ghSaveAll = st => ghQueued(() => ghSaveAllRaw(st));
+  const ghSaveAll = (st, light) => ghQueued(() => ghSaveAllRaw(st, light));
   async function ghSaveAllNow() {
     const st = $('#ghStatus'), btn = $('#ghSaveAll'), go = $('#ghGo'); btn.disabled = go.disabled = true; $('#ghLink').innerHTML = '';
     try {
@@ -1357,6 +1357,17 @@ const App = (() => {
     } catch (e) { st.textContent = e.message; }
     finally { btn.disabled = go.disabled = false; }
   }
+  // Claude (MCP save_to_github): the open design, or every design on this PC (all); answers for the server to pass on
+  async function ghFromClaude(args) {
+    if (!GitHub.getToken() || !GitHub.getRepo()) return { error: 'GitHub is not set up in the app: sign in and choose a repository in the ⌥ GitHub dialog first' };
+    try {
+      if (args.all) { const r = await ghSaveAll({ textContent: '' }, !args.full); return { ok: true, mode: 'all', repo: GitHub.getRepo(), saved: r.saved, unchanged: r.same, empty: r.empty, failed: r.failed }; }
+      const r = await ghSave({ light: !args.full, onStep: () => { } });   // light: no images, PDFs or enclosure files (they change on every export)
+      ghPaintIdle();
+      return { ok: true, mode: 'design', repo: r.repo, folder: r.folder, changed: r.changed, url: r.url, skipped: r.skipped };
+    } catch (e) { return { error: e.message }; }
+  }
+  window.CPGitHubFromClaude = ghFromClaude;
   async function ghPasteToken() {
     const t = $('#ghToken').value.trim(), st = $('#ghStatus'); if (!t) { st.textContent = 'Paste a token first.'; return; }
     GitHub.setToken(t);

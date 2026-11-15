@@ -105,9 +105,13 @@ def render_result(jid, result):
 
 def render_request(project, args, timeout=60.0):
     now = time.time()
+    if args.get("kind") == "github":   # a GitHub save: every design can take minutes
+        timeout = 1500.0 if args.get("all") else 420.0
     with _rlock:
         live = {p: t for p, t in _rtabs.items() if now - t < 40}
         if project not in live:
+            if args.get("kind") == "github":
+                return {"error": "Open the CircuitPilot app with this project so it can save to GitHub (it is not open in any window right now)."}, 409
             msg = ("Screenshots are drawn by the CircuitPilot app in the browser. Open http://localhost:5173 and open this "
                    "project there (it is not open in any browser tab right now)." if not live else
                    "The browser has a different project open. Open this project in the CircuitPilot tab to take screenshots.")
@@ -125,6 +129,8 @@ def render_request(project, args, timeout=60.0):
         return {"error": "The browser did not answer in time (is the CircuitPilot tab still open?)"}, 504
     if r.get("error"):
         return {"error": r["error"]}, 400
+    if (job.get("args") or {}).get("kind") == "github":   # the GitHub save's answer, as the app sent it
+        return {k: v for k, v in r.items() if k != "id"}, 200
     return {k: r.get(k) for k in ("mime", "data", "w", "h")}, 200
 
 

@@ -77,6 +77,7 @@ async function chat(req, env) {
       const ck = `c:${e.id}:${d}`;
       await env.POOL.put(ck, String((await num(env, ck)) + 1));
       await env.POOL.put(uk, String(used + 1), { expirationTtl: 172800 });
+      await seen(env, who, true);
       if (changed) await save(env, pool);
       return new Response(up.body, { status: 200, headers: { 'content-type': up.headers.get('content-type') || 'application/json', 'cache-control': 'no-store' } });
     }
@@ -102,6 +103,7 @@ async function chat(req, env) {
 async function status(req, env) {
   const who = await login(req);
   if (!who) return json({ error: 'Sign in with GitHub first' }, 401);
+  await seen(env, who, false);
   const pool = await load(env), used = await num(env, 'u:' + who + ':' + day());
   return json({ used, limit: pool.settings.dailyLimit, ready: pool.entries.some(e => e.enabled && e.key && (e.cooldown_until || 0) <= Date.now()) });
 }
@@ -115,7 +117,7 @@ async function admin(req, url, env) {
   if (p === '/admin/api/state' && req.method === 'GET') {
     const entries = [];
     for (const e of pool.entries) entries.push({ id: e.id, label: e.label, provider: e.provider, base: e.base, model: e.model, enabled: !!e.enabled, keyTail: String(e.key || '').slice(-4), cooling: (e.cooldown_until || 0) > now ? e.cooldown_until : 0, last_error: e.last_error || '', usedToday: await num(env, `c:${e.id}:${d}`), context: e.context || null, rpm: e.rpm == null ? null : e.rpm, minuteUsed: await num(env, `m:${e.id}:${Math.floor(now / 60000)}`) });
-    return json({ entries, settings: pool.settings, presets: Object.fromEntries(Object.entries(PRESETS).map(([k, v]) => [k, v.name])), usedToday: entries.reduce((a, e) => a + e.usedToday, 0), day: d });
+    return json({ entries, settings: pool.settings, presets: Object.fromEntries(Object.entries(PRESETS).map(([k, v]) => [k, v.name])), usedToday: entries.reduce((a, e) => a + e.usedToday, 0), day: d, limit: pool.settings.dailyLimit, users: await allUsers(env, d) });
   }
   if (req.method !== 'POST') return json({ error: 'Use POST for changes' }, 405);
   const body = await req.json().catch(() => ({}));
@@ -155,6 +157,21 @@ async function admin(req, url, env) {
     await save(env, pool);
     return json({ ok: true, id: e.id });
   }
+  if (p === '/admin/api/user/reset') {
+    if (body.all) {   // everyone's count for today (the rolling daily counters of this day only)
+      let cursor;
+      do {
+        const r = await env.POOL.list({ prefix: 'u:', cursor });
+        for (const k of r.keys) if (k.name.endsWith(':' + d)) await env.POOL.delete(k.name);
+        cursor = r.list_complete ? undefined : r.cursor;
+      } while (cursor);
+      return json({ ok: true });
+    }
+    const who = String(body.login || '').trim().toLowerCase();
+    if (!who) return json({ error: 'Which user?' }, 400);
+    await env.POOL.delete(`u:${who}:${d}`);
+    return json({ ok: true });
+  }
   if (p === '/admin/api/delete') { pool.entries = pool.entries.filter(e => e.id !== String(body.id || '')); await save(env, pool); return json({ ok: true }); }
   if (p === '/admin/api/move') {
     const i = pool.entries.findIndex(e => e.id === String(body.id || '')), j = i + (body.dir < 0 ? -1 : 1);
@@ -176,6 +193,26 @@ async function admin(req, url, env) {
     return json({ ok: r.ok, status: r.status, detail: r.ok ? 'answered' : t });
   }
   return json({ error: 'Unknown admin route' }, 404);
+}
+
+// users who signed in with GitHub: first and last sign-in and the total of shared requests (kept under user:<login>)
+async function seen(env, who, counted) {
+  const k = 'user:' + who, t = new Date().toISOString();
+  const u = (await env.POOL.get(k, 'json')) || { login: who, first: t, total: 0 };
+  u.last = t;
+  if (counted) u.total = (u.total || 0) + 1;
+  await env.POOL.put(k, JSON.stringify(u));
+}
+// every user with today's use, for the admin page (newest sign-in first)
+async function allUsers(env, d) {
+  const out = []; let cursor;
+  do {
+    const r = await env.POOL.list({ prefix: 'user:', cursor });
+    for (const k of r.keys) { const u = await env.POOL.get(k.name, 'json'); if (u) out.push(u); }
+    cursor = r.list_complete ? undefined : r.cursor;
+  } while (cursor && out.length < 2000);
+  for (const u of out) u.usedToday = await num(env, `u:${u.login}:${d}`);
+  return out.sort((a, b) => String(b.last).localeCompare(String(a.last)));
 }
 
 export async function poolRoute(req, url, env) {
@@ -217,6 +254,10 @@ input,select{padding:5px;font:inherit;max-width:100%} button{padding:5px 9px;fon
 <div class="row" style="margin-top:6px"><input id="emodel" list="mlist" placeholder="Model name (or Fetch models)" size="36"><button id="fetch">Fetch models</button><datalist id="mlist"></datalist><input id="ekey" type="password" placeholder="API key (empty when editing = keep it)" size="36"></div>
 <div class="row" style="margin-top:6px"><input id="ermp" type="number" min="0" max="600" placeholder="Requests per minute (empty = default)" style="width:230px"><input id="ectx" type="number" min="1024" placeholder="Context window in tokens, e.g. 1048576" style="width:230px"><label><input type="checkbox" id="eon" checked> enabled</label><button id="save">Save account</button><button id="clear">New account</button><span id="emsg" class="muted"></span></div>
 </div>
+<h2>Users (signed in with GitHub)</h2>
+<div class="box"><p class="muted" id="ustats"></p>
+<div class="row"><button id="resetAll">Reset everyone's count for today</button><span id="umsg" class="muted"></span></div>
+<table><thead><tr><th>GitHub login</th><th>First seen</th><th>Last seen</th><th>Total requests</th><th>Today</th><th></th></tr></thead><tbody id="urows"></tbody></table></div>
 <h2>Limits</h2>
 <div class="box row">Requests per user per day <input id="dl" type="number" min="1" max="10000" style="width:90px"> Max output tokens per request <input id="mt" type="number" min="256" max="32000" style="width:90px"> Requests per minute per account <input id="rpm" type="number" min="1" max="600" style="width:90px"><button id="saveSet">Save limits</button><span id="smsg" class="muted"></span></div>
 </div>
@@ -254,6 +295,12 @@ function paint() {
       '<button data-a="edit" data-id="' + id + '">Edit</button><button data-a="test" data-id="' + id + '">Test</button>' +
       '<button data-a="reset" data-id="' + id + '">Wake up</button><button data-a="delete" data-id="' + id + '">Delete</button></td></tr>';
   }).join('') || '<tr><td colspan="9" class="muted">No account yet. Add one below: users then get the shared AI.</td></tr>';
+  var today = state.users.reduce(function (a, u) { return a + u.usedToday; }, 0), active = state.users.filter(function (u) { return u.usedToday > 0; }).length;
+  $('ustats').textContent = state.users.length + ' users signed in · ' + active + ' used the shared AI today · ' + today + ' requests today · daily limit ' + state.settings.dailyLimit + ' per user';
+  $('urows').innerHTML = state.users.map(function (u) {
+    var over = u.usedToday >= state.settings.dailyLimit;
+    return '<tr><td>' + esc(u.login) + '</td><td>' + esc(when(u.first)) + '</td><td>' + esc(when(u.last)) + '</td><td>' + u.total + '</td><td class="' + (over ? 'bad' : '') + '">' + u.usedToday + ' / ' + state.settings.dailyLimit + '</td><td><button data-u="' + esc(u.login) + '">Reset today</button></td></tr>';
+  }).join('') || '<tr><td colspan="6" class="muted">No user has signed in yet.</td></tr>';
   $('total').textContent = 'Requests today: ' + state.usedToday + ' (day ' + state.day + ' UTC)';
   $('dl').value = state.settings.dailyLimit; $('mt').value = state.settings.maxTokens; $('rpm').value = state.settings.rpm;
 }
@@ -286,6 +333,14 @@ $('rows').onclick = function (ev) {
   var path = { up: '/admin/api/move', down: '/admin/api/move', reset: '/admin/api/reset', delete: '/admin/api/delete' }[a];
   var body = { id: id }; if (a === 'up') body.dir = -1; if (a === 'down') body.dir = 1;
   api(path, body).then(function () { return refresh(); }).catch(function (e) { say('emsg', e.message, true); });
+};
+$('urows').onclick = function (ev) {
+  var b = ev.target.closest('[data-u]'); if (!b) return;
+  api('/admin/api/user/reset', { login: b.getAttribute('data-u') }).then(function () { return refresh('umsg', 'Count reset for ' + b.getAttribute('data-u') + '.'); }).catch(function (e) { say('umsg', e.message, true); });
+};
+$('resetAll').onclick = function () {
+  if (!window.confirm("Reset every user's count for today?")) return;
+  api('/admin/api/user/reset', { all: true }).then(function () { return refresh('umsg', "Everyone's count for today is reset."); }).catch(function (e) { say('umsg', e.message, true); });
 };
 $('save').onclick = function () {
   api('/admin/api/entry', { id: $('eid').value, label: $('elabel').value, provider: $('eprov').value, base: $('ebase').value, model: $('emodel').value, key: $('ekey').value, enabled: $('eon').checked, rpm: $('ermp').value, context: $('ectx').value })

@@ -993,7 +993,7 @@ const App = (() => {
     $('#asStatus').textContent = ''; $('#asStatus').className = 'muted';
     if ($('#asOpenSettings')) $('#asOpenSettings').onclick = () => { $('#aiSetup').classList.add('hidden'); openSettings(); };
   }
-  function openSetup(tab) { if (tab) setupTab = tab; $('#asKey').value = ''; setupRender(); $('#aiSetup').classList.remove('hidden'); setTimeout(() => $('#asKey').focus(), 50); }
+  function openSetup(tab) { if (!tab && window.CPChoose) return window.CPChoose(); if (tab) setupTab = tab; $('#asKey').value = ''; setupRender(); $('#aiSetup').classList.remove('hidden'); setTimeout(() => $('#asKey').focus(), 50); }
   // the shared AI: needs a GitHub sign-in (or a GitHub token pasted under the GitHub button); the relay counts the daily requests
   async function sharedConnect() {
     const st = $('#asStatus');
@@ -1743,7 +1743,8 @@ const App = (() => {
     $$('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
     $('#modelSel').onchange = e => {
       const v = e.target.value;
-      if (v === '__shared' || v === '__setup') { openSetup(v === '__shared' ? 'shared' : 'gemini'); renderModels(); return; }   // not a model: open the setup dialog
+      if (v === '__shared') { window.CPChoose(); renderModels(); return; }
+      if (v === '__setup') { openSetup('gemini'); renderModels(); return; }   // not a model: open the setup dialog
       AI.saveSettings({ model: v });
     };
     $('#btnSend').onclick = () => running ? AI.stop() : send();
@@ -1805,8 +1806,28 @@ const App = (() => {
           .then(r => r.ok ? r.json() : null).then(j => { if (j && j.limit) $('#chLimit').textContent = j.limit + ' requests a day'; }).catch(() => { });
       }
     }
+    window.CPChoose = chooseOpen;
     $('#chClose').onclick = () => $('#chooseModal').classList.add('hidden');
-    $('#chShared').onclick = () => { $('#chooseModal').classList.add('hidden'); openSetup('shared'); };
+    async function chooseShared() {
+      const st = $('#chStatus');
+      if (!GitHub.getToken()) {
+        st.className = 'muted'; st.textContent = 'Opening GitHub sign-in...';
+        try { GitHub.signIn(); } catch (e) { st.className = 'bad'; st.textContent = 'Sign in with GitHub first (GitHub button at the top; a GitHub token works too). ' + e.message; }
+        return;
+      }
+      st.className = 'muted'; st.textContent = 'Checking the shared AI...';
+      try {
+        const r = await fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'The shared AI is not reachable');
+        if (!j.ready) throw new Error('The shared AI has no account ready right now. Try again later, or use your own API.');
+        AI.saveSettings({ model: 'shared::circuitpilot' });
+        renderModels(); renderChat(); AI.probeContext().then(updateCtx);
+        st.className = 'good'; st.textContent = '\u2713 Using the shared AI: ' + Math.max(0, j.limit - j.used) + ' of ' + j.limit + ' requests left today.';
+        setTimeout(() => $('#chooseModal').classList.add('hidden'), 1800);
+      } catch (e) { st.className = 'bad'; st.textContent = '\u2717 ' + e.message; }
+    }
+    $('#chShared').onclick = chooseShared;
     $('#chOwn').onclick = () => { $('#chooseModal').classList.add('hidden'); openSetup('gemini'); };
     // once per GitHub account: a welcome that offers both choices
     // every visitor sees it once per browser (a guest), and once more after each GitHub sign-in

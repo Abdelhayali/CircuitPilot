@@ -10,3 +10,12 @@ ALLOWED_ORIGINS = "https://pcbgo.site,https://www.pcbgo.site,https://bodynet.net
 #   npx wrangler secret put GITHUB_CLIENT_SECRET
 # and set GITHUB_CLIENT_ID below to the OAuth app's Client ID.
 GITHUB_CLIENT_ID = "Ov23li0Owt2MkdkwsTOy"
+
+# Shared AI pool (relay/pool.js): one key-value namespace for the provider accounts, usage counters and limits.
+#   npx wrangler kv namespace create POOL      (then paste the id it prints below)
+[[kv_namespaces]]
+binding = "POOL"
+id = "PASTE_KV_NAMESPACE_ID_HERE"
+
+# The GitHub login that may open /admin (the admin page). Set it as a secret, not in this file:
+#   npx wrangler secret put ADMIN_LOGIN

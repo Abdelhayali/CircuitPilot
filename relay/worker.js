@@ -1,3 +1,5 @@
+import { poolRoute } from './pool.js';
+
 // CircuitPilot relay — a Cloudflare Worker for the web version (GitHub Pages).
 //
 // The JLCPCB parts catalogue, the EasyEDA part library and DuckDuckGo search do not accept
@@ -17,7 +19,7 @@ function corsHeaders(origin) {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type',
+    'Access-Control-Allow-Headers': 'content-type, authorization',
     'Access-Control-Expose-Headers': 'content-type, x-final-url',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
@@ -89,6 +91,17 @@ export default {
     const cors = ok ? corsHeaders(origin) : {};
     const url = new URL(req.url);
     if (req.method === 'OPTIONS') return new Response(null, { status: ok ? 204 : 403, headers: cors });
+    // shared AI pool and its admin page (pool.js): /pool/* only for the allowed websites; /admin is the relay's own page
+    if (url.pathname.startsWith('/admin') || url.pathname.startsWith('/pool/')) {
+      if (url.pathname.startsWith('/pool/') && !ok) return json({ error: 'This relay only serves the CircuitPilot web app (origin not allowed: ' + (origin || 'none') + ')' }, 403, {});
+      try {
+        const r = await poolRoute(req, url, env);
+        if (!r) return json({ error: 'Unknown relay route ' + url.pathname }, 404, cors);
+        const out = new Response(r.body, r);
+        for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
+        return out;
+      } catch (e) { return json({ error: String((e && e.message) || e) }, 502, cors); }
+    }
     if (!ok && url.pathname !== '/' && url.pathname !== '/health') return json({ error: 'This relay only serves the CircuitPilot web app (origin not allowed: ' + (origin || 'none') + ')' }, 403, {});
     try {
       const r = await relay(req, url, env);

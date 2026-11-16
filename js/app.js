@@ -936,6 +936,12 @@ const App = (() => {
 
   // ---------- first run: connect an AI model (free Gemini / Ollama Cloud guides) ----------
   const SETUP = {
+    shared: {
+      steps: ['Sign in with GitHub (button below). Your GitHub account is used only to count your daily requests.',
+        'Use the copilot as usual. The shared AI is free within a daily limit; the limit resets at midnight UTC.',
+        'For more requests, connect your own key (Google Gemini, Ollama Cloud, Claude ...). It stays only in this browser tab unless you tick "Remember".'],
+      note: 'The shared AI runs on accounts provided by the CircuitPilot owner. When one account runs out of quota, the next one answers by itself.',
+    },
     gemini: {
       base: 'https://generativelanguage.googleapis.com/v1beta/openai',
       steps: ['Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and sign in with your Google account.',
@@ -968,17 +974,44 @@ const App = (() => {
       note: 'You can save several providers and switch between their models in the menu above the chat; manage them in ⚙ Settings. Some providers (NVIDIA, for example) do not accept requests straight from web pages: on the web your key only ever goes straight to the provider, so those work only in the desktop version.',
     },
   };
-  let setupTab = 'gemini';
+  let setupTab = 'shared';
   function setupRender() {
-    const g = SETUP[setupTab];
+    const g = SETUP[setupTab], shared = setupTab === 'shared';
     $$('#aiSetup .as-tabs button').forEach(b => b.classList.toggle('on', b.dataset.p === setupTab));
+    $('#asKey').closest('label').classList.toggle('hidden', shared);
+    $('#asRemember').closest('label').classList.toggle('hidden', shared);
+    $('#asConnect').textContent = shared ? (GitHub.getToken() ? 'Use the shared AI' : 'Sign in with GitHub') : 'Connect';
     $('#asGuide').innerHTML = `<ol>${g.steps.map(s => `<li>${s}</li>`).join('')}</ol>${g.note ? `<p class="muted small">${g.note}</p>` : ''}`;
     $('#asCustom').classList.toggle('hidden', setupTab !== 'custom');
     $('#asStatus').textContent = ''; $('#asStatus').className = 'muted';
     if ($('#asOpenSettings')) $('#asOpenSettings').onclick = () => { $('#aiSetup').classList.add('hidden'); openSettings(); };
   }
   function openSetup(tab) { if (tab) setupTab = tab; $('#asKey').value = ''; setupRender(); $('#aiSetup').classList.remove('hidden'); setTimeout(() => $('#asKey').focus(), 50); }
+  // the shared AI: needs a GitHub sign-in (or a GitHub token pasted under the GitHub button); the relay counts the daily requests
+  async function sharedConnect() {
+    const st = $('#asStatus');
+    if (!GitHub.getToken()) {
+      st.className = 'muted'; st.textContent = 'Opening GitHub sign-in...';
+      try { GitHub.signIn(); } catch (e) { st.className = 'bad'; st.textContent = 'Sign in with GitHub first (GitHub button at the top; a GitHub token works too). ' + e.message; }
+      return;
+    }
+    st.className = 'muted'; st.textContent = 'Checking the shared AI...'; $('#asConnect').disabled = true;
+    try {
+      const r = await fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'The shared AI is not reachable');
+      if (!j.ready) throw new Error('The shared AI has no account ready right now. Try again later, or connect your own key.');
+      AI.saveSettings({ model: 'shared::circuitpilot' });
+      renderModels(); renderChat(); AI.probeContext().then(updateCtx);
+      st.className = 'good'; st.textContent = '✓ Using the shared AI: ' + Math.max(0, j.limit - j.used) + ' of ' + j.limit + ' requests left today.';
+      setTimeout(() => $('#aiSetup').classList.add('hidden'), 1800);
+    } catch (e) {
+      st.className = 'bad'; st.textContent = '✗ ' + e.message;
+    } finally { $('#asConnect').disabled = false; }
+  }
   async function setupConnect() {
+    if (setupTab === 'shared') return sharedConnect();
+    AI.saveSettings({ rememberKeys: $('#asRemember').checked });   // before the key is saved: kept beyond this tab only when ticked
     const key = $('#asKey').value.trim(), st = $('#asStatus'), g = SETUP[setupTab];
     if (!key && setupTab !== 'custom') { st.className = 'bad'; st.textContent = 'Paste your API key first'; return; }   // custom servers may need no key
     st.className = 'muted'; st.textContent = 'Checking the key…'; $('#asConnect').disabled = true;

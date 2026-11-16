@@ -239,8 +239,9 @@
 <div id="aiSetup" class="hidden modal">
   <div class="dlg setup">
     <div class="row-h"><h2>Connect an AI model</h2><button id="asClose" title="Close">✕</button></div>
-    <p class="as-safe"><b>🔒 Your key goes only to the provider.</b> It is saved only in this browser and sent straight to the AI provider you choose — never through a CircuitPilot server. Providers that refuse requests from web pages (Ollama Cloud, NVIDIA …) therefore work only in the desktop version. Remove the key any time in ⚙ Settings.</p>
+    <p class="as-safe"><b>Two ways to use the AI.</b> <b>CircuitPilot shared AI</b> needs no key: sign in with GitHub and use the daily allowance. <b>Your own key</b> goes only to the provider you choose; it is kept only while this browser tab is open, unless you tick "Remember this key on this PC".</p>
     <div class="as-tabs" role="tablist">
+      <button data-p="shared" role="tab">CircuitPilot shared <span class="tag free">no key</span></button>
       <button data-p="gemini" role="tab">Google Gemini <span class="tag free">free</span></button>
       <button data-p="ollama" role="tab">Ollama Cloud <span class="tag free">free plan</span><span class="tag webonly" title="Ollama Cloud refuses requests from web pages: on the web version it works only in the desktop app">desktop only</span></button>
       <button data-p="claude" role="tab">Claude <span class="tag">paid</span></button>
@@ -253,6 +254,7 @@
     </div>
     <div id="asForm">
       <label>API key<input id="asKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key here"></label>
+      <label class="small as-remember"><input type="checkbox" id="asRemember"> Remember this key on this PC (off = forgotten when the browser tab closes)</label>
       <div class="row"><button id="asConnect" class="primary">Connect</button><span id="asStatus" class="muted"></span></div>
     </div>
     <p class="as-open muted small">CircuitPilot is source-available (PolyForm Strict, free for noncommercial use) — read the code or run it yourself: <a href="https://github.com/Abdelhayali/CircuitPilot" target="_blank" rel="noopener">github.com/Abdelhayali/CircuitPilot</a></p>
@@ -506,7 +508,7 @@
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
 <script src="js/engine.js?v=202610301800"></script>
-<script src="js/ai.js?v=202610301800"></script>
+<script src="js/ai.js?v=202611161400"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202610301800"></script>
@@ -515,7 +517,7 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
 <script src="js/github.js?v=202611151230"></script>
-<script src="js/app.js?v=202611161300"></script>
+<script src="js/app.js?v=202611161400"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

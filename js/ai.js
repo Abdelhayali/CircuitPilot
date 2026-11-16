@@ -18,10 +18,28 @@ const AI = (() => {
     'LM Studio (local)': 'http://localhost:1234/v1',
   };
   // no model is preselected: the user connects a provider first (🔑 Connect AI)
-  const defaults = { anthropicKey: '', oaiBase: '', oaiKey: '', oaiModels: '', model: '', maxTokens: 8192, includeContext: true, webAccess: true, braveKey: '' };
+  const defaults = { anthropicKey: '', oaiBase: '', oaiKey: '', oaiModels: '', model: '', maxTokens: 8192, includeContext: true, webAccess: true, braveKey: '', rememberKeys: false };
   let settings = Object.assign({}, defaults);
   try { Object.assign(settings, JSON.parse(localStorage.getItem('cp.settings') || '{}')); } catch (e) { }
-  const saveSettings = s => { settings = Object.assign(settings, s); try { localStorage.setItem('cp.settings', JSON.stringify(settings)); } catch (e) { } };
+  // API keys are kept only for this browser session (sessionStorage: gone when the tab closes), unless the user ticks
+  // "remember this key on this PC": then they are also saved in localStorage. Keys saved by older versions move to the session.
+  const KEYS = 'cp.keys';
+  const readKeys = () => { try { return JSON.parse(sessionStorage.getItem(KEYS) || '{}'); } catch (e) { return {}; } };
+  const writeKeys = k => { try { sessionStorage.setItem(KEYS, JSON.stringify(k)); } catch (e) { } };
+  const keysOf = s => ({ anthropicKey: s.anthropicKey || '', oaiKey: s.oaiKey || '', providers: Object.fromEntries((s.providers || []).map(p => [p.id, p.key || ''])) });
+  const withoutKeys = s => { const c = JSON.parse(JSON.stringify(s)); c.anthropicKey = ''; c.oaiKey = ''; (c.providers || []).forEach(p => { p.key = ''; }); return c; };
+  const saveSettings = s => {
+    settings = Object.assign(settings, s);
+    writeKeys(keysOf(settings));
+    try { localStorage.setItem('cp.settings', JSON.stringify(settings.rememberKeys ? settings : withoutKeys(settings))); } catch (e) { }
+  };
+  {
+    const ks = readKeys(), kp = ks.providers || {};
+    settings.anthropicKey = ks.anthropicKey || settings.anthropicKey || '';
+    settings.oaiKey = ks.oaiKey || settings.oaiKey || '';
+    if (Array.isArray(settings.providers)) settings.providers.forEach(p => { p.key = kp[p.id] || p.key || ''; });
+    saveSettings({});   // moves any key left in localStorage by an older version into this session
+  }
   // Several OpenAI-compatible providers can be saved at once, each with its own URL, key and models:
   // settings.providers = [{ id, name, base, key, models: 'a, b' }]; a model is chosen as "<provider id>::<model id>".
   const hostName = base => { try { const h = new URL(base).hostname.replace(/^www\./, ''); return { 'generativelanguage.googleapis.com': 'Google Gemini', 'ollama.com': 'Ollama Cloud', 'api.openai.com': 'OpenAI', 'openrouter.ai': 'OpenRouter', 'api.x.ai': 'xAI Grok', localhost: 'Local server', '127.0.0.1': 'Local server' }[h] || h; } catch (e) { return 'Custom'; } };
@@ -120,7 +138,11 @@ const AI = (() => {
       : '';
     return `API ${status}: ${msg}${hint ? ' — ' + hint : ''}`;
   }
-  const allModels = () => [...(settings.anthropicKey ? MODELS : []), ...settings.providers.flatMap(p => String(p.models || '').split(',').map(s => s.trim()).filter(Boolean)
+  // CircuitPilot shared AI: the relay's pool of the owner's accounts, for a signed-in GitHub user (no key of their own).
+  // The GitHub token is sent to the relay, which checks it with GitHub and does not store it; it is never saved here.
+  const sharedToken = () => { try { return (typeof GitHub !== 'undefined' && GitHub.getToken()) || ''; } catch (e) { return ''; } };
+  const sharedModels = () => { const t = sharedToken(); return t ? [{ id: 'shared::circuitpilot', model: 'circuitpilot', label: 'CircuitPilot shared AI (daily limit)', provider: 'openai', pid: 'shared', pname: 'CircuitPilot shared', base: ((window.CP_CONFIG && CP_CONFIG.relay) || '').replace(/\/+$/, '') + '/pool/v1', key: t }] : []; };
+  const allModels = () => [...(settings.anthropicKey ? MODELS : []), ...sharedModels(), ...settings.providers.flatMap(p => String(p.models || '').split(',').map(s => s.trim()).filter(Boolean)
     .map(id => ({ id: p.id + '::' + id, model: id, label: id, provider: 'openai', pid: p.id, pname: p.name, base: p.base, key: p.key })))];
 
   // Tools live in engine.js (shared with the MCP server / REST API).

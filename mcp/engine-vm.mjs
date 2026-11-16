@@ -4,7 +4,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const FILES = [['lib.js', 'Lib'], ['model.js', 'Model'], ['strokefont.js', 'StrokeFont'], ['pcb.js', 'Pcb'], ['cnc.js', 'Cnc'], ['enclosure.js', 'Enclosure'], ['shape3d.js', 'Shape3D'], ['kicad.js', 'KiCad'],
-  ['openlib.js', 'OpenLib'], ['easyeda.js', 'EasyEDA'], ['exports.js', 'Exports'], ['blocks.js', 'Blocks'], ['engine.js', 'Engine']];
+  ['openlib.js', 'OpenLib'], ['easyeda.js', 'EasyEDA'], ['exports.js', 'Exports'], ['blocks.js', 'Blocks'], ['firmware.js', 'Firmware'], ['engine.js', 'Engine']];
 
 export function loadEngine(root, log = () => { }) {
   const ctx = vm.createContext({
@@ -35,6 +35,7 @@ export async function projectFiles(ctx, inc) {
   let drc = null;
   if (inc.has('project')) files[base + '.circuit.json'] = X.project();
   if (inc.has('bom')) files[base + '-bom.csv'] = X.bom();
+  if (inc.has('firmware')) for (const [n, d] of Object.entries(ctx.Firmware.files())) files[`firmware/${base}/${n}`] = d;
   if (inc.has('netlist')) files[base + '.net'] = X.netlist();
   if (hasPcb) {
     if (inc.has('gerbers')) {

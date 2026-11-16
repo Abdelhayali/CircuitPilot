@@ -74,6 +74,7 @@
         <button class="tab" data-view="doc">Documentation</button>
       </div>
       <div id="schTools" class="tools">
+        <button id="btnFirmware" title="The code of the MCU: design_pins.h (every connected pin as a PIN_ name, made from the schematic) and the code files saved with the design. An AI can write the code">{ } Firmware</button>
         <button id="btnComps" title="Every component of the design in one list: search by reference, value, part, footprint, LCSC number, sheet, net or pin. Click one to go to it">☰ Components</button>
         <button id="btnOrganize" title="Readable schematic: ICs in a row, every small part next to the pin it connects to, GND parts vertical with GND down, supply parts vertical with 3V3 / VDD up, wires routed around the symbols">✨ Organize</button>
         <button id="btnLayout">Auto-layout</button>
@@ -367,6 +368,20 @@
     <div class="row end"><button id="shDraw">✎ Draw outline</button><button id="shApply" class="primary">Apply</button></div>
   </div>
 </div>
+<div id="fwModal" class="hidden modal">
+  <div class="dlg fw-dlg">
+    <div class="row-h"><h2>Firmware</h2><button id="fwClose">✕</button></div>
+    <p class="muted small" style="margin:2px 0 8px">Code for the microcontroller of this design. <b>design_pins.h</b> is made from the schematic: each connected pin is a <code>PIN_</code> name, so the code never uses a pin number. Files are saved with the design and exported to <code>firmware/&lt;design&gt;/</code>. Describe what the code should do in the AI Copilot, or type it here.</p>
+    <div class="row-h"><label class="small" for="fwMcu">MCU</label><select id="fwMcu" style="flex:1"></select></div>
+    <p class="small muted" id="fwBoard" style="margin:6px 0"></p>
+    <div id="fwTabs" class="fw-tabs"></div>
+    <textarea id="fwText" class="fw-text" spellcheck="false" placeholder="Code of the selected file"></textarea>
+    <div class="row-h" style="margin-top:6px"><input id="fwNewName" spellcheck="false" style="flex:1" placeholder="new file, e.g. sketch.ino"><button id="fwNew">Add file</button><button id="fwDel">Delete file</button><button id="fwAsk" class="primary">Ask AI to write it</button></div>
+    <p id="fwStatus" class="small" style="margin:6px 0 0;min-height:1.2em"></p>
+    <div id="fwWarn" class="small fw-warn"></div>
+    <details style="margin-top:6px"><summary class="small">design_pins.h (made from the schematic)</summary><pre id="fwHeader" class="fw-pre"></pre></details>
+  </div>
+</div>
 <div id="compModal" class="hidden modal">
   <div class="dlg comp-dlg">
     <div class="row-h"><h2>Components</h2><button id="compClose">✕</button></div>
@@ -489,6 +504,7 @@
 <script src="js/docview.js?v=202610301800"></script>
 <script src="js/pcb3d.js?v=202611111200"></script>
 <script src="js/blocks.js?v=202610301800"></script>
+<script src="js/firmware.js?v=202611161300"></script>
 <script src="js/engine.js?v=202610301800"></script>
 <script src="js/ai.js?v=202610301800"></script>
 <script src="js/exports.js?v=202611111200"></script>
@@ -499,7 +515,7 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
 <script src="js/github.js?v=202611151230"></script>
-<script src="js/app.js?v=202611160900"></script>
+<script src="js/app.js?v=202611161300"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

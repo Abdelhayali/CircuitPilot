@@ -327,7 +327,7 @@ async function awaitJob(j, ms) {
 }
 // export: files from the worker, PDFs + images from the app window, all into one folder per project
 async function exportJob(job, project, input) {
-  const all = ['project', 'gerbers', 'jlcpcb', 'bom', 'netlist', 'enclosure', 'easyeda', 'pdf', 'images', 'order_readme'];
+  const all = ['project', 'gerbers', 'jlcpcb', 'bom', 'netlist', 'enclosure', 'easyeda', 'pdf', 'images', 'order_readme', 'firmware'];
   let inc = Array.isArray(input.include) && input.include.length ? input.include.slice() : all;
   if (inc.includes('flat') && !inc.includes('enclosure')) inc.push('enclosure');   // the flat parts come with the enclosure files
   const { p, w } = workerRun({ kind: 'export', include: inc, project, myLib, base: BASE, headers }); job.worker = w;
@@ -411,7 +411,7 @@ const NO_PROJECT = new Set(['search_parts', 'web_search', 'web_fetch', 'list_my_
 const RO = new Set(Engine.TOOLS.filter(t => t.ro).map(t => t.name));
 
 // the code this server runs vs. the files on disk: an update while it runs is not in its tool list — say so
-const CODE_FILES = ['js/engine.js', 'js/shape3d.js', 'mcp/circuitpilot-mcp.mjs'].map(f => path.join(ROOT, f)), mtime = f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
+const CODE_FILES = ['js/engine.js', 'js/firmware.js', 'js/shape3d.js', 'mcp/circuitpilot-mcp.mjs'].map(f => path.join(ROOT, f)), mtime = f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
 const CODE_AT_START = CODE_FILES.map(mtime);
 const outdated = () => CODE_FILES.some((f, i) => mtime(f) > CODE_AT_START[i] + 1000);
 async function callTool(name, input = {}) {

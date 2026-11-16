@@ -644,3 +644,13 @@ body.web .as-tabs .tag.webonly { display: inline; }
 
 .guidebtn { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--chip); color: var(--text); text-decoration: none; font-size: 13px; white-space: nowrap; }
 .guidebtn:hover { filter: brightness(1.15); }
+
+/* Firmware dialog */
+.fw-dlg { width: min(860px, 96vw); }
+.fw-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.fw-tab { font-size: 12px; padding: 3px 8px; border: 1px solid var(--line, #333); border-radius: 4px; background: transparent; cursor: pointer; }
+.fw-tab.on { background: var(--accent, #2d6cdf); color: #fff; border-color: transparent; }
+.fw-text, .fw-pre { width: 100%; box-sizing: border-box; min-height: 260px; font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; line-height: 1.4; white-space: pre; overflow: auto; }
+.fw-pre { min-height: 0; max-height: 240px; margin: 6px 0 0; padding: 8px; background: var(--panel, #161616); border: 1px solid var(--line, #333); border-radius: 4px; }
+.fw-warn div { padding: 2px 0; }
+@media (max-width: 700px) { .fw-text { min-height: 200px; } }

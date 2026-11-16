@@ -1140,6 +1140,8 @@ const App = (() => {
       add('easyeda/' + base + '-EasyEDA-import.zip', new Uint8Array(await makeZip(ez).arrayBuffer()));
       if (!hasPcb) skipped.push('EasyEDA PCB (no PCB yet)');
     } catch (e) { skipped.push('EasyEDA: ' + e.message); }
+    // the MCU's code: design_pins.h (pin names from the schematic) and the code files, in firmware/<design>/ (Arduino sketch folder)
+    try { for (const [n, d] of Object.entries(Firmware.files())) add('firmware/' + base + '/' + n, d); } catch (e) { skipped.push('firmware: ' + e.message); }
     const shots = [['schematic', 'schematic.png', { sheet: 1 }]].concat(Sch.sheets().slice(1).map((_, i) => ['schematic', `schematic-sheet${i + 2}.png`, { sheet: i + 2 }]))
       .concat(hasPcb ? [['pcb', 'pcb-2d.png', {}], ['pcb_3d', 'pcb-3d.png', { side: 'iso' }], ['pcb_3d', 'pcb-3d-top.png', { side: 'top' }], ['pcb_3d', 'pcb-3d-bottom.png', { side: 'bottom' }], ['enclosure', 'enclosure.png', {}]] : []);
     if (opts.images !== false && !opts.light) for (const [view, name, a] of shots) { try { const r = await renderForAI(Object.assign({ view, full: true }, a)); add('images/' + name, b64bytes(r.data)); } catch (e) { skipped.push(name + ': ' + e.message); } }
@@ -1520,6 +1522,7 @@ const App = (() => {
     $('#connStyle').onchange = e => Model.mutate(() => { Model.S.connStyle = e.target.value; });
     $('#btnErc').onclick = () => { renderStatus(); $('#ercLink').click(); };
     $('#btnComps').onclick = compOpen;
+    $('#btnFirmware').onclick = () => Firmware.open(); Firmware.mount();
     $('#compClose').onclick = () => $('#compModal').classList.add('hidden');
     $('#compSearch').oninput = compShow;
     $('#compSearch').onkeydown = e => { if (e.key === 'Enter') compGo(compHits[0]); if (e.key === 'Escape') $('#compModal').classList.add('hidden'); };

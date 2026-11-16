@@ -911,15 +911,20 @@ const App = (() => {
     $('#modeHint').textContent = { agent: 'Agent: edits your design (checkpointed)', ask: 'Ask: read-only questions & review', plan: 'Plan: proposes a plan before building' }[m];
   }
   function renderModels() {
-    const ms = AI.allModels(), cur = AI.settings.model;
+    const ms = AI.allModels();
+    // a signed-in user without a key of their own uses the shared AI by default
+    if (!AI.modelReady() && ms.some(m => m.pid === 'shared')) AI.saveSettings({ model: 'shared::circuitpilot' });
+    const cur = AI.settings.model;
+    const sharedGrp = ms.some(m => m.pid === 'shared') ? '<optgroup label="CircuitPilot shared (no key)">' + ms.filter(m => m.pid === 'shared').map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + '</optgroup>' : '';
     const grp = (p, label) => { const xs = ms.filter(m => m.provider === p); return xs.length ? `<optgroup label="${label}">` + xs.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + '</optgroup>' : ''; };
     // one group per saved provider, so models from several providers can be picked from one menu
     const byProv = AI.settings.providers.map(p => { const xs = ms.filter(m => m.pid === p.id); return xs.length ? `<optgroup label="${esc(p.name)}">` + xs.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + '</optgroup>' : ''; }).join('');
-    const html = grp('anthropic', 'Anthropic') + byProv;
+    const html = grp('anthropic', 'Anthropic') + sharedGrp + byProv;
     $('#modelSel').innerHTML = html || '<option value="">No AI model yet</option>';
     if (html && !AI.modelReady()) $('#modelSel').insertAdjacentHTML('afterbegin', '<option value="" selected>Choose a model…</option>');
     const ready = AI.modelReady();
-    $('#btnConnect').classList.toggle('hidden', ready);
+    $('#btnConnect').classList.remove('hidden');
+    $('#btnConnect').textContent = ready ? '🔑 AI keys' : '🔑 Connect AI';
     $('#modelSel').classList.toggle('hidden', !html);
   }
 

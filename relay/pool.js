@@ -112,6 +112,19 @@ async function admin(req, url, env) {
   if (req.method !== 'POST') return json({ error: 'Use POST for changes' }, 405);
   const body = await req.json().catch(() => ({}));
   const find = () => pool.entries.find(e => e.id === String(body.id || ''));
+  if (p === '/admin/api/models') {
+    const prov = PRESETS[body.provider] ? String(body.provider) : 'custom';
+    const base = prov === 'custom' ? String(body.base || '').trim().replace(/\/+$/, '') : PRESETS[prov].base;
+    if (!/^https:\/\/\S+$/.test(base)) return json({ error: 'The address must start with https://' }, 400);
+    let key = String(body.key || '').trim();
+    if (!key) { const e = find(); if (e) key = e.key; }   // editing an account: its saved key
+    if (!key) return json({ error: 'Paste the API key first' }, 400);
+    const r = await fetch(base + '/models', { headers: { authorization: 'Bearer ' + key, accept: 'application/json' } });
+    const j = await r.json().catch(() => null);
+    if (!r.ok) return json({ error: 'The provider answered ' + r.status + (j && j.error ? ': ' + String(j.error.message || j.error).slice(0, 200) : '') }, 502);
+    const ids = ((j && (j.data || j.models)) || []).map(m => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
+    return json({ models: [...new Set(ids)].sort() });
+  }
   if (p === '/admin/api/entry') {
     const prov = PRESETS[body.provider] ? String(body.provider) : 'custom';
     const base = prov === 'custom' ? String(body.base || '').trim().replace(/\/+$/, '') : PRESETS[prov].base;
@@ -185,7 +198,7 @@ input,select{padding:5px;font:inherit;max-width:100%} button{padding:5px 9px;fon
 <div class="box">
 <input type="hidden" id="eid">
 <div class="row"><input id="elabel" placeholder="Label, e.g. Google 1"><select id="eprov"></select><input id="ebase" placeholder="https://... (custom only)" size="36"></div>
-<div class="row" style="margin-top:6px"><input id="emodel" placeholder="Model name (check the provider's model list)" size="36"><input id="ekey" type="password" placeholder="API key (empty when editing = keep it)" size="36"></div>
+<div class="row" style="margin-top:6px"><input id="emodel" list="mlist" placeholder="Model name (or Fetch models)" size="36"><button id="fetch">Fetch models</button><datalist id="mlist"></datalist><input id="ekey" type="password" placeholder="API key (empty when editing = keep it)" size="36"></div>
 <div class="row" style="margin-top:6px"><label><input type="checkbox" id="eon" checked> enabled</label><button id="save">Save account</button><button id="clear">New account</button><span id="emsg" class="muted"></span></div>
 </div>
 <h2>Limits</h2>
@@ -230,6 +243,18 @@ function paint() {
 }
 function refresh(msgId, text, bad) { if (msgId) say(msgId, text, bad); return api('/admin/api/state').then(function (s) { state = s; paint(); }); }
 $('login').onclick = load;
+function fetchModels(quiet) {
+  var key = $('ekey').value.trim(), id = $('eid').value;
+  if (!key && !id) { if (!quiet) say('emsg', 'Paste the API key first (or edit a saved account).', true); return; }
+  if (!quiet) say('emsg', 'Fetching models...');
+  api('/admin/api/models', { id: id, provider: $('eprov').value, base: $('ebase').value, key: key }).then(function (r) {
+    $('mlist').innerHTML = r.models.map(function (m) { return '<option value="' + esc(m) + '">'; }).join('');
+    if (!$('emodel').value.trim() && r.models.length) $('emodel').value = r.models[0];
+    say('emsg', r.models.length + ' models found. Pick one in the Model field (suggestions appear when you click it).');
+  }).catch(function (e) { if (!quiet) say('emsg', e.message, true); });
+}
+$('fetch').onclick = function () { fetchModels(false); };
+$('ekey').onchange = function () { if ($('ekey').value.trim()) fetchModels(true); };
 $('rows').onclick = function (ev) {
   var b = ev.target.closest('[data-a]'); if (!b) return;
   var id = b.getAttribute('data-id'), a = b.getAttribute('data-a');
@@ -237,6 +262,7 @@ $('rows').onclick = function (ev) {
     var e = state.entries.filter(function (x) { return x.id === id; })[0]; if (!e) return;
     $('eid').value = e.id; $('elabel').value = e.label; $('eprov').value = e.provider; $('ebase').value = e.base; $('emodel').value = e.model; $('ekey').value = ''; $('eon').checked = !!e.enabled;
     say('emsg', 'Editing ' + e.label + ' (empty key = keep the saved one)');
+    fetchModels(true);
     return;
   }
   if (a === 'delete' && !window.confirm('Delete this account? Its key is removed from the relay.')) return;

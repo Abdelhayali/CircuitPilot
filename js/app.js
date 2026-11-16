@@ -1795,6 +1795,8 @@ const App = (() => {
     autoFetchModels();
     // first run (or no model set up in this browser): open the connect dialog
     $('#btnConnect').onclick = () => openSetup();
+    // record the signed-in user for the shared AI admin page (one quiet check per page load)
+    if (GitHub.getToken()) fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } }).catch(() => { });
     $('#asClose').onclick = () => $('#aiSetup').classList.add('hidden');
     $('#aiSetup .as-tabs').onclick = e => { const b = e.target.closest('button[data-p]'); if (b) { setupTab = b.dataset.p; setupRender(); } };
     $('#asConnect').onclick = setupConnect;

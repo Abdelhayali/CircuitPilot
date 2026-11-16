@@ -231,6 +231,17 @@ async function allUsers(env, d) {
     for (const k of r.keys) { const u = await env.POOL.get(k.name, 'json'); if (u) out.push(u); }
     cursor = r.list_complete ? undefined : r.cursor;
   } while (cursor && out.length < 2000);
+  const have = new Set(out.map(u => u.login));
+  cursor = undefined;
+  do {
+    const r = await env.POOL.list({ prefix: 'u:', cursor });
+    for (const k of r.keys) {
+      if (!k.name.endsWith(':' + d)) continue;
+      const login = k.name.slice(2, -(d.length + 1));
+      if (login && !have.has(login)) { have.add(login); out.push({ login, first: '', last: '', total: 0 }); }
+    }
+    cursor = r.list_complete ? undefined : r.cursor;
+  } while (cursor);
   for (const u of out) u.usedToday = await num(env, `u:${u.login}:${d}`);
   return out.sort((a, b) => String(b.last).localeCompare(String(a.last)));
 }
@@ -285,7 +296,7 @@ input,select{padding:5px;font:inherit;max-width:100%} button{padding:5px 9px;fon
 var state = null;
 function $(id) { return document.getElementById(id); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-function when(t) { return new Date(t).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'; }
+function when(t) { if (!t) return '-'; var d = new Date(t); return isNaN(d) ? '-' : d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC'; }
 function api(path, body) {
   var tok = sessionStorage.getItem('cpAdminTok') || '';
   return fetch(path, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + tok }, body: body ? JSON.stringify(body) : undefined })

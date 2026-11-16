@@ -919,13 +919,15 @@ const App = (() => {
     const grp = (p, label) => { const xs = ms.filter(m => m.provider === p); return xs.length ? `<optgroup label="${label}">` + xs.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + '</optgroup>' : ''; };
     // one group per saved provider, so models from several providers can be picked from one menu
     const byProv = AI.settings.providers.map(p => { const xs = ms.filter(m => m.pid === p.id); return xs.length ? `<optgroup label="${esc(p.name)}">` + xs.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + '</optgroup>' : ''; }).join('');
-    const html = grp('anthropic', 'Anthropic') + sharedGrp + byProv;
-    $('#modelSel').innerHTML = html || '<option value="">No AI model yet</option>';
-    if (html && !AI.modelReady()) $('#modelSel').insertAdjacentHTML('afterbegin', '<option value="" selected>Choose a model…</option>');
+    // the menu is always here: the shared AI (signed in or not) and "add your own key" are listed even with no model yet
+    const sharedAlways = sharedGrp || '<optgroup label="CircuitPilot shared"><option value="__shared">Sign in with GitHub to use it</option></optgroup>';
+    const html = grp('anthropic', 'Anthropic') + sharedAlways + byProv + '<optgroup label="Your own key"><option value="__setup">＋ Add a provider and key…</option></optgroup>';
+    $('#modelSel').innerHTML = html;
+    if (!AI.modelReady()) $('#modelSel').insertAdjacentHTML('afterbegin', '<option value="" selected>Choose a model…</option>');
     const ready = AI.modelReady();
     $('#btnConnect').classList.remove('hidden');
     $('#btnConnect').textContent = ready ? '🔑 AI keys' : '🔑 Connect AI';
-    $('#modelSel').classList.toggle('hidden', !html);
+    $('#modelSel').classList.remove('hidden');
   }
 
   // default model per provider (used when connecting and whenever the model list is refreshed)
@@ -1739,7 +1741,11 @@ const App = (() => {
 
     // copilot
     $$('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
-    $('#modelSel').onchange = e => AI.saveSettings({ model: e.target.value });
+    $('#modelSel').onchange = e => {
+      const v = e.target.value;
+      if (v === '__shared' || v === '__setup') { openSetup(v === '__shared' ? 'shared' : 'gemini'); renderModels(); return; }   // not a model: open the setup dialog
+      AI.saveSettings({ model: v });
+    };
     $('#btnSend').onclick = () => running ? AI.stop() : send();
     $('#prompt').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
     $('#btnNewChat').onclick = () => { if (running) return; AI.reset(); lastError = null; renderChat(); };

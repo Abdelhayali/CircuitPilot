@@ -154,7 +154,7 @@ const AI = (() => {
   }
   // CircuitPilot shared AI: the relay's pool of the owner's accounts, for a signed-in GitHub user (no key of their own).
   // The GitHub token is sent to the relay, which checks it with GitHub and does not store it; it is never saved here.
-  const sharedToken = () => { try { return (typeof GitHub !== 'undefined' && GitHub.getToken()) || ''; } catch (e) { return ''; } };
+  const sharedToken = () => { try { return (typeof GitHub !== 'undefined' && GitHub.getIdToken()) || ''; } catch (e) { return ''; } };
   const sharedModels = () => { const t = sharedToken(); return t ? [{ id: 'shared::circuitpilot', model: 'circuitpilot', label: 'CircuitPilot shared AI (daily limit)', provider: 'openai', pid: 'shared', pname: 'CircuitPilot shared', base: ((window.CP_CONFIG && CP_CONFIG.relay) || '').replace(/\/+$/, '') + '/pool/v1', key: t }] : []; };
   const allModels = () => [...(settings.anthropicKey ? MODELS : []), ...sharedModels(), ...settings.providers.flatMap(p => String(p.models || '').split(',').map(s => s.trim()).filter(Boolean)
     .map(id => ({ id: p.id + '::' + id, model: id, label: id, provider: 'openai', pid: p.id, pname: p.name, base: p.base, key: p.key })))];

@@ -246,7 +246,7 @@
       <button class="choose-card" id="chShared">
         <span class="choose-ico">☁</span>
         <b>Use CircuitPilot's free AI</b>
-        <span class="small">No key needed. Sign in with GitHub. Free with <span id="chLimit">a daily limit</span> per person.</span>
+        <span class="small">No key needed. Sign in with GitHub: only your public username is read, no access to your files or repositories. Free with <span id="chLimit">a daily limit</span> per person.</span>
       </button>
       <button class="choose-card" id="chOwn">
         <span class="choose-ico">🔑</span>
@@ -415,7 +415,7 @@
 <div id="ghModal" class="hidden modal">
   <div class="dlg">
     <div class="row-h"><h2>GitHub</h2><button id="ghClose">✕</button></div>
-    <p class="muted" style="margin:2px 0 8px;font-size:12px">Save your designs in your own GitHub account. Each design is a folder in one repository you choose: the project file, Gerbers, BOM and CPL, EasyEDA files, netlist, images, PDFs and a README.</p>
+    <p class="muted" style="margin:2px 0 8px;font-size:12px">Save your designs in your own GitHub account. Saving asks GitHub for access to your repositories, used only to save designs; the free AI never asks for it. Each design is a folder in one repository you choose: the project file, Gerbers, BOM and CPL, EasyEDA files, netlist, images, PDFs and a README.</p>
 
     <div id="ghOut">
       <button id="ghOauth" class="primary" style="display:none">Sign in with GitHub</button>
@@ -527,7 +527,7 @@
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
 <script src="js/engine.js?v=202610301800"></script>
-<script src="js/ai.js?v=202611161400"></script>
+<script src="js/ai.js?v=202611162200"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202610301800"></script>
@@ -535,8 +535,8 @@
 <script src="js/cloud.js?v=202610301800"></script>
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
-<script src="js/github.js?v=202611151230"></script>
-<script src="js/app.js?v=202611162100"></script>
+<script src="js/github.js?v=202611162200"></script>
+<script src="js/app.js?v=202611162200"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

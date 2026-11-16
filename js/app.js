@@ -944,7 +944,7 @@ const App = (() => {
   // ---------- first run: connect an AI model (free Gemini / Ollama Cloud guides) ----------
   const SETUP = {
     shared: {
-      steps: ['Sign in with GitHub (button below). Your GitHub account is used only to count your daily requests.',
+      steps: ['Sign in with GitHub (button below). Only your public username is read, to count your daily requests: no access to your files or repositories.',
         'Use the copilot as usual. The shared AI is free within a daily limit; the limit resets at midnight UTC.',
         'For more requests, connect your own key (Google Gemini, Ollama Cloud, Claude ...). It stays only in this browser tab unless you tick "Remember".'],
       note: 'The shared AI runs on accounts provided by the CircuitPilot owner. When one account runs out of quota, the next one answers by itself.',
@@ -987,7 +987,7 @@ const App = (() => {
     $$('#chooseModal .as-tabs button').forEach(b => b.classList.toggle('on', b.dataset.p === setupTab));
     $('#asKey').closest('label').classList.toggle('hidden', shared);
     $('#asRemember').closest('label').classList.toggle('hidden', shared);
-    $('#asConnect').textContent = shared ? (GitHub.getToken() ? 'Use the shared AI' : 'Sign in with GitHub') : 'Connect';
+    $('#asConnect').textContent = shared ? (GitHub.getIdToken() ? 'Use the shared AI' : 'Sign in with GitHub') : 'Connect';
     $('#asGuide').innerHTML = `<ol>${g.steps.map(s => `<li>${s}</li>`).join('')}</ol>${g.note ? `<p class="muted small">${g.note}</p>` : ''}`;
     $('#asCustom').classList.toggle('hidden', setupTab !== 'custom');
     $('#asStatus').textContent = ''; $('#asStatus').className = 'muted';
@@ -997,14 +997,14 @@ const App = (() => {
   // the shared AI: needs a GitHub sign-in (or a GitHub token pasted under the GitHub button); the relay counts the daily requests
   async function sharedConnect() {
     const st = $('#asStatus');
-    if (!GitHub.getToken()) {
+    if (!GitHub.getIdToken()) {
       st.className = 'muted'; st.textContent = 'Opening GitHub sign-in...';
-      try { GitHub.signIn(); } catch (e) { st.className = 'bad'; st.textContent = 'Sign in with GitHub first (GitHub button at the top; a GitHub token works too). ' + e.message; }
+      try { GitHub.signIn('id'); } catch (e) { st.className = 'bad'; st.textContent = 'Sign in with GitHub first (GitHub button at the top; a GitHub token works too). ' + e.message; }
       return;
     }
     st.className = 'muted'; st.textContent = 'Checking the shared AI...'; $('#asConnect').disabled = true;
     try {
-      const r = await fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } });
+      const r = await fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getIdToken() } });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'The shared AI is not reachable');
       if (!j.ready) throw new Error('The shared AI has no account ready right now. Try again later, or connect your own key.');
@@ -1804,8 +1804,8 @@ const App = (() => {
       if (title) $('#chTitle').textContent = title;
       if (sub) $('#chSub').textContent = sub;
       $('#chooseModal').classList.remove('hidden');
-      if (GitHub.getToken()) {
-        fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } })
+      if (GitHub.getIdToken()) {
+        fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getIdToken() } })
           .then(r => r.ok ? r.json() : null).then(j => { if (j && j.limit) $('#chLimit').textContent = j.limit + ' requests a day'; }).catch(() => { });
       }
     }
@@ -1813,14 +1813,14 @@ const App = (() => {
     $('#chClose').onclick = () => $('#chooseModal').classList.add('hidden');
     async function chooseShared() {
       const st = $('#chStatus');
-      if (!GitHub.getToken()) {
+      if (!GitHub.getIdToken()) {
         st.className = 'muted'; st.textContent = 'Opening GitHub sign-in...';
-        try { GitHub.signIn(); } catch (e) { st.className = 'bad'; st.textContent = 'Sign in with GitHub first (GitHub button at the top; a GitHub token works too). ' + e.message; }
+        try { GitHub.signIn('id'); } catch (e) { st.className = 'bad'; st.textContent = 'Sign in with GitHub first (GitHub button at the top; a GitHub token works too). ' + e.message; }
         return;
       }
       st.className = 'muted'; st.textContent = 'Checking the shared AI...';
       try {
-        const r = await fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } });
+        const r = await fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getIdToken() } });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || 'The shared AI is not reachable');
         if (!j.ready) throw new Error('The shared AI has no account ready right now. Try again later, or use your own API.');
@@ -1835,7 +1835,7 @@ const App = (() => {
     // once per GitHub account: a welcome that offers both choices
     // every visitor sees it once per browser (a guest), and once more after each GitHub sign-in
     function maybeAnnounce() {
-      const signed = !!GitHub.getToken(), who = signed ? (GitHub.account() || 'github') : 'guest';
+      const signed = !!GitHub.getIdToken(), who = signed ? (GitHub.account() || 'github') : 'guest';
       try { if (localStorage.getItem('cp.announced') === who) return; localStorage.setItem('cp.announced', who); } catch (e) { }
       $('#ghModal').classList.add('hidden');
       if (signed) chooseOpen('Welcome! You are signed in with GitHub', 'You can now use CircuitPilot\'s free AI with a limit per person, or your own API key. Choose one; you can change it any time with 🔑 AI keys.');
@@ -1843,7 +1843,7 @@ const App = (() => {
     }
     setTimeout(maybeAnnounce, 1500); setTimeout(maybeAnnounce, 4000);
     // record the signed-in user for the shared AI admin page (one quiet check per page load)
-    if (GitHub.getToken()) fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } }).catch(() => { });
+    if (GitHub.getIdToken()) fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getIdToken() } }).catch(() => { });
     $('#asClose').onclick = () => $('#chooseModal').classList.add('hidden');
     $('#chooseModal .as-tabs').onclick = e => { const b = e.target.closest('button[data-p]'); if (b) { setupTab = b.dataset.p; setupRender(); } };
     $('#asConnect').onclick = setupConnect;

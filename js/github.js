@@ -9,6 +9,11 @@ const GitHub = (() => {
   const enc = new TextEncoder();
   const getToken = () => { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
   const setToken = t => { try { if (t) localStorage.setItem(KEY, t); else localStorage.removeItem(KEY); } catch (e) { } };
+  // level 1 (identity only, no scope): the token that proves who the user is for the shared AI. It gives no access to
+  // repositories or files. Level 2 (repo): the token for saving designs, requested only when the user saves to GitHub.
+  const ID_KEY = 'cp-github-id-token';
+  const getIdToken = () => { try { return localStorage.getItem(ID_KEY) || ''; } catch (e) { return ''; } };
+  const setIdToken = t => { try { if (t) localStorage.setItem(ID_KEY, t); else localStorage.removeItem(ID_KEY); } catch (e) { } };
   const getRepo = () => { try { return localStorage.getItem(REPO_KEY) || ''; } catch (e) { return ''; } };
   const setRepo = r => { try { if (r) localStorage.setItem(REPO_KEY, r); else localStorage.removeItem(REPO_KEY); } catch (e) { } };
 
@@ -63,11 +68,12 @@ const GitHub = (() => {
   const onSite = () => /(^|\.)pcbgo\.site$/.test(location.hostname);
   const oauthAvailable = () => !!clientId() && (onSite() || localOrigin(location.origin)) && !!relayUrl();
   const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
-  function signIn() {
+  function signIn(level = 'repo') {
     if (!oauthAvailable()) throw new Error('GitHub sign-in is not set up for this site');
     const state = rnd() + (onSite() ? '' : '_' + encodeURIComponent(location.origin));
     try { sessionStorage.setItem('cp-github-state', state); } catch (e) { }
-    const q = new URLSearchParams({ client_id: clientId(), redirect_uri: CALLBACK, scope: 'repo', state, allow_signup: 'true' });
+    try { sessionStorage.setItem('cp-github-want', level); } catch (e) { }
+    const q = new URLSearchParams(Object.assign({ client_id: clientId(), redirect_uri: CALLBACK, state, allow_signup: 'true' }, level === 'id' ? {} : { scope: 'repo' }));
     location.href = 'https://github.com/login/oauth/authorize?' + q;
   }
   // called when the page loads: if GitHub sent the user back with a code, finish the sign-in
@@ -82,15 +88,25 @@ const GitHub = (() => {
     }
     const want = (() => { try { return sessionStorage.getItem('cp-github-state'); } catch (e) { return null; } })();
     history.replaceState(null, '', location.pathname + location.hash);
+    const level = (() => { try { const v = sessionStorage.getItem('cp-github-want') || 'repo'; sessionStorage.removeItem('cp-github-want'); return v; } catch (e) { return 'repo'; } })();
     try { sessionStorage.removeItem('cp-github-state'); } catch (e) { }
     if (!want || want !== state) throw new Error('GitHub sign-in was cancelled or did not match (try again)');
     const r = await fetch(relayUrl().replace(/\/$/, '') + '/github/token', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, redirect_uri: CALLBACK }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.access_token) throw new Error('GitHub sign-in failed: ' + (j.error || r.statusText));
+    if (level === 'id') { setIdToken(j.access_token); return identity(j.access_token); }
     setToken(j.access_token);
     return check();
   }
-  const signOut = () => { setToken(''); setRepo(''); try { localStorage.removeItem('cp.github.login'); } catch (e) { } };
+  // the account name of a token (identity only: nothing else is read)
+  async function identity(token) {
+    const r = await fetch(API + '/user', { headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + token } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.login) throw new Error('GitHub did not confirm the account');
+    try { localStorage.setItem('cp.github.login', j.login); } catch (e) { }
+    return j.login;
+  }
+  const signOut = () => { setToken(''); setIdToken(''); setRepo(''); try { localStorage.removeItem('cp.github.login'); } catch (e) { } };
 
   // ---------- repositories ----------
   // the signed-in account's repositories (most recently updated first)
@@ -178,5 +194,5 @@ const GitHub = (() => {
   async function check() { const login = (await api('GET', '/user')).login; try { localStorage.setItem('cp.github.login', login); } catch (e) { } return login; }
   const account = () => { try { return localStorage.getItem('cp.github.login') || ''; } catch (e) { return ''; } };
 
-  return { getToken, setToken, getRepo, setRepo, check, account, listRepos, createRepo, saveDesign, listDesigns, readBlob, gitSha, slug, oauthAvailable, signIn, finishSignIn, signOut };
+  return { getToken, setToken, getIdToken, setIdToken, getRepo, setRepo, check, account, listRepos, createRepo, saveDesign, listDesigns, readBlob, gitSha, slug, oauthAvailable, signIn, finishSignIn, signOut };
 })();

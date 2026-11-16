@@ -39,22 +39,30 @@ const Sch = (() => {
   }
   function sheetBar() {
     let bar = document.getElementById('sheetBar');
-    if (!bar) { bar = document.createElement('div'); bar.id = 'sheetBar'; bar.className = 'sheetbar'; svg.parentNode.appendChild(bar); bar.onclick = sheetClick; bar.ondblclick = sheetRename; }
+    if (!bar) { bar = document.createElement('div'); bar.id = 'sheetBar'; bar.className = 'sheetbar'; svg.parentNode.appendChild(bar); bar.onclick = sheetClick; }
     const sh = sheets(), n = Model.S.components.filter(c => Model.sheetOf(c) === ui.sheet).length;
     bar.innerHTML = sh.map((s, i) => `<button data-sheet="${i}" class="${i === ui.sheet ? 'on' : ''}" title="Double-click to rename">${i + 1}: ${esc(s.name || 'Sheet ' + (i + 1))}</button>`).join('') +
       `<button data-sheet="add" title="Add a sheet">＋</button>${sh.length > 1 && !n ? '<button data-sheet="del" title="Delete this empty sheet">✕</button>' : ''}<label class="sfr"><input type="checkbox" ${frameOn() ? 'checked' : ''} data-sheet="frame"> frame</label>`;
   }
+  // two clicks on the same sheet tab within 450 ms rename it. Detected here, not with the native dblclick event,
+  // because the first click re-renders the bar and the second click then lands on a new element.
+  let lastTab = { k: null, t: 0 };
   function sheetClick(e) {
     const b = e.target.closest('[data-sheet]'); if (!b) return;
     const k = b.dataset.sheet;
+    if (!isNaN(+k)) {
+      const now = Date.now(), dbl = lastTab.k === k && now - lastTab.t < 450;
+      lastTab = dbl ? { k: null, t: 0 } : { k, t: now };
+      if (dbl) { sheetRename(+k); return; }
+    }
     if (k === 'frame') { Model.mutate(() => { Model.S.schFrame = b.checked; }); return; }
     if (k === 'add') { Model.mutate(() => { const sh = sheets().slice(); sh.push({ name: 'Sheet ' + (sh.length + 1) }); Model.S.sheets = sh; }); ui.sheet = sheets().length - 1; select(null); render(); fit(); return; }
     if (k === 'del') { const i = ui.sheet; Model.mutate(() => { const sh = sheets().slice(); sh.splice(i, 1); Model.S.sheets = sh; for (const c of Model.S.components) if (Model.sheetOf(c) > i) c.sheet = Model.sheetOf(c) - 1; }); ui.sheet = Math.max(0, i - 1); render(); fit(); return; }
     ui.sheet = +k; select(null); render(); fit();
   }
-  function sheetRename(e) {
-    const b = e.target.closest('[data-sheet]'); if (!b || isNaN(+b.dataset.sheet)) return;
-    const i = +b.dataset.sheet, n = prompt('Sheet name', sheets()[i].name || ''); if (n == null) return;
+  function sheetRename(i) {
+    const cur = sheets()[i]; if (!cur) return;
+    const n = prompt('Sheet name', cur.name || ''); if (n == null) return;
     Model.mutate(() => { const sh = sheets().map(s => Object.assign({}, s)); sh[i].name = n.trim() || 'Sheet ' + (i + 1); Model.S.sheets = sh; });
   }
 

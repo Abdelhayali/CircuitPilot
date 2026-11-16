@@ -19,7 +19,7 @@ const PRESETS = {
   openai: { name: 'OpenAI', base: 'https://api.openai.com/v1' },
   custom: { name: 'Custom', base: '' },
 };
-const DEFAULTS = { dailyLimit: 20, maxTokens: 4096, rpm: 10 };   // rpm: requests per minute per account (0 = no cap)
+const DEFAULTS = { dailyLimit: 20, maxTokens: 4096, rpm: 10, context: 262144 };   // rpm: requests per minute per account (0 = no cap)
 const CIRCUIT_MODEL = 'circuitpilot';
 
 const day = () => new Date().toISOString().slice(0, 10);
@@ -43,6 +43,23 @@ async function load(env) {
 }
 const save = (env, p) => env.POOL.put('pool', JSON.stringify(p));
 const num = async (env, k) => Number(await env.POOL.get(k)) || 0;
+// context window of a model as the provider reports it (OpenRouter, vLLM, LM Studio … report one; some report none)
+const ctxOf = m => Number(m && (m.context_length || m.max_model_len || m.context_window || m.max_context_length || m.input_token_limit || m.max_seq_len || (m.top_provider && m.top_provider.context_length) || (m.meta && m.meta.n_ctx_train))) || 0;
+async function listModels(base, key) {
+  const r = await fetch(base + '/models', { headers: { authorization: 'Bearer ' + key, accept: 'application/json' } });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error('The provider answered ' + r.status + (j && j.error ? ': ' + String(j.error.message || j.error).slice(0, 200) : ''));
+  const models = [], contexts = {};
+  for (const m of ((j && (j.data || j.models)) || [])) {
+    const id = String(m.id || m.name || '').replace(/^models\//, '');
+    if (!id) continue;
+    models.push(id);
+    const c = ctxOf(m); if (c > 0) contexts[id] = c;
+  }
+  return { models: [...new Set(models)].sort(), contexts };
+}
+// the default context window (256K tokens) when an account's provider does not report one
+const CTX_DEFAULT = 262144;
 
 // one chat request: the first account that is ready answers; a failing account is put to rest and the next is tried
 async function chat(req, env) {
@@ -116,7 +133,7 @@ async function admin(req, url, env) {
   const pool = await load(env), d = day(), now = Date.now();
   if (p === '/admin/api/state' && req.method === 'GET') {
     const entries = [];
-    for (const e of pool.entries) entries.push({ id: e.id, label: e.label, provider: e.provider, base: e.base, model: e.model, enabled: !!e.enabled, keyTail: String(e.key || '').slice(-4), cooling: (e.cooldown_until || 0) > now ? e.cooldown_until : 0, last_error: e.last_error || '', usedToday: await num(env, `c:${e.id}:${d}`), context: e.context || null, rpm: e.rpm == null ? null : e.rpm, minuteUsed: await num(env, `m:${e.id}:${Math.floor(now / 60000)}`) });
+    for (const e of pool.entries) entries.push({ id: e.id, label: e.label, provider: e.provider, base: e.base, model: e.model, enabled: !!e.enabled, keyTail: String(e.key || '').slice(-4), cooling: (e.cooldown_until || 0) > now ? e.cooldown_until : 0, last_error: e.last_error || '', usedToday: await num(env, `c:${e.id}:${d}`), context: e.context || null, context_eff: e.context || pool.settings.context || CTX_DEFAULT, context_auto: !!e.context_auto, rpm: e.rpm == null ? null : e.rpm, minuteUsed: await num(env, `m:${e.id}:${Math.floor(now / 60000)}`) });
     return json({ entries, settings: pool.settings, presets: Object.fromEntries(Object.entries(PRESETS).map(([k, v]) => [k, v.name])), usedToday: entries.reduce((a, e) => a + e.usedToday, 0), day: d, limit: pool.settings.dailyLimit, users: await allUsers(env, d) });
   }
   if (req.method !== 'POST') return json({ error: 'Use POST for changes' }, 405);
@@ -129,11 +146,8 @@ async function admin(req, url, env) {
     let key = String(body.key || '').trim();
     if (!key) { const e = find(); if (e) key = e.key; }   // editing an account: its saved key
     if (!key) return json({ error: 'Paste the API key first' }, 400);
-    const r = await fetch(base + '/models', { headers: { authorization: 'Bearer ' + key, accept: 'application/json' } });
-    const j = await r.json().catch(() => null);
-    if (!r.ok) return json({ error: 'The provider answered ' + r.status + (j && j.error ? ': ' + String(j.error.message || j.error).slice(0, 200) : '') }, 502);
-    const ids = ((j && (j.data || j.models)) || []).map(m => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
-    return json({ models: [...new Set(ids)].sort() });
+    try { const { models, contexts } = await listModels(base, key); return json({ models, contexts }); }
+    catch (err) { return json({ error: err.message }, 502); }
   }
   if (p === '/admin/api/entry') {
     const prov = PRESETS[body.provider] ? String(body.provider) : 'custom';
@@ -151,7 +165,12 @@ async function admin(req, url, env) {
     if (e.model !== model || e.base !== base) { e.cooldown_until = 0; e.last_error = ''; }
     if (String(body.rpm === undefined ? '' : body.rpm).trim() === '') e.rpm = null;
     else { const rpm = Math.round(Number(body.rpm)); if (!(rpm >= 0 && rpm <= 600)) return json({ error: 'Requests per minute: 0 to 600 (0 = no limit), or empty for the default' }, 400); e.rpm = rpm; }
-    const cw = Math.round(Number(body.context)); e.context = cw > 0 ? cw : null;
+    const cw = Math.round(Number(body.context));
+    if (cw > 0) { e.context = cw; e.context_auto = false; }
+    else {
+      e.context = null; e.context_auto = false;
+      try { const { contexts } = await listModels(base, e.key); if (contexts[model] > 0) { e.context = contexts[model]; e.context_auto = true; } } catch (err) { /* no list: the default applies */ }
+    }
     const same = pool.entries.filter(x => x.provider === prov).length;
     Object.assign(e, { provider: prov, base, model, label: String(body.label || '').trim().slice(0, 60) || `${PRESETS[prov].name} ${same}`, enabled: body.enabled !== false });
     await save(env, pool);
@@ -184,6 +203,7 @@ async function admin(req, url, env) {
     if (dl >= 1 && dl <= 10000) pool.settings.dailyLimit = dl;
     if (mt >= 256 && mt <= 32000) pool.settings.maxTokens = mt;
     const rp = Math.round(Number(body.rpm)); if (rp >= 1 && rp <= 600) pool.settings.rpm = rp;
+    const cx = Math.round(Number(body.context)); if (cx >= 1024 && cx <= 2000000) pool.settings.context = cx;
     await save(env, pool); return json({ ok: true, settings: pool.settings });
   }
   if (p === '/admin/api/test') {   // one tiny request to check an account (the admin sees the provider's answer)
@@ -221,8 +241,8 @@ export async function poolRoute(req, url, env) {
   if (p.startsWith('/admin')) return admin(req, url, env);
   if (p === '/pool/status' && req.method === 'GET') return status(req, env);
   if (p === '/pool/v1/models' && req.method === 'GET') {
-    const pool = await load(env), sizes = pool.entries.filter(e => e.enabled && e.context > 0).map(e => e.context);
-    const context_length = sizes.length ? Math.min(...sizes) : 32768;
+    const pool = await load(env), sizes = pool.entries.filter(e => e.enabled).map(e => e.context || pool.settings.context || CTX_DEFAULT);
+    const context_length = sizes.length ? Math.min(...sizes) : (pool.settings.context || CTX_DEFAULT);
     return json({ object: 'list', data: [{ id: CIRCUIT_MODEL, object: 'model', owned_by: 'circuitpilot', context_length }] });
   }
   if (p === '/pool/v1/chat/completions' && req.method === 'POST') return chat(req, env);
@@ -252,14 +272,14 @@ input,select{padding:5px;font:inherit;max-width:100%} button{padding:5px 9px;fon
 <input type="hidden" id="eid">
 <div class="row"><input id="elabel" placeholder="Label, e.g. Google 1"><select id="eprov"></select><input id="ebase" placeholder="https://... (custom only)" size="36"></div>
 <div class="row" style="margin-top:6px"><input id="emodel" list="mlist" placeholder="Model name (or Fetch models)" size="36"><button id="fetch">Fetch models</button><datalist id="mlist"></datalist><input id="ekey" type="password" placeholder="API key (empty when editing = keep it)" size="36"></div>
-<div class="row" style="margin-top:6px"><input id="ermp" type="number" min="0" max="600" placeholder="Requests per minute (empty = default)" style="width:230px"><input id="ectx" type="number" min="1024" placeholder="Context window in tokens, e.g. 1048576" style="width:230px"><label><input type="checkbox" id="eon" checked> enabled</label><button id="save">Save account</button><button id="clear">New account</button><span id="emsg" class="muted"></span></div>
+<div class="row" style="margin-top:6px"><input id="ermp" type="number" min="0" max="600" placeholder="Requests per minute (empty = default)" style="width:230px"><input id="ectx" type="number" min="1024" placeholder="Context in tokens: empty = from provider, else 256K" style="width:230px"><label><input type="checkbox" id="eon" checked> enabled</label><button id="save">Save account</button><button id="clear">New account</button><span id="emsg" class="muted"></span></div>
 </div>
 <h2>Users (signed in with GitHub)</h2>
 <div class="box"><p class="muted" id="ustats"></p>
 <div class="row"><button id="resetAll">Reset everyone's count for today</button><span id="umsg" class="muted"></span></div>
 <table><thead><tr><th>GitHub login</th><th>First seen</th><th>Last seen</th><th>Total requests</th><th>Today</th><th></th></tr></thead><tbody id="urows"></tbody></table></div>
 <h2>Limits</h2>
-<div class="box row">Requests per user per day <input id="dl" type="number" min="1" max="10000" style="width:90px"> Max output tokens per request <input id="mt" type="number" min="256" max="32000" style="width:90px"> Requests per minute per account <input id="rpm" type="number" min="1" max="600" style="width:90px"><button id="saveSet">Save limits</button><span id="smsg" class="muted"></span></div>
+<div class="box row">Requests per user per day <input id="dl" type="number" min="1" max="10000" style="width:90px"> Max output tokens per request <input id="mt" type="number" min="256" max="32000" style="width:90px"> Requests per minute per account <input id="rpm" type="number" min="1" max="600" style="width:90px"> Default context window (tokens) <input id="cx" type="number" min="1024" max="2000000" style="width:120px"><button id="saveSet">Save limits</button><span id="smsg" class="muted"></span></div>
 </div>
 <script>
 var state = null;
@@ -290,7 +310,7 @@ function paint() {
     if (e.last_error) st += ' (last: ' + e.last_error + ')';
     var id = esc(e.id);
     return '<tr><td>' + (i + 1) + '</td><td>' + esc(e.label) + '</td><td>' + esc(state.presets[e.provider] || e.provider) + '<br><span class="muted">' + esc(e.base) + '</span></td>' +
-      '<td>' + esc(e.model) + (e.context ? '<br><span class="muted">' + e.context + ' tokens</span>' : '<br><span class="bad">context not set</span>') + '</td><td>••••' + esc(e.keyTail) + '</td><td class="' + (st === 'ready' ? 'good' : 'bad') + '">' + esc(st) + '</td><td>' + e.usedToday + '</td><td>' + e.minuteUsed + ' / ' + (e.rpm == null ? state.settings.rpm : (e.rpm || 'no limit')) + '</td><td>' +
+      '<td>' + esc(e.model) + '<br><span class="muted">' + e.context_eff + ' tokens' + (e.context ? (e.context_auto ? ' (from provider)' : '') : ' (default)') + '</span>' + '</td><td>••••' + esc(e.keyTail) + '</td><td class="' + (st === 'ready' ? 'good' : 'bad') + '">' + esc(st) + '</td><td>' + e.usedToday + '</td><td>' + e.minuteUsed + ' / ' + (e.rpm == null ? state.settings.rpm : (e.rpm || 'no limit')) + '</td><td>' +
       '<button data-a="up" data-id="' + id + '">▲</button><button data-a="down" data-id="' + id + '">▼</button>' +
       '<button data-a="edit" data-id="' + id + '">Edit</button><button data-a="test" data-id="' + id + '">Test</button>' +
       '<button data-a="reset" data-id="' + id + '">Wake up</button><button data-a="delete" data-id="' + id + '">Delete</button></td></tr>';
@@ -302,21 +322,25 @@ function paint() {
     return '<tr><td>' + esc(u.login) + '</td><td>' + esc(when(u.first)) + '</td><td>' + esc(when(u.last)) + '</td><td>' + u.total + '</td><td class="' + (over ? 'bad' : '') + '">' + u.usedToday + ' / ' + state.settings.dailyLimit + '</td><td><button data-u="' + esc(u.login) + '">Reset today</button></td></tr>';
   }).join('') || '<tr><td colspan="6" class="muted">No user has signed in yet.</td></tr>';
   $('total').textContent = 'Requests today: ' + state.usedToday + ' (day ' + state.day + ' UTC)';
-  $('dl').value = state.settings.dailyLimit; $('mt').value = state.settings.maxTokens; $('rpm').value = state.settings.rpm;
+  $('dl').value = state.settings.dailyLimit; $('mt').value = state.settings.maxTokens; $('rpm').value = state.settings.rpm; $('cx').value = state.settings.context;
 }
 function refresh(msgId, text, bad) { if (msgId) say(msgId, text, bad); return api('/admin/api/state').then(function (s) { state = s; paint(); }); }
 $('login').onclick = load;
+var ctxMap = {};
 function fetchModels(quiet) {
   var key = $('ekey').value.trim(), id = $('eid').value;
   if (!key && !id) { if (!quiet) say('emsg', 'Paste the API key first (or edit a saved account).', true); return; }
   if (!quiet) say('emsg', 'Fetching models...');
   api('/admin/api/models', { id: id, provider: $('eprov').value, base: $('ebase').value, key: key }).then(function (r) {
+    ctxMap = r.contexts || {};
     $('mlist').innerHTML = r.models.map(function (m) { return '<option value="' + esc(m) + '">'; }).join('');
+    if (ctxMap[$('emodel').value.trim()]) $('ectx').value = ctxMap[$('emodel').value.trim()];
     if (!$('emodel').value.trim() && r.models.length) $('emodel').value = r.models[0];
     say('emsg', r.models.length + ' models found. Pick one in the Model field (suggestions appear when you click it).');
   }).catch(function (e) { if (!quiet) say('emsg', e.message, true); });
 }
 $('fetch').onclick = function () { fetchModels(false); };
+$('emodel').onchange = function () { var c = ctxMap[$('emodel').value.trim()]; if (c) $('ectx').value = c; };
 $('ekey').onchange = function () { if ($('ekey').value.trim()) fetchModels(true); };
 $('rows').onclick = function (ev) {
   var b = ev.target.closest('[data-a]'); if (!b) return;
@@ -348,7 +372,7 @@ $('save').onclick = function () {
 };
 $('clear').onclick = function () { $('eid').value = ''; $('elabel').value = ''; $('ebase').value = ''; $('emodel').value = ''; $('ekey').value = ''; $('eon').checked = true; $('ermp').value = ''; $('ectx').value = ''; say('emsg', 'New account: paste its key.'); };
 $('saveSet').onclick = function () {
-  api('/admin/api/settings', { dailyLimit: $('dl').value, maxTokens: $('mt').value, rpm: $('rpm').value }).then(function () { return refresh('smsg', 'Saved.'); }).catch(function (e) { say('smsg', e.message, true); });
+  api('/admin/api/settings', { dailyLimit: $('dl').value, maxTokens: $('mt').value, rpm: $('rpm').value, context: $('cx').value }).then(function () { return refresh('smsg', 'Saved.'); }).catch(function (e) { say('smsg', e.message, true); });
 };
 if (sessionStorage.getItem('cpAdminTok')) { $('tok').value = sessionStorage.getItem('cpAdminTok'); load(); }
 </script></body></html>`;

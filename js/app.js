@@ -993,7 +993,7 @@ const App = (() => {
     $('#asStatus').textContent = ''; $('#asStatus').className = 'muted';
     if ($('#asOpenSettings')) $('#asOpenSettings').onclick = () => { $('#chooseModal').classList.add('hidden'); openSettings(); };
   }
-  function openSetup(tab) { if (!tab && window.CPChoose) return window.CPChoose(); if (tab) setupTab = tab; $('#asKey').value = ''; setupRender(); showOwnPanel(); setTimeout(() => $('#asKey').focus(), 50); }
+  function openSetup(tab) { if (!tab && window.CPChoose) return window.CPChoose(); if (tab) setupTab = tab; $('#asKey').value = ''; setupRender(); (window.CPOwnPanel && window.CPOwnPanel()); setTimeout(() => $('#asKey').focus(), 50); }
   // the shared AI: needs a GitHub sign-in (or a GitHub token pasted under the GitHub button); the relay counts the daily requests
   async function sharedConnect() {
     const st = $('#asStatus');
@@ -1810,6 +1810,7 @@ const App = (() => {
       }
     }
     window.CPChoose = chooseOpen;
+    window.CPOwnPanel = showOwnPanel;
     $('#chClose').onclick = () => $('#chooseModal').classList.add('hidden');
     async function chooseShared() {
       const st = $('#chStatus');

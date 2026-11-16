@@ -1745,7 +1745,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       if (!b) throw new Error(fn + "(): no board '" + name + "' on the PCB (" + (list.length ? 'boards: ' + list.map(x => x.name).join(', ') : 'the outline is one board') + ')');
       return b;
     };
-    const localOf = b => { const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2; return { cx, cy, outline: new Shape2D(b.outline.map(q => [q[0] - cx, cy - q[1]])) }; };
+    const localOf = b => { const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2; return { cx, cy, outline: new Shape2D(b.outline.map(q => [q[0] - cx, q[1] - cy])) }; };
     const asBoard = b => b ? { outline: b.outline, parts: pcb.parts.filter(p => b.parts.includes(p.ref)), holes: b.holes, thickness: pcb.thickness, w: b.x1 - b.x0, h: b.y1 - b.y0 } : pcb;
     const lib = {
       square: api2.square, rect: api2.rect, circle: api2.circle, ellipse: api2.ellipse, roundedRect: api2.roundedRect, polygon: api2.polygon, hull2d: api2.hull2d,
@@ -1764,7 +1764,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       part: (name, shape, o = {}) => { if (shape === undefined && typeof name === 'string') return lib.pcbPart(name); need3(shape, 'part');
         // print: false / kind 'metal' | 'reference': not 3D-printed (electrode plates, a battery dummy) — no print checks, not in the print STLs
         const kind = o.kind || (o.print === false ? 'reference' : 'print'); if (!['print', 'metal', 'reference', 'board'].includes(kind)) throw new Error("part(): kind must be 'print', 'metal', 'reference' or 'board'");
-        parts.push({ name: String(name || 'part' + (parts.length + 1)).replace(/[^\w.-]+/g, '_'), shape, color: o.color, explode: o.explode ? vec3(o.explode, 'explode') : null, print: o.print && typeof o.print === 'object' ? o.print : null, kind, noPrint: kind !== 'print', sheet: o.thickness ? +o.thickness : null }); return shape; },
+        parts.push({ name: String(name || 'part' + (parts.length + 1)).replace(/[^\w.-]+/g, '_'), shape, color: o.color, explode: o.explode ? vec3(o.explode, 'explode') : null, print: o.print && typeof o.print === 'object' ? o.print : null, kind, noPrint: kind !== 'print', through: o.through || null, sheet: o.thickness ? +o.thickness : null }); return shape; },
       resolution: n => { FN = Math.max(0, Math.min(256, Math.round(+n || 0))); },
       range: (a, b, s = 1) => { const out = []; for (let x = a; s > 0 ? x <= b + 1e-9 : x >= b - 1e-9; x += s) { out.push(+x.toFixed(9)); if (out.length > 10000) break; } return out; },
       log: (...a) => { logs.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')); },
@@ -1780,6 +1780,124 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       feature: (kind, shape, o = {}) => { features.push(Object.assign({ kind: String(kind), node: need3(shape, 'feature') }, o)); return shape; },
     };
     // ---------- enclosure kit: building blocks shared by the templates (and available to the AI) ----------
+    // ---------- hardware library: real screws, nuts, standoffs, inserts, pogo pins, foam, tape, wires (reference parts) ----------
+    // Sizes are catalogue values (ballpark: check the supplier datasheet before ordering). Keys: M1_6, M2, M2_5, M3, M4.
+    const HW = {
+      M1_6: { dia: 1.6, pitch: 0.35, pan: [3.0, 1.0], wafer: [3.2, 0.6], flat: [3.0, 0.9], socket: [3.0, 1.6], nut: [3.2, 1.3], search: 'M1.6' },
+      M2: { dia: 2.0, pitch: 0.4, pan: [3.8, 1.3], wafer: [4.6, 0.8], flat: [3.8, 1.2], socket: [3.8, 2.0], nut: [4.0, 1.6], search: 'M2' },
+      M2_5: { dia: 2.5, pitch: 0.45, pan: [4.5, 1.6], wafer: [5.5, 1.0], flat: [4.5, 1.5], socket: [4.5, 2.5], nut: [5.0, 2.0], search: 'M2.5' },
+      M3: { dia: 3.0, pitch: 0.5, pan: [5.5, 2.0], wafer: [6.0, 1.1], flat: [5.5, 1.9], socket: [5.5, 3.0], nut: [5.5, 2.4], search: 'M3' },
+      M4: { dia: 4.0, pitch: 0.7, pan: [7.0, 2.8], wafer: [8.0, 1.5], flat: [8.0, 2.5], socket: [7.0, 4.0], nut: [7.0, 3.2], search: 'M4' },
+    };
+    const WIRE_OD = { 26: 1.0, 28: 0.8, 30: 0.6 };      // insulated outer diameter, mm (approximate)
+    const hwKey = size => String(size || 'M2').toUpperCase().replace('.', '_');
+    const hwList = [];                                    // every hardware part: the BOM and the thread checks
+    // hardware(kind, o): a reference part with real dimensions. Origin: the screw's shank tip / the part's corner.
+    //   screw (size, length, head: pan|wafer|flat|socket) · nut · washer · standoff (od, height, bore, part) · insert (od, length)
+    //   pogo (d, height) · magnet (d, t) · spring_bar (d, length) · foam | tape | gap_pad (w, l, t) · wire (points, awg | od, color)
+    //   options: at [x,y,z] (placed before xf), xf (a transform such as TB), name, color, dir (explode direction)
+    function hardwareOf(kind, o = {}) {
+      const key = hwKey(o.size), t = HW[key], xf = o.xf || (s => s), at = o.at || [0, 0, 0];
+      const need = (c, m) => { if (!c) throw new Error('hardware(' + kind + '): ' + m); };
+      let shape, color = o.color || 'silver', tag = kind, search = kind, extra = {};
+      if (kind === 'screw') {
+        need(t, 'no screw size ' + o.size + ' (M1.6, M2, M2.5, M3, M4)');
+        const head = o.head || 'pan'; need(['pan', 'wafer', 'flat', 'socket'].includes(head), 'head must be pan, wafer, flat or socket');
+        need(o.length > 0, 'a screw needs length (mm)');
+        const hd = t[head];
+        shape = union(cylinder({ d: t.dia, h: o.length }), cylinder({ d: hd[0], h: hd[1] }).translate([0, 0, o.length]));
+        tag = head + ' ' + t.search + ' x ' + o.length; search = t.search + ' ' + head + ' head screw ' + o.length + 'mm';
+        extra = { length: o.length, pitch: t.pitch };
+      } else if (kind === 'nut') {
+        need(t, 'no nut size ' + o.size); const af = t.nut[0], th = t.nut[1];
+        shape = difference(cylinder({ d: af / Math.cos(Math.PI / 6), h: th, fn: 6 }), cylinder({ d: t.dia, h: th + 2 }).translate([0, 0, -1]));
+        tag = 'nut ' + t.search; search = t.search + ' hex nut'; extra = { pitch: t.pitch };
+      } else if (kind === 'washer') {
+        need(t, 'no washer size ' + o.size); const th = o.t || 0.3;
+        shape = difference(cylinder({ d: o.od || t.dia * 2, h: th }), cylinder({ d: t.dia + 0.2, h: th + 2 }).translate([0, 0, -1]));
+        tag = 'washer ' + t.search; search = t.search + ' washer';
+      } else if (kind === 'standoff') {
+        const od = o.od || 4.4, h = o.height || 3.0, bore = o.bore || (t ? t.dia : 2.0);
+        shape = difference(cylinder({ d: od, h }), cylinder({ d: bore, h: h + 2 }).translate([0, 0, -1]));
+        tag = 'standoff ' + (o.part || key) + ' ' + h + 'mm'; search = o.part ? o.part + ' standoff ' + h + 'mm' : key + ' standoff ' + h + 'mm';
+        extra = { height: h, pitch: t ? t.pitch : 0.4 };
+      } else if (kind === 'insert') {
+        need(t, 'no insert size ' + o.size); const od = o.od || 3.2, h = o.length || 3.0;
+        shape = difference(cylinder({ d: od, h }), cylinder({ d: t.dia, h: h + 2 }).translate([0, 0, -1])); color = o.color || 'brass';
+        tag = 'heat-set insert ' + t.search; search = t.search + ' heat-set insert ' + h + 'mm'; extra = { length: h, pitch: t.pitch };
+      } else if (kind === 'pogo') {
+        need(o.height > 0, 'a pogo pin needs height (mm)'); shape = cylinder({ d: o.d || 1.6, h: o.height }); color = o.color || 'gold';
+        tag = 'pogo ' + o.height; search = 'pogo pin ' + (o.d || 1.6) + 'mm ' + o.height + 'mm spring';
+      } else if (kind === 'magnet') {
+        shape = cylinder({ d: o.d || 6, h: o.t || 2 }); color = o.color || 'silver'; tag = 'magnet disc'; search = 'neodymium disc magnet ' + (o.d || 6) + 'x' + (o.t || 2) + 'mm';
+      } else if (kind === 'spring_bar') {
+        need(o.length > 0, 'a spring bar needs length (mm)'); shape = cylinder({ d: o.d || 1.2, h: o.length }).rotate([0, 90, 0]);
+        tag = 'spring bar ' + o.length; search = 'spring bar ' + (o.d || 1.2) + 'mm x ' + o.length + 'mm';
+      } else if (kind === 'foam' || kind === 'tape' || kind === 'gap_pad') {
+        need(o.w > 0 && o.l > 0 && o.t > 0, kind + ' needs w, l and t (mm)');
+        const cutters = (o.cuts || []).map(c => c.box ? cube([c.box[2] - c.box[0], c.box[3] - c.box[1], o.t + 2]).translate([c.box[0], c.box[1], -1]) : cylinder({ d: c.d, h: o.t + 2 }).translate([c.at[0], c.at[1], -1]));
+        shape = cutters.length ? difference(cube([o.w, o.l, o.t]), ...cutters) : cube([o.w, o.l, o.t]); color = o.color || (kind === 'tape' ? 'white' : 'pink');
+        tag = kind + ' ' + o.w + 'x' + o.l + 'x' + o.t; search = kind === 'foam' ? 'EVA foam sheet ' + o.t + 'mm' : kind === 'tape' ? 'double-sided tape ' + o.t + 'mm' : 'thermal gap pad ' + o.t + 'mm';
+      } else if (kind === 'wire') {
+        need(Array.isArray(o.points) && o.points.length >= 2, 'a wire needs points: [[x,y,z], …]');
+        const od = o.od || WIRE_OD[o.awg || 30] || 0.6; color = o.color || 'red';
+        const P = o.points.map(p => [p[0] + at[0], p[1] + at[1], p[2] + at[2]]);
+        shape = union(P.slice(1).map((q, i) => hull(sphere({ d: od }).translate(P[i]), sphere({ d: od }).translate(q))));
+        tag = 'wire ' + (o.awg || 30) + ' AWG'; search = (o.awg || 30) + ' AWG silicone wire ' + od.toFixed(1) + 'mm';
+        extra = { length: +P.slice(1).reduce((a, q, i) => a + Math.hypot(q[0] - P[i][0], q[1] - P[i][1], q[2] - P[i][2]), 0).toFixed(1) };
+        const placed = xf(shape);
+        const name = o.name || ('wire_' + (hwList.length + 1));
+        lib.part(name, placed, { kind: 'reference', color, explode: o.dir });
+        hwList.push(Object.assign({ name, kind, size: null, search, qty: 1 }, extra));
+        return placed;
+      } else throw new Error("hardware(): unknown kind '" + kind + "' (screw, nut, washer, standoff, insert, pogo, magnet, spring_bar, foam, tape, gap_pad, wire)");
+      const name = o.name || (kind + '_' + (hwList.length + 1));
+      const placed = xf(shape.translate(at));
+      lib.part(name, placed, { kind: 'reference', color, explode: o.dir, through: o.through });
+      hwList.push(Object.assign({ name, kind, size: o.size || null, head: o.head || null, search, qty: 1, tag }, extra));
+      return placed;
+    }
+    // screwsAt(holes, o): one screw per hole. holes: [{x, y}] or [[x, y]] in board mm (default: the board's own holes, with
+    // o.board the board region's holes). Heads sit on the board top; the shank runs down and into the host below the board.
+    // engage = shank length inside the host (hostTop = z of the host's top face, hostDepth = its height; default: the
+    // standoff under the board). Warns below 1.5 x the thread pitch, or when the shank does not reach the host.
+    function screwsAt(holes, o = {}) {
+      if (!pcb) throw new Error('screwsAt(): this project has no PCB yet');
+      const bd = o.board != null ? boardOf(o.board, 'screwsAt') : null, Lc = bd ? localOf(bd) : null;
+      const list = holes || (bd ? bd.holes : pcb.holes), len = o.length, top = pcb.thickness;
+      if (!(len > 0)) throw new Error('screwsAt(): give length (mm)');
+      const t = HW[hwKey(o.size)] || HW.M2, hostTop = o.hostTop ?? 0, hostDepth = o.hostDepth ?? 3.0;
+      const tip = top - len, engage = Math.max(0, Math.min(top, hostTop) - Math.max(tip, hostTop - hostDepth));
+      if (engage < 1.5 * t.pitch) kitWarn.push('screwsAt: ' + (engage > 0 ? 'only ' + engage.toFixed(2) + ' mm of thread in the host (under 1.5 x pitch ' + t.pitch + ' mm)' : 'the shank does not reach the host') + ' — use a longer screw or a taller standoff');
+      const made = [];
+      list.forEach((h, i) => {
+        const q = typeof h === 'string' ? lib.pcbPart(h) : null, x = q ? q.cx : Array.isArray(h) ? h[0] : h.x, y = q ? q.cy : Array.isArray(h) ? h[1] : h.y;
+        const at = Lc ? [x - Lc.cx, y - Lc.cy, tip] : [x, y, tip];   // board local frame (centred, same axes as the script) when o.board is set
+        made.push(hardwareOf('screw', { size: o.size || 'M2', length: len, head: o.head || 'wafer', at, xf: o.xf, name: (o.prefix || 'screw') + '_' + (bd ? bd.name : '') + (i + 1), dir: o.dir, through: [typeof h === 'string' ? h : null, 'PCB' + (bd ? ' ' + bd.name : '')].filter(Boolean) }));
+        hwList[hwList.length - 1].engage = +engage.toFixed(2);
+      });
+      return made;
+    }
+    function hwSummary() {               // grouped for the BOM: one line per kind, size, head and length
+      const g = new Map();
+      for (const h of hwList) { const k = [h.kind, h.size, h.head, h.length].join('|'); const e = g.get(k); if (e) e.qty += 1; else g.set(k, Object.assign({}, h)); }
+      return [...g.values()];
+    }
+    const lib_hardware = (kind, o) => hardwareOf(kind, o), lib_screwsAt = (holes, o) => screwsAt(holes, o);
+    lib.hardware = lib_hardware; lib.screwsAt = lib_screwsAt;
+    // ---------- assembly steps: section drawings of the build order, from the real geometry (see assemblySvg) ----------
+    // assemblySteps([{ title, add: ['base', 'lid*', 'screw_B*', 'kind:board', 'hardware:*', 'all'], dir: [0, 0, -1], note: ['...'] }, ...],
+    //               { cut: { axis: 'y', at: 0 }, title, footer })
+    // add: part names (exact, or a prefix ending in *), 'kind:board', 'hardware:*' (screws, standoffs, foam, wires ...), 'pcb:B'.
+    // A step's parts are coloured; parts from earlier steps are grey.
+    const asmSteps = []; let asmOpts = {};
+    lib.assemblySteps = (steps, o = {}) => {
+      if (!Array.isArray(steps) || !steps.length) throw new Error('assemblySteps(): give a list of steps [{ title, add: [...], dir, note }]');
+      asmSteps.length = 0;
+      for (const st of steps) { if (!st || !st.title) throw new Error('assemblySteps(): every step needs a title'); asmSteps.push(st); }
+      asmOpts = o || {};
+    };
+
     const K2 = lib;
     // Space the board needs: PCB outline + every part box (connectors that open outward excepted), plus a gap.
     K2.envelope = (o = {}) => {
@@ -2241,7 +2359,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       for (const q of pcb.parts.slice(0, 300)) {
         const w = Math.max(0.05, q.x1 - q.x0), d = Math.max(0.05, q.y1 - q.y0), h = Math.max(0.05, q.h), zb = q.side === 'top' ? pcb.thickness : -h;
         const bd = (pcb.boards || []).find(b => b.parts.includes(q.ref)), fn = bd && placements[bd.name], L = bd && localOf(bd);
-        tg.push({ with: q.ref, m: fn ? evalM(fn(lib.cube([w, d, h]).translate([q.x0 - L.cx, L.cy - q.y1, zb])).node) : kept(M3.cube([w, d, h]).translate([q.x0, q.y0, zb])) });
+        tg.push({ with: q.ref, m: fn ? evalM(fn(lib.cube([w, d, h]).translate([q.x0 - L.cx, q.y0 - L.cy, zb])).node) : kept(M3.cube([w, d, h]).translate([q.x0, q.y0, zb])) });
       }
       for (const b of bats) if (b.rot) tg.push({ with: 'battery ' + b.name, m: evalM(K2.batteryBox({ battery: b }, 0).node) }); else tg.push({ with: 'battery ' + b.name, m: b.shape === 'coin' ? kept(kept(M3.cylinder(b.t, b.w / 2, b.w / 2, 64)).translate([b.cx, b.cy, b.z0]))
         : b.shape === 'cyl' ? kept(kept(kept(M3.cylinder(Math.max(b.w, b.l), b.t / 2, b.t / 2, 64, true)).rotate(b.w > b.l ? [0, 90, 0] : [90, 0, 0])).translate([b.cx, b.cy, (b.z0 + b.z1) / 2])) : kept(M3.cube([b.w, b.l, b.t]).translate([b.x0, b.y0, b.z0])) });
@@ -2250,6 +2368,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
         const pb = mBounds(p.m);
         for (const t of tg) {
           if (!overlap(pb, mBounds(t.m))) continue;
+          if (p.through && p.through.includes(t.with)) continue;   // the hardware goes through this hole (intended)
           const v = kept(p.m.intersect(t.m)).volume();
           if (v > 0.5) report.collisions.push({ part: p.name, with: t.with, overlap_mm3: +v.toFixed(1) });
         }
@@ -2425,8 +2544,82 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     const scad = ['// CircuitPilot custom enclosure — OpenSCAD source generated from the 3D script (mm).', '// Coordinates: origin = PCB outline centre, Z = 0 at the PCB bottom.', '// Render one part: put ! in front of its call at the bottom, F6, then export STL.', '']
       .concat(parts.map(p => `module ${p.name.replace(/[^\w]/g, '_')}() {\n${scadOf(p.shape.node, '  ')}\n}\n`))
       .concat(parts.map(p => `${p.color ? `color("${p.color}") ` : ''}${p.explode ? `translate(${fv(p.explode)}) ` : ''}${p.name.replace(/[^\w]/g, '_')}();`)).join('\n') + '\n';
-    return { parts: out, scad, logs, report, extras: extras.map(x => Object.assign({}, x)), kernel: MK ? 'manifold' : 'bsp', ms: Date.now() - t0 };
+    let assembly = null;
+    if (asmSteps.length) {
+      const at = asmOpts.cut && asmOpts.cut.at != null ? +asmOpts.cut.at : 0;
+      const tilt = +asmOpts.tilt || 0;   // level a tilted section (degrees about y, e.g. the section B angle)
+      const secs = parts.filter(p => p.m).map(p => ({ name: p.name, kind: p.kind, color: p.color || null, polys: sectionOf(tilt ? p.m.rotate([0, -tilt, 0]) : p.m, at) })).filter(q => q.polys.length);
+      assembly = { cut: { axis: 'y', at }, title: asmOpts.title || '', footer: asmOpts.footer || '', steps: asmSteps.map(q => Object.assign({}, q)), parts: secs };
+    }
+    return { parts: out, scad, logs, report, extras: extras.map(x => Object.assign({}, x)), hardware: hwSummary(), assembly, kernel: MK ? 'manifold' : 'bsp', ms: Date.now() - t0 };
+
   }
-  return { DESIGN, DENSITY, joinedSheet, sheetCheck, electrodePcb, assemblyGuide, dxfOfProfiles, stepOfProfiles, pdfOfFlat, dfmCheck, checkBox, PROCESSES, exportPack, stepOfPolys, stepOfSheet, dxfOf, profiles: P, run, context, useManifold, get fast() { return !!MF; }, HELP, EXAMPLES, TEMPLATES, PARAMS, fromTemplate, recipe, Shape, Shape2D };
+  // cross-section of a manifold with the plane y = y0, as [x, z] loops (mm). The part is turned so that y becomes z.
+  function sectionOf(m, y0) {
+    try { return m.rotate([90, 0, 0]).slice(y0).toPolygons().map(loop => loop.map(([x, yp]) => [x, -yp])); } catch (e) { return []; }
+  }
+  // colours of the drawing (flat, like the hand-drawn section)
+  function asmColour(name, kind, color) {
+    const n = String(name).toLowerCase();
+    if (/^pcb|board/.test(n) || kind === 'board') return '#2f8f5b';
+    if (n === 'base') return '#4a4d52';
+    if (/^lid/.test(n)) return '#fbfbfb';
+    if (/battery/.test(n)) return '#f2a33a';
+    if (/foam|gap_pad|tape/.test(n)) return '#f4c3d4';
+    if (/screw|standoff|insert|nut|washer|magnet|pogo/.test(n)) return '#b9c2cb';
+    if (/wire/.test(n)) return color === 'black' ? '#222' : '#c0392b';
+    if (/plate|pad|hbc|sense|gnd|ecg|stim|t_plate/.test(n)) return '#dba82c';
+    return color === 'gold' ? '#dba82c' : color === 'orange' ? '#f2a33a' : color === 'pink' ? '#f4c3d4' : '#9aa0a6';
+  }
+  function asmMatch(p, pat) {
+    if (pat === 'all') return true;
+    if (pat.startsWith('kind:')) return p.kind === pat.slice(5);
+    if (pat === 'hardware:*') return /screw|standoff|nut|washer|insert|foam|tape|gap_pad|wire|pogo|magnet|spring/i.test(p.name);
+    if (pat.startsWith('pcb:')) return p.name === 'PCB_' + pat.slice(4).replace(/\s+/g, '_');
+    if (pat.endsWith('*')) return p.name.startsWith(pat.slice(0, -1));
+    return p.name === pat;
+  }
+  // SVG of the build steps: one panel per step, drawn to scale (mm), an arrow for the insert direction, notes under each panel
+  function assemblySvg(A) {
+    if (!A || !A.steps || !A.steps.length) return '';
+    const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const all = A.parts.flatMap(q => q.polys.flat());
+    const x0 = Math.min(...all.map(v => v[0])), x1 = Math.max(...all.map(v => v[0])), z0 = Math.min(...all.map(v => v[1])), z1 = Math.max(...all.map(v => v[1]));
+    const PW = 540, PH = 340, cols = A.steps.length > 2 ? 2 : A.steps.length, rows = Math.ceil(A.steps.length / cols), top = 86;
+    const sc = Math.min(490 / Math.max(1e-6, x1 - x0), 150 / Math.max(1e-6, z1 - z0));
+    const W = cols * PW + 20, H = top + rows * PH + 46;
+    const out = [];
+    out.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" font-family="Segoe UI, Arial, sans-serif">');
+    out.push('<rect width="' + W + '" height="' + H + '" fill="#ffffff"/>');
+    out.push('<text x="' + W / 2 + '" y="34" text-anchor="middle" font-size="24" font-weight="700" fill="#0f4c5c">' + esc(A.title || 'Assembly') + '</text>');
+    out.push('<text x="' + W / 2 + '" y="60" text-anchor="middle" font-size="13" fill="#555">Side cut at y = ' + A.cut.at + ' mm, drawn to scale. Grey = already in place, colour = added in this step.</text>');
+    A.steps.forEach((st, k) => {
+      const c = k % cols, r = Math.floor(k / cols), px = 10 + c * PW, py = top + r * PH, dx = px + 25, dy = py + 46;
+      const X = v => dx + (v - x0) * sc, Z = v => dy + 150 - (v - z0) * sc;
+      out.push('<rect x="' + (px + 6) + '" y="' + (py + 6) + '" width="' + (PW - 12) + '" height="' + (PH - 12) + '" rx="10" fill="#fbfcfd" stroke="#dfe4e8"/>');
+      out.push('<text x="' + (px + 22) + '" y="' + (py + 30) + '" font-size="16" font-weight="700" fill="#14212b">' + (k + 1) + ' · ' + esc(st.title) + '</text>');
+      A.parts.forEach(q => {
+        const j = A.steps.findIndex(s2 => (s2.add || []).some(pat => asmMatch(q, pat)));
+        if (j < 0 || j > k) return;
+        const fill = j === k ? asmColour(q.name, q.kind, q.color) : '#d6d9dd';
+        for (const loop of q.polys) out.push('<path d="' + loop.map((v, i) => (i ? 'L' : 'M') + X(v[0]).toFixed(1) + ',' + Z(v[1]).toFixed(1)).join('') + 'Z" fill="' + fill + '" stroke="#2b2f33" stroke-width="0.6"/>');
+      });
+      if (st.dir) {   // insert direction arrow over the drawing
+        const cx = (X(x0) + X(x1)) / 2, down = st.dir[2] < 0, ya = down ? dy - 4 : dy + 128, yb = down ? dy + 30 : dy + 92, hd = down ? 9 : -9;
+        out.push('<line x1="' + cx + '" y1="' + ya + '" x2="' + cx + '" y2="' + yb + '" stroke="#14212b" stroke-width="2.2"/>');
+        out.push('<polygon points="' + (cx - 6) + ',' + (yb - hd) + ' ' + (cx + 6) + ',' + (yb - hd) + ' ' + cx + ',' + yb + '" fill="#14212b"/>');
+        out.push('<text x="' + (cx + 10) + '" y="' + (ya + 12) + '" font-size="11" fill="#14212b">' + esc(st.dirLabel || (down ? 'insert from the top' : 'insert from the skin side')) + '</text>');
+      }
+      const bar = 10 * sc;   // 10 mm scale bar
+      out.push('<line x1="' + (px + PW - 40 - bar) + '" y1="' + (py + PH - 40) + '" x2="' + (px + PW - 40) + '" y2="' + (py + PH - 40) + '" stroke="#333" stroke-width="2"/>');
+      out.push('<text x="' + (px + PW - 40 - bar / 2) + '" y="' + (py + PH - 46) + '" text-anchor="middle" font-size="10" fill="#333">10 mm</text>');
+      (st.note || []).forEach((line, i) => out.push('<text x="' + (px + 26) + '" y="' + (py + 218 + i * 17) + '" font-size="12.5" fill="#222">• ' + esc(line) + '</text>'));
+    });
+    if (A.footer) out.push('<text x="' + W / 2 + '" y="' + (H - 16) + '" text-anchor="middle" font-size="13" font-weight="600" fill="#444">' + esc(A.footer) + '</text>');
+    out.push('</svg>');
+    return out.join('\n');
+  }
+
+  return { DESIGN, DENSITY, joinedSheet, assemblySvg, sheetCheck, electrodePcb, assemblyGuide, dxfOfProfiles, stepOfProfiles, pdfOfFlat, dfmCheck, checkBox, PROCESSES, exportPack, stepOfPolys, stepOfSheet, dxfOf, profiles: P, run, context, useManifold, get fast() { return !!MF; }, HELP, EXAMPLES, TEMPLATES, PARAMS, fromTemplate, recipe, Shape, Shape2D };
 })();
 if (typeof module !== 'undefined') module.exports = Shape3D;

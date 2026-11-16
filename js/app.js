@@ -1809,12 +1809,13 @@ const App = (() => {
     $('#chShared').onclick = () => { $('#chooseModal').classList.add('hidden'); openSetup('shared'); };
     $('#chOwn').onclick = () => { $('#chooseModal').classList.add('hidden'); openSetup('gemini'); };
     // once per GitHub account: a welcome that offers both choices
+    // every visitor sees it once per browser (a guest), and once more after each GitHub sign-in
     function maybeAnnounce() {
-      if (!GitHub.getToken()) return;
-      const who = GitHub.account() || 'github';
+      const signed = !!GitHub.getToken(), who = signed ? (GitHub.account() || 'github') : 'guest';
       try { if (localStorage.getItem('cp.announced') === who) return; localStorage.setItem('cp.announced', who); } catch (e) { }
       $('#ghModal').classList.add('hidden');
-      chooseOpen('Welcome! You are signed in with GitHub', 'You can now use CircuitPilot\'s free AI with a limit per person, or your own API key. Choose one; you can change it any time with 🔑 AI keys.');
+      if (signed) chooseOpen('Welcome! You are signed in with GitHub', 'You can now use CircuitPilot\'s free AI with a limit per person, or your own API key. Choose one; you can change it any time with 🔑 AI keys.');
+      else chooseOpen('Welcome to CircuitPilot', 'Use CircuitPilot\'s free AI with a limit per person (sign in with GitHub, no key needed), or your own API key. You can change it any time with 🔑 AI keys.');
     }
     setTimeout(maybeAnnounce, 1500); setTimeout(maybeAnnounce, 4000);
     // record the signed-in user for the shared AI admin page (one quiet check per page load)

@@ -663,3 +663,7 @@ body.web .as-tabs .tag.webonly { display: inline; }
 .choose-ico { font-size: 34px; line-height: 1; }
 .choose-card b { font-size: 17px; }
 @media (max-width: 640px) { .choose-grid { grid-template-columns: 1fr; } .choose-card { min-height: 0; } }
+
+/* model-quality note in the AI chooser */
+.choose-note { margin: 10px 0 0; padding: 10px 12px; border-left: 3px solid #d49b00; background: rgba(212,155,0,.08); border-radius: 6px; line-height: 1.5; }
+.choose-note b { display: block; }

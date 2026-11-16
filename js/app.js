@@ -984,16 +984,16 @@ const App = (() => {
   let setupTab = 'shared';
   function setupRender() {
     const g = SETUP[setupTab], shared = setupTab === 'shared';
-    $$('#aiSetup .as-tabs button').forEach(b => b.classList.toggle('on', b.dataset.p === setupTab));
+    $$('#chooseModal .as-tabs button').forEach(b => b.classList.toggle('on', b.dataset.p === setupTab));
     $('#asKey').closest('label').classList.toggle('hidden', shared);
     $('#asRemember').closest('label').classList.toggle('hidden', shared);
     $('#asConnect').textContent = shared ? (GitHub.getToken() ? 'Use the shared AI' : 'Sign in with GitHub') : 'Connect';
     $('#asGuide').innerHTML = `<ol>${g.steps.map(s => `<li>${s}</li>`).join('')}</ol>${g.note ? `<p class="muted small">${g.note}</p>` : ''}`;
     $('#asCustom').classList.toggle('hidden', setupTab !== 'custom');
     $('#asStatus').textContent = ''; $('#asStatus').className = 'muted';
-    if ($('#asOpenSettings')) $('#asOpenSettings').onclick = () => { $('#aiSetup').classList.add('hidden'); openSettings(); };
+    if ($('#asOpenSettings')) $('#asOpenSettings').onclick = () => { $('#chooseModal').classList.add('hidden'); openSettings(); };
   }
-  function openSetup(tab) { if (!tab && window.CPChoose) return window.CPChoose(); if (tab) setupTab = tab; $('#asKey').value = ''; setupRender(); $('#aiSetup').classList.remove('hidden'); setTimeout(() => $('#asKey').focus(), 50); }
+  function openSetup(tab) { if (!tab && window.CPChoose) return window.CPChoose(); if (tab) setupTab = tab; $('#asKey').value = ''; setupRender(); showOwnPanel(); setTimeout(() => $('#asKey').focus(), 50); }
   // the shared AI: needs a GitHub sign-in (or a GitHub token pasted under the GitHub button); the relay counts the daily requests
   async function sharedConnect() {
     const st = $('#asStatus');
@@ -1011,7 +1011,7 @@ const App = (() => {
       AI.saveSettings({ model: 'shared::circuitpilot' });
       renderModels(); renderChat(); AI.probeContext().then(updateCtx);
       st.className = 'good'; st.textContent = '✓ Using the shared AI: ' + Math.max(0, j.limit - j.used) + ' of ' + j.limit + ' requests left today.';
-      setTimeout(() => $('#aiSetup').classList.add('hidden'), 1800);
+      setTimeout(() => $('#chooseModal').classList.add('hidden'), 1800);
     } catch (e) {
       st.className = 'bad'; st.textContent = '✗ ' + e.message;
     } finally { $('#asConnect').disabled = false; }
@@ -1046,7 +1046,7 @@ const App = (() => {
       }
       renderModels(); renderChat(); AI.probeContext().then(updateCtx);
       st.className = 'good'; st.textContent = `✓ Connected · using ${model}. You can switch models in the menu above the chat.`;
-      setTimeout(() => $('#aiSetup').classList.add('hidden'), 1800);
+      setTimeout(() => $('#chooseModal').classList.add('hidden'), 1800);
     } catch (e) {
       st.className = 'bad'; st.textContent = '✗ ' + (e.name === 'TimeoutError' ? 'The provider did not answer in time. Check your internet connection and try again.' : e.message);
     } finally { $('#asConnect').disabled = false; }
@@ -1797,7 +1797,10 @@ const App = (() => {
     // first run (or no model set up in this browser): open the connect dialog
     $('#btnConnect').onclick = () => chooseOpen();
     // the two-box chooser: CircuitPilot's free AI (GitHub sign-in) or the user's own API key
+    // the own-key form lives in this same dialog (the "Use your own API" panel)
+    function showOwnPanel() { $('#chPicks').classList.add('hidden'); $('#chOwnPanel').classList.remove('hidden'); $('#chooseModal').classList.remove('hidden'); }
     function chooseOpen(title, sub) {
+      $('#chPicks').classList.remove('hidden'); $('#chOwnPanel').classList.add('hidden');
       if (title) $('#chTitle').textContent = title;
       if (sub) $('#chSub').textContent = sub;
       $('#chooseModal').classList.remove('hidden');
@@ -1828,7 +1831,7 @@ const App = (() => {
       } catch (e) { st.className = 'bad'; st.textContent = '\u2717 ' + e.message; }
     }
     $('#chShared').onclick = chooseShared;
-    $('#chOwn').onclick = () => { $('#chooseModal').classList.add('hidden'); openSetup('gemini'); };
+    $('#chOwn').onclick = () => openSetup('gemini');
     // once per GitHub account: a welcome that offers both choices
     // every visitor sees it once per browser (a guest), and once more after each GitHub sign-in
     function maybeAnnounce() {
@@ -1841,8 +1844,8 @@ const App = (() => {
     setTimeout(maybeAnnounce, 1500); setTimeout(maybeAnnounce, 4000);
     // record the signed-in user for the shared AI admin page (one quiet check per page load)
     if (GitHub.getToken()) fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } }).catch(() => { });
-    $('#asClose').onclick = () => $('#aiSetup').classList.add('hidden');
-    $('#aiSetup .as-tabs').onclick = e => { const b = e.target.closest('button[data-p]'); if (b) { setupTab = b.dataset.p; setupRender(); } };
+    $('#asClose').onclick = () => $('#chooseModal').classList.add('hidden');
+    $('#chooseModal .as-tabs').onclick = e => { const b = e.target.closest('button[data-p]'); if (b) { setupTab = b.dataset.p; setupRender(); } };
     $('#asConnect').onclick = setupConnect;
     $('#asKey').onkeydown = e => { if (e.key === 'Enter') setupConnect(); };
     // the key-privacy note is about the web version (no server of ours between you and the provider): not shown in the desktop app
@@ -1855,7 +1858,7 @@ const App = (() => {
       if (!$('#edModal').classList.contains('hidden')) { if (PartEditor.key(e)) e.preventDefault(); return; }
       if (!$('#projModal').classList.contains('hidden')) { if (e.key === 'Escape') Projects.close(); return; }
       if (!$('#knowModal').classList.contains('hidden')) { if (e.key === 'Escape') $('#knowModal').classList.add('hidden'); return; }
-      for (const id of ['#gerberModal', '#shapeModal', '#rulesModal', '#aiSetup']) if (!$(id).classList.contains('hidden')) { if (e.key === 'Escape') $(id).classList.add('hidden'); return; }
+      for (const id of ['#gerberModal', '#shapeModal', '#rulesModal', '#chooseModal']) if (!$(id).classList.contains('hidden')) { if (e.key === 'Escape') $(id).classList.add('hidden'); return; }
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? Model.redo() : Model.undo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); Model.redo(); return; }

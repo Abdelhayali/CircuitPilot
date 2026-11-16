@@ -654,3 +654,12 @@ body.web .as-tabs .tag.webonly { display: inline; }
 .fw-pre { min-height: 0; max-height: 240px; margin: 6px 0 0; padding: 8px; background: var(--panel, #161616); border: 1px solid var(--line, #333); border-radius: 4px; }
 .fw-warn div { padding: 2px 0; }
 @media (max-width: 700px) { .fw-text { min-height: 200px; } }
+
+/* two-box chooser: CircuitPilot's free AI or your own API */
+.choose-dlg { width: min(720px, 96vw); }
+.choose-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
+.choose-card { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; text-align: left; padding: 22px; min-height: 200px; border: 2px solid var(--line, #333); border-radius: 12px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.choose-card:hover, .choose-card:focus-visible { border-color: var(--accent, #2d6cdf); }
+.choose-ico { font-size: 34px; line-height: 1; }
+.choose-card b { font-size: 17px; }
+@media (max-width: 640px) { .choose-grid { grid-template-columns: 1fr; } .choose-card { min-height: 0; } }

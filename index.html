@@ -236,6 +236,24 @@
     <div class="row end"><button id="sCancel">Cancel</button><button id="sSave" class="primary">Save</button></div>
   </div>
 </div>
+<div id="chooseModal" class="hidden modal">
+  <div class="dlg choose-dlg">
+    <div class="row-h"><h2 id="chTitle">Choose how the AI answers</h2><button id="chClose" title="Close">✕</button></div>
+    <p class="muted" id="chSub" style="margin:4px 0 0">Two ways to use the copilot. You can change this any time with 🔑 AI keys.</p>
+    <div class="choose-grid">
+      <button class="choose-card" id="chShared">
+        <span class="choose-ico">☁</span>
+        <b>Use CircuitPilot's free AI</b>
+        <span class="small">No key needed. Sign in with GitHub. Free with <span id="chLimit">a daily limit</span> per person.</span>
+      </button>
+      <button class="choose-card" id="chOwn">
+        <span class="choose-ico">🔑</span>
+        <b>Use your own API</b>
+        <span class="small">Google Gemini, Ollama Cloud, Claude, OpenAI or any provider. No limit from us. Your key stays in this browser tab only, unless you tick "Remember".</span>
+      </button>
+    </div>
+  </div>
+</div>
 <div id="aiSetup" class="hidden modal">
   <div class="dlg setup">
     <div class="row-h"><h2>Connect an AI model</h2><button id="asClose" title="Close">✕</button></div>
@@ -517,7 +535,7 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
 <script src="js/github.js?v=202611151230"></script>
-<script src="js/app.js?v=202611161700"></script>
+<script src="js/app.js?v=202611161800"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

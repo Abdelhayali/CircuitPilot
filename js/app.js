@@ -1794,7 +1794,29 @@ const App = (() => {
     let ft; $('#sBase').oninput = $('#sOKey').oninput = () => { clearTimeout(ft); ft = setTimeout(fetchModelsUI, 600); };
     autoFetchModels();
     // first run (or no model set up in this browser): open the connect dialog
-    $('#btnConnect').onclick = () => openSetup();
+    $('#btnConnect').onclick = () => chooseOpen();
+    // the two-box chooser: CircuitPilot's free AI (GitHub sign-in) or the user's own API key
+    function chooseOpen(title, sub) {
+      if (title) $('#chTitle').textContent = title;
+      if (sub) $('#chSub').textContent = sub;
+      $('#chooseModal').classList.remove('hidden');
+      if (GitHub.getToken()) {
+        fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } })
+          .then(r => r.ok ? r.json() : null).then(j => { if (j && j.limit) $('#chLimit').textContent = j.limit + ' requests a day'; }).catch(() => { });
+      }
+    }
+    $('#chClose').onclick = () => $('#chooseModal').classList.add('hidden');
+    $('#chShared').onclick = () => { $('#chooseModal').classList.add('hidden'); openSetup('shared'); };
+    $('#chOwn').onclick = () => { $('#chooseModal').classList.add('hidden'); openSetup('gemini'); };
+    // once per GitHub account: a welcome that offers both choices
+    function maybeAnnounce() {
+      if (!GitHub.getToken()) return;
+      const who = GitHub.account() || 'github';
+      try { if (localStorage.getItem('cp.announced') === who) return; localStorage.setItem('cp.announced', who); } catch (e) { }
+      $('#ghModal').classList.add('hidden');
+      chooseOpen('Welcome! You are signed in with GitHub', 'You can now use CircuitPilot\'s free AI with a limit per person, or your own API key. Choose one; you can change it any time with 🔑 AI keys.');
+    }
+    setTimeout(maybeAnnounce, 1500); setTimeout(maybeAnnounce, 4000);
     // record the signed-in user for the shared AI admin page (one quiet check per page load)
     if (GitHub.getToken()) fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getToken() } }).catch(() => { });
     $('#asClose').onclick = () => $('#aiSetup').classList.add('hidden');

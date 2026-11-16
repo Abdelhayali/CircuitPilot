@@ -1571,7 +1571,19 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
         const before = S[i - 1], after = S[j + 1], s0 = S[i].s - STEP / 2, s1 = S[j].s + STEP / 2;
         if (after && !before.neck && !after.neck && before.iv.length && after.iv.length && s1 - s0 >= 0.5 && s1 - s0 <= 6) {
           const iv = cross(u, v, (s0 + s1) / 2);
-          if (iv.length) necks.push({ s0, s1, v0: Math.min(...iv.map(q => q[0])), v1: Math.max(...iv.map(q => q[1])) });
+          if (iv.length) {
+            // the tab's own edges: walk out of the neck while the section stays near the tab width (its base fillets),
+            // then find the jump to the board's width by bisection
+            const w = Math.min(...S.slice(i, j + 1).map(q => span(q.iv))), thr = Math.max(2 * w, w + 2), narrow = t => { const q = cross(u, v, t); return q.length > 0 && span(q) <= thr; };
+            const edge = (k, dir) => {
+              while (S[k + dir] && S[k + dir].iv.length && span(S[k + dir].iv) <= thr) k += dir;
+              if (!S[k + dir]) return S[k].s;
+              let a = S[k].s, b = S[k + dir].s;            // a narrow, b wide
+              for (let n = 0; n < 24; n++) { const m = (a + b) / 2; if (narrow(m)) a = m; else b = m; }
+              return (a + b) / 2;
+            };
+            necks.push({ s0: edge(i, -1), s1: edge(j, 1), v0: Math.min(...iv.map(q => q[0])), v1: Math.max(...iv.map(q => q[1])) });
+          }
         }
         i = j + 1;
       }
@@ -1739,6 +1751,20 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     FN = 0;
     const pcb = ctx.pcb || null;
     const placements = {};                              // board name -> transform (placeBoard)
+    const mats = {};                                    // board name -> 3 x 4 matrix of that transform (null: not a plain move / turn)
+    const mulA = (A, B) => [0, 1, 2].map(r => [0, 1, 2, 3].map(c => A[r][0] * B[0][c] + A[r][1] * B[1][c] + A[r][2] * B[2][c] + (c === 3 ? A[r][3] : 0)));
+    const applyA = (M, p) => [0, 1, 2].map(r => M[r][0] * p[0] + M[r][1] * p[1] + M[r][2] * p[2] + M[r][3]);
+    const affineOf = fn => {
+      try {
+        const probe = cube([1, 1, 1]); let n = fn(probe).node, M = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]];
+        while (n && n !== probe.node) {
+          if (n.op === 'color') { n = n.c[0]; continue; }
+          if (!['translate', 'rotate', 'scale', 'mirror'].includes(n.op) || !n.c || n.c.length !== 1) return null;
+          M = mulA(M, matrixOf(n)); n = n.c[0];
+        }
+        return n === probe.node ? M : null;
+      } catch (e) { return null; }
+    };
     const boardOf = (name, fn) => {
       if (!pcb) throw new Error(fn + '(): this project has no PCB yet');
       const list = pcb.boards || [], b = list.find(x => x.name === String(name));
@@ -1772,7 +1798,8 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       // shown in the preview, not printed, not collision-checked); its parts are checked at that place.
       placeBoard: (name, fn) => {
         if (typeof fn !== 'function') throw new Error("placeBoard(): give the transform as a function, e.g. placeBoard('B', shape => TB(shape))");
-        const b = boardOf(name, 'placeBoard'); placements[b.name] = fn;
+        const b = boardOf(name, 'placeBoard'); placements[b.name] = fn; mats[b.name] = affineOf(fn);
+        if (!mats[b.name]) kitWarn.push('placeBoard(\'' + b.name + '\'): the transform is not a plain move / turn / mirror, so the 3D view and the containment check show board ' + b.name + ' flat');
         lib.part('PCB ' + b.name, fn(extrude(localOf(b).outline, pcb.thickness)), { kind: 'board', color: 'green' });
       },
       PI: Math.PI, pcb, rules,
@@ -2444,18 +2471,25 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       // one or two openings (a window above, a connector opening beside) is normal for an enclosed part
       const escapes = P => { let n = 0, through = false; for (let ax = 0; ax < 3; ax++) { let k = 0; for (const s of [-1, 1]) if (!hits(P, ax, s)) { n++; k++; } if (k === 2) through = true; } return through ? 9 : n >= 3 ? 9 : n; };
       const out = [];
-      const pc = [pcb.outline.reduce((a, q) => a + q[0], 0) / pcb.outline.length, pcb.outline.reduce((a, q) => a + q[1], 0) / pcb.outline.length];
-      const boardPts = pcb.outline.map(q => [q[0] + (pc[0] - q[0]) * 0.03, q[1] + (pc[1] - q[1]) * 0.03, pcb.thickness / 2]).concat([[pc[0], pc[1], pcb.thickness / 2]]);
-      if (boardPts.some(P => escapes(P) >= 3)) out.push('PCB');
+      // boards on one panel: each region at its placeBoard place (tabs are cut off, so they are not checked)
+      const regs = pcb.boards && pcb.boards.length ? pcb.boards : [null];
+      const placeOf = b => { const M = b && mats[b.name]; if (!M) return P => P; const L = localOf(b); return P => applyA(M, [P[0] - L.cx, P[1] - L.cy, P[2]]); };
+      const regOf = ref => (pcb.boards || []).find(b => b.parts.includes(ref)) || null;
+      for (const b of regs) {
+        const O = b ? b.outline : pcb.outline, f = placeOf(b);
+        const pc = [O.reduce((a, q) => a + q[0], 0) / O.length, O.reduce((a, q) => a + q[1], 0) / O.length];
+        const boardPts = O.map(q => [q[0] + (pc[0] - q[0]) * 0.03, q[1] + (pc[1] - q[1]) * 0.03, pcb.thickness / 2]).concat([[pc[0], pc[1], pcb.thickness / 2]]).map(f);
+        if (boardPts.some(P => escapes(P) >= 3)) out.push(b && regs.length > 1 ? 'PCB ' + b.name : 'PCB');
+      }
       for (const b of bats) if (escapes([b.cx, b.cy, (b.z0 + b.z1) / 2]) >= 3) out.push('battery');
       for (const p of pcb.parts) {
         if (p.plug && p.edge) continue;
         // the part's box is only an estimate (its corners stick out of curved walls and floors): it is outside when its
         // centre can see out, or most of a grid of points inside its box can; a few escaping points only mean it is close
         const z0 = p.side === 'top' ? pcb.thickness : -p.h, z1 = z0 + p.h, ix = (p.x1 - p.x0) * 0.2, iy = (p.y1 - p.y0) * 0.2, iz = Math.min(0.3, p.h * 0.2);
-        const pts = [];
-        for (const fx of [0, 0.5, 1]) for (const fy of [0, 0.5, 1]) for (const fz of [0, 1]) pts.push([p.x0 + ix + (p.x1 - p.x0 - 2 * ix) * fx, p.y0 + iy + (p.y1 - p.y0 - 2 * iy) * fy, z0 + iz + (p.h - 2 * iz) * fz]);
-        const centre = escapes([p.cx, p.cy, (z0 + z1) / 2]) >= 3, esc = pts.filter(P => escapes(P) >= 3).length;
+        const pts = [], f = placeOf(regOf(p.ref));
+        for (const fx of [0, 0.5, 1]) for (const fy of [0, 0.5, 1]) for (const fz of [0, 1]) pts.push(f([p.x0 + ix + (p.x1 - p.x0 - 2 * ix) * fx, p.y0 + iy + (p.y1 - p.y0 - 2 * iy) * fy, z0 + iz + (p.h - 2 * iz) * fz]));
+        const centre = escapes(f([p.cx, p.cy, (z0 + z1) / 2])) >= 3, esc = pts.filter(P => escapes(P) >= 3).length;
         if (centre || esc > pts.length / 2) out.push(p.ref);
         else if (esc) (report.near_wall = report.near_wall || []).push(`${p.ref} (${Math.round(esc / pts.length * 100)}% of its estimated box touches or crosses a wall — check its real height / position)`);
         if (Date.now() > budget) { report.warnings.push('containment check stopped early (time limit)'); break; }
@@ -2551,7 +2585,9 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       const secs = parts.filter(p => p.m).map(p => ({ name: p.name, kind: p.kind, color: p.color || null, polys: sectionOf(tilt ? p.m.rotate([0, -tilt, 0]) : p.m, at) })).filter(q => q.polys.length);
       assembly = { cut: { axis: 'y', at }, title: asmOpts.title || '', footer: asmOpts.footer || '', steps: asmSteps.map(q => Object.assign({}, q)), parts: secs };
     }
-    return { parts: out, scad, logs, report, extras: extras.map(x => Object.assign({}, x)), hardware: hwSummary(), assembly, kernel: MK ? 'manifold' : 'bsp', ms: Date.now() - t0 };
+    // boards: [{ name, matrix (3 x 4 rows, local frame -> case; null = drawn flat), cx, cy (local frame centre in script mm), outline, holes, parts }]
+    const boards = pcb && pcb.boards && pcb.boards.length ? pcb.boards.map(b => { const L = localOf(b); return { name: b.name, matrix: mats[b.name] || null, cx: L.cx, cy: L.cy, outline: b.outline, holes: b.holes, parts: b.parts }; }) : null;
+    return { parts: out, scad, logs, report, extras: extras.map(x => Object.assign({}, x)), hardware: hwSummary(), assembly, boards, tabs: pcb && pcb.tabs && pcb.tabs.length ? pcb.tabs : null, kernel: MK ? 'manifold' : 'bsp', ms: Date.now() - t0 };
 
   }
   // cross-section of a manifold with the plane y = y0, as [x, z] loops (mm). The part is turned so that y becomes z.

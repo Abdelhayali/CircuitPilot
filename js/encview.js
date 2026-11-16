@@ -3,7 +3,7 @@
 const EncView = (() => {
   const $ = s => document.querySelector(s);
   const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
-  const WORKER = 'js/shape-worker.js?v=202610290300';
+  const WORKER = 'js/shape-worker.js?v=202611170100';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
   function loadThree() {
@@ -232,6 +232,28 @@ const EncView = (() => {
     }
     return g;
   }
+  // Boards on one panel (break-off tabs), from a custom build: each board's slab and part boxes in its own frame (centred
+  // on the board), moved by its placeBoard matrix; a board without one is drawn flat where it is on the panel.
+  // B: r.boards [{ name, matrix (3 x 4 rows), cx, cy, outline, holes, parts }], P: the script context's pcb (script mm)
+  function placedBoards(B, P) {
+    const T = window.THREE, all = new T.Group();
+    const colors = { part: 0x2b2b2b, ic: 0x2b2b2b, connector: 0xc9c9c9, resistor: 0x2a6cc0, capacitor: 0xb08850, capacitor_polarized: 0x2d3fa0, led: 0x37d67a, switch: 0x555555, regulator: 0x333333, battery: 0x222222 };
+    for (const b of B) {
+      const g = new T.Group(), ox = b.matrix ? b.cx : 0, oy = b.matrix ? b.cy : 0;
+      const sh = new T.Shape(b.outline.map(q => new T.Vector2(q[0] - ox, q[1] - oy)));
+      for (const h of b.holes || []) { const p = new T.Path(); p.absarc(h.x - ox, h.y - oy, h.d / 2, 0, Math.PI * 2, true); sh.holes.push(p); }
+      g.add(new T.Mesh(new T.ExtrudeGeometry(sh, { depth: P.thickness, bevelEnabled: false }), new T.MeshStandardMaterial({ color: 0x1f7a3a, roughness: 0.8, side: T.DoubleSide })));
+      for (const p of P.parts.filter(q => b.parts.includes(q.ref))) {
+        const w = Math.max(0.6, p.x1 - p.x0), d = Math.max(0.6, p.y1 - p.y0), h = Math.max(0.4, p.h), col = p.plug ? 0xd8d8d8 : (colors[p.type] ?? 0x3a3a3a);
+        const m = new T.Mesh(new T.BoxGeometry(w * 0.92, d * 0.92, h), new T.MeshStandardMaterial({ color: col, roughness: 0.5, metalness: p.plug ? 0.6 : 0.1, side: T.DoubleSide }));
+        m.position.set((p.x0 + p.x1) / 2 - ox, (p.y0 + p.y1) / 2 - oy, p.side === 'bottom' ? -h / 2 : P.thickness + h / 2);
+        g.add(m);
+      }
+      if (b.matrix) { const M = b.matrix; g.matrixAutoUpdate = false; g.matrix.set(M[0][0], M[0][1], M[0][2], M[0][3], M[1][0], M[1][1], M[1][2], M[1][3], M[2][0], M[2][1], M[2][2], M[2][3], 0, 0, 0, 1); }
+      g.userData.board = b.name; all.add(g);
+    }
+    return all;
+  }
   // a loose battery: coin = steel disc, LiPo = silver pouch, cylinder = blue wrapped cell (o = offset of the frame)
   function batteryMesh(b, o) {
     const T = window.THREE, w = b.x1 - b.x0, l = b.y1 - b.y0, t = b.z1 - b.z0, shape = b.shape || b.kind;
@@ -256,7 +278,7 @@ const EncView = (() => {
       for (const m of meshes.parts || []) {
         const p = m.userData, ex = ui.explode && p.explode ? p.explode : [0, 0, 0];
         m.position.set(ex[0], ex[1], ex[2]);
-        m.visible = ui.lid || !p.explode;
+        m.visible = !p.hidden && (ui.lid || !p.explode) && (p.kind !== 'board' || ui.pcb);
         m.material.opacity = ui.xray ? 0.35 : 1; m.material.depthWrite = !ui.xray;
       }
       if (meshes.pcb) meshes.pcb.visible = ui.pcb;
@@ -360,7 +382,14 @@ const EncView = (() => {
     $('#encMetal').title = r.parts.some(p => p.kind === 'metal') ? 'Sheet-metal parts for JLCCNC: DXF (true arcs) + STEP per part, one panel of all plates with break-off bridges, order settings' : 'No sheet-metal parts in this design — electrode({…}) in the script makes skin plates';
     meshes.extras = (r.extras || []).filter(x => x.kind === 'battery').map(b => { const m = batteryMesh(b, [0, 0, 0]); root.add(m); return m; });
     meshes.pcb = null;
-    if (c.ctx.pcb) { try { const L = Enclosure.layout(), g = pcbGroup(L); g.position.set(-c.ctx.origin[0], -c.ctx.origin[1], -c.ctx.origin[2]); meshes.pcb = g; root.add(g); } catch (e) { } }
+    if (c.ctx.pcb) {
+      try {
+        if (r.boards && r.boards.some(b => b.matrix)) {
+          meshes.pcb = placedBoards(r.boards, c.ctx.pcb); root.add(meshes.pcb);
+          for (const m of meshes.parts) if (m.userData.kind === 'board' && /^PCB_/.test(m.userData.name)) m.userData.hidden = true;
+        } else { const L = Enclosure.layout(), g = pcbGroup(L); g.position.set(-c.ctx.origin[0], -c.ctx.origin[1], -c.ctx.origin[2]); meshes.pcb = g; root.add(g); }
+      } catch (e) { }
+    }
     if (ui.dimsFor !== r) { ui.rulers = []; ui.pendingA = null; ui.dimsFor = r; }   // a new model: old ruler points no longer apply
     ui.dims = measureModel(c.ctx.pcb ? c.ctx.pcb.thickness + 1 : null);
     if (fit || !ui.fitted) {

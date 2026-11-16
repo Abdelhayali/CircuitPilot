@@ -19,7 +19,7 @@ const PRESETS = {
   openai: { name: 'OpenAI', base: 'https://api.openai.com/v1' },
   custom: { name: 'Custom', base: '' },
 };
-const DEFAULTS = { dailyLimit: 20, maxTokens: 4096 };
+const DEFAULTS = { dailyLimit: 20, maxTokens: 4096, rpm: 10 };   // rpm: requests per minute per account (0 = no cap)
 const CIRCUIT_MODEL = 'circuitpilot';
 
 const day = () => new Date().toISOString().slice(0, 10);
@@ -55,9 +55,13 @@ async function chat(req, env) {
   if (used >= limit) return json({ error: `You used today's shared AI requests (${limit}). They reset at midnight UTC, or use your own key.`, limit, used }, 429);
   body.max_tokens = Math.min(Number(body.max_tokens) || pool.settings.maxTokens, pool.settings.maxTokens);
   const now = Date.now();
-  let changed = false, tried = 0;
+  let changed = false, tried = 0, capped = 0;
   for (const e of pool.entries) {
     if (!e.enabled || !e.key || !e.base || !e.model || (e.cooldown_until || 0) > now) continue;
+    const rpm = e.rpm == null ? pool.settings.rpm : e.rpm, mk = `m:${e.id}:${Math.floor(now / 60000)}`;
+    const minuteUsed = await num(env, mk);
+    if (rpm && minuteUsed >= rpm) { capped++; continue; }
+    await env.POOL.put(mk, String(minuteUsed + 1), { expirationTtl: 180 });
     tried++;
     let up;
     try {
@@ -88,6 +92,10 @@ async function chat(req, env) {
     changed = true;
   }
   if (changed) await save(env, pool);
+  if (!tried && capped) {
+    const wait = 60 - Math.floor((now % 60000) / 1000);
+    return new Response(JSON.stringify({ error: 'The shared AI is at its request limit for this minute. It continues by itself in a moment.' }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': String(wait), 'x-pool-busy': '1', 'cache-control': 'no-store' } });
+  }
   return json({ error: tried ? 'The shared AI is busy or used up right now. Try again later, or use your own key.' : 'The shared AI has no account ready yet. The owner needs to add one.' }, 503);
 }
 
@@ -106,7 +114,7 @@ async function admin(req, url, env) {
   const pool = await load(env), d = day(), now = Date.now();
   if (p === '/admin/api/state' && req.method === 'GET') {
     const entries = [];
-    for (const e of pool.entries) entries.push({ id: e.id, label: e.label, provider: e.provider, base: e.base, model: e.model, enabled: !!e.enabled, keyTail: String(e.key || '').slice(-4), cooling: (e.cooldown_until || 0) > now ? e.cooldown_until : 0, last_error: e.last_error || '', usedToday: await num(env, `c:${e.id}:${d}`) });
+    for (const e of pool.entries) entries.push({ id: e.id, label: e.label, provider: e.provider, base: e.base, model: e.model, enabled: !!e.enabled, keyTail: String(e.key || '').slice(-4), cooling: (e.cooldown_until || 0) > now ? e.cooldown_until : 0, last_error: e.last_error || '', usedToday: await num(env, `c:${e.id}:${d}`), rpm: e.rpm == null ? null : e.rpm, minuteUsed: await num(env, `m:${e.id}:${Math.floor(now / 60000)}`) });
     return json({ entries, settings: pool.settings, presets: Object.fromEntries(Object.entries(PRESETS).map(([k, v]) => [k, v.name])), usedToday: entries.reduce((a, e) => a + e.usedToday, 0), day: d });
   }
   if (req.method !== 'POST') return json({ error: 'Use POST for changes' }, 405);
@@ -139,6 +147,8 @@ async function admin(req, url, env) {
       pool.entries.push(e);
     } else if (String(body.key || '').trim()) e.key = String(body.key).trim();
     if (e.model !== model || e.base !== base) { e.cooldown_until = 0; e.last_error = ''; }
+    if (String(body.rpm === undefined ? '' : body.rpm).trim() === '') e.rpm = null;
+    else { const rpm = Math.round(Number(body.rpm)); if (!(rpm >= 0 && rpm <= 600)) return json({ error: 'Requests per minute: 0 to 600 (0 = no limit), or empty for the default' }, 400); e.rpm = rpm; }
     const same = pool.entries.filter(x => x.provider === prov).length;
     Object.assign(e, { provider: prov, base, model, label: String(body.label || '').trim().slice(0, 60) || `${PRESETS[prov].name} ${same}`, enabled: body.enabled !== false });
     await save(env, pool);
@@ -155,6 +165,7 @@ async function admin(req, url, env) {
     const dl = Math.round(Number(body.dailyLimit)), mt = Math.round(Number(body.maxTokens));
     if (dl >= 1 && dl <= 10000) pool.settings.dailyLimit = dl;
     if (mt >= 256 && mt <= 32000) pool.settings.maxTokens = mt;
+    const rp = Math.round(Number(body.rpm)); if (rp >= 1 && rp <= 600) pool.settings.rpm = rp;
     await save(env, pool); return json({ ok: true, settings: pool.settings });
   }
   if (p === '/admin/api/test') {   // one tiny request to check an account (the admin sees the provider's answer)
@@ -192,17 +203,17 @@ input,select{padding:5px;font:inherit;max-width:100%} button{padding:5px 9px;fon
 <div class="box row"><input id="tok" type="password" placeholder="GitHub token of the admin account" size="40"><button id="login">Load</button><span id="msg" class="muted"></span></div>
 <div id="main" style="display:none">
 <h2>Accounts (order = priority)</h2>
-<table><thead><tr><th>#</th><th>Label</th><th>Provider</th><th>Model</th><th>Key</th><th>Status</th><th>Today</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table>
+<table><thead><tr><th>#</th><th>Label</th><th>Provider</th><th>Model</th><th>Key</th><th>Status</th><th>Today</th><th>This minute</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table>
 <p class="muted" id="total"></p>
 <h2>Add or edit an account</h2>
 <div class="box">
 <input type="hidden" id="eid">
 <div class="row"><input id="elabel" placeholder="Label, e.g. Google 1"><select id="eprov"></select><input id="ebase" placeholder="https://... (custom only)" size="36"></div>
 <div class="row" style="margin-top:6px"><input id="emodel" list="mlist" placeholder="Model name (or Fetch models)" size="36"><button id="fetch">Fetch models</button><datalist id="mlist"></datalist><input id="ekey" type="password" placeholder="API key (empty when editing = keep it)" size="36"></div>
-<div class="row" style="margin-top:6px"><label><input type="checkbox" id="eon" checked> enabled</label><button id="save">Save account</button><button id="clear">New account</button><span id="emsg" class="muted"></span></div>
+<div class="row" style="margin-top:6px"><input id="ermp" type="number" min="0" max="600" placeholder="Requests per minute (empty = default)" style="width:230px"><label><input type="checkbox" id="eon" checked> enabled</label><button id="save">Save account</button><button id="clear">New account</button><span id="emsg" class="muted"></span></div>
 </div>
 <h2>Limits</h2>
-<div class="box row">Requests per user per day <input id="dl" type="number" min="1" max="10000" style="width:90px"> Max output tokens per request <input id="mt" type="number" min="256" max="32000" style="width:90px"><button id="saveSet">Save limits</button><span id="smsg" class="muted"></span></div>
+<div class="box row">Requests per user per day <input id="dl" type="number" min="1" max="10000" style="width:90px"> Max output tokens per request <input id="mt" type="number" min="256" max="32000" style="width:90px"> Requests per minute per account <input id="rpm" type="number" min="1" max="600" style="width:90px"><button id="saveSet">Save limits</button><span id="smsg" class="muted"></span></div>
 </div>
 <script>
 var state = null;
@@ -233,13 +244,13 @@ function paint() {
     if (e.last_error) st += ' (last: ' + e.last_error + ')';
     var id = esc(e.id);
     return '<tr><td>' + (i + 1) + '</td><td>' + esc(e.label) + '</td><td>' + esc(state.presets[e.provider] || e.provider) + '<br><span class="muted">' + esc(e.base) + '</span></td>' +
-      '<td>' + esc(e.model) + '</td><td>••••' + esc(e.keyTail) + '</td><td class="' + (st === 'ready' ? 'good' : 'bad') + '">' + esc(st) + '</td><td>' + e.usedToday + '</td><td>' +
+      '<td>' + esc(e.model) + '</td><td>••••' + esc(e.keyTail) + '</td><td class="' + (st === 'ready' ? 'good' : 'bad') + '">' + esc(st) + '</td><td>' + e.usedToday + '</td><td>' + e.minuteUsed + ' / ' + (e.rpm == null ? state.settings.rpm : (e.rpm || 'no limit')) + '</td><td>' +
       '<button data-a="up" data-id="' + id + '">▲</button><button data-a="down" data-id="' + id + '">▼</button>' +
       '<button data-a="edit" data-id="' + id + '">Edit</button><button data-a="test" data-id="' + id + '">Test</button>' +
       '<button data-a="reset" data-id="' + id + '">Wake up</button><button data-a="delete" data-id="' + id + '">Delete</button></td></tr>';
-  }).join('') || '<tr><td colspan="8" class="muted">No account yet. Add one below: users then get the shared AI.</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="muted">No account yet. Add one below: users then get the shared AI.</td></tr>';
   $('total').textContent = 'Requests today: ' + state.usedToday + ' (day ' + state.day + ' UTC)';
-  $('dl').value = state.settings.dailyLimit; $('mt').value = state.settings.maxTokens;
+  $('dl').value = state.settings.dailyLimit; $('mt').value = state.settings.maxTokens; $('rpm').value = state.settings.rpm;
 }
 function refresh(msgId, text, bad) { if (msgId) say(msgId, text, bad); return api('/admin/api/state').then(function (s) { state = s; paint(); }); }
 $('login').onclick = load;
@@ -260,7 +271,7 @@ $('rows').onclick = function (ev) {
   var id = b.getAttribute('data-id'), a = b.getAttribute('data-a');
   if (a === 'edit') {
     var e = state.entries.filter(function (x) { return x.id === id; })[0]; if (!e) return;
-    $('eid').value = e.id; $('elabel').value = e.label; $('eprov').value = e.provider; $('ebase').value = e.base; $('emodel').value = e.model; $('ekey').value = ''; $('eon').checked = !!e.enabled;
+    $('eid').value = e.id; $('elabel').value = e.label; $('eprov').value = e.provider; $('ebase').value = e.base; $('emodel').value = e.model; $('ekey').value = ''; $('eon').checked = !!e.enabled; $('ermp').value = e.rpm == null ? '' : e.rpm;
     say('emsg', 'Editing ' + e.label + ' (empty key = keep the saved one)');
     fetchModels(true);
     return;
@@ -272,12 +283,12 @@ $('rows').onclick = function (ev) {
   api(path, body).then(function () { return refresh(); }).catch(function (e) { say('emsg', e.message, true); });
 };
 $('save').onclick = function () {
-  api('/admin/api/entry', { id: $('eid').value, label: $('elabel').value, provider: $('eprov').value, base: $('ebase').value, model: $('emodel').value, key: $('ekey').value, enabled: $('eon').checked })
+  api('/admin/api/entry', { id: $('eid').value, label: $('elabel').value, provider: $('eprov').value, base: $('ebase').value, model: $('emodel').value, key: $('ekey').value, enabled: $('eon').checked, rpm: $('ermp').value })
     .then(function () { $('ekey').value = ''; return refresh('emsg', 'Saved.'); }).catch(function (e) { say('emsg', e.message, true); });
 };
-$('clear').onclick = function () { $('eid').value = ''; $('elabel').value = ''; $('ebase').value = ''; $('emodel').value = ''; $('ekey').value = ''; $('eon').checked = true; say('emsg', 'New account: paste its key.'); };
+$('clear').onclick = function () { $('eid').value = ''; $('elabel').value = ''; $('ebase').value = ''; $('emodel').value = ''; $('ekey').value = ''; $('eon').checked = true; $('ermp').value = ''; say('emsg', 'New account: paste its key.'); };
 $('saveSet').onclick = function () {
-  api('/admin/api/settings', { dailyLimit: $('dl').value, maxTokens: $('mt').value }).then(function () { return refresh('smsg', 'Saved.'); }).catch(function (e) { say('smsg', e.message, true); });
+  api('/admin/api/settings', { dailyLimit: $('dl').value, maxTokens: $('mt').value, rpm: $('rpm').value }).then(function () { return refresh('smsg', 'Saved.'); }).catch(function (e) { say('smsg', e.message, true); });
 };
 if (sessionStorage.getItem('cpAdminTok')) { $('tok').value = sessionStorage.getItem('cpAdminTok'); load(); }
 </script></body></html>`;

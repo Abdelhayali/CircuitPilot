@@ -20,7 +20,7 @@ function corsHeaders(origin) {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'content-type, authorization',
-    'Access-Control-Expose-Headers': 'content-type, x-final-url',
+    'Access-Control-Expose-Headers': 'content-type, x-final-url, retry-after, x-pool-busy',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
   };

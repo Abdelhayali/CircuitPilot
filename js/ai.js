@@ -93,7 +93,21 @@ const AI = (() => {
     const needs = /(^|\.)ollama\.com$/.test(u.hostname) || viaProxy.has(u.host);
     return needs ? (webMode ? 'desktop' : 'pc') : 'direct';
   }
+  // the shared AI answers 429 with x-pool-busy when every account is at its request limit for this minute:
+  // wait as the relay says (retry-after) and try again, a few times, unless the user stops the request
+  async function poolFetch(base, path, opts) {
+    for (let n = 0; ; n++) {
+      const r = await fetch(base + path, opts);
+      if (r.status !== 429 || r.headers.get('x-pool-busy') !== '1' || n >= 4) return r;
+      const wait = Math.min(Number(r.headers.get('retry-after')) || 15, 60) * 1000;
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, wait);
+        if (opts.signal) opts.signal.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
+      });
+    }
+  }
   async function llmFetch(base, path, opts = {}) {
+    if (/\/pool\/v1$/.test(String(base || '').trim().replace(/\/+$/, ''))) return poolFetch(String(base).trim().replace(/\/+$/, ''), path, opts);
     base = String(base || '').trim().replace(/\/+$/, '');
     const web = await onWeb();
     let host = ''; try { host = new URL(base).host; } catch (e) { }

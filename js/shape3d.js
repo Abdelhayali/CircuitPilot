@@ -1537,6 +1537,62 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
   // legacy names
   Object.assign(EXAMPLES, { wristband: TEMPLATES.find(t => t.id === 'wrist-whoop').code, ecg: TEMPLATES.find(t => t.id === 'chest-ecg3').code, box: TEMPLATES.find(t => t.id === 'box-rounded').code });
 
+  // Boards on one panel (break-off tabs): the outline is split at narrow necks (cross-section <= 4 mm between two wide
+  // parts). Returns { boards: [{ name, outline, x0, y0, x1, y1, parts: [refs], holes }], tabs: [{ x0, y0, x1, y1 }] } in
+  // script coordinates. Parts and holes belong to the board whose slab holds their centre; tabs belong to no board.
+  // One board (no neck) -> empty lists. Boards are named A, B, C along the split axis.
+  function detectBoards(P, holes, parts) {
+    const none = { boards: [], tabs: [] };
+    if (!P || P.length < 4) return none;
+    const r3 = v => +v.toFixed(3);
+    const cross = (u, v, s) => {                       // intervals along v of the outline at u = s
+      const ys = [];
+      for (let a = 0, b = P.length - 1; a < P.length; b = a++) { const A = P[a], B = P[b]; if ((A[u] > s) !== (B[u] > s)) ys.push(B[v] + (A[v] - B[v]) * (s - B[u]) / (A[u] - B[u])); }
+      ys.sort((p, q) => p - q); const iv = []; for (let i = 0; i + 1 < ys.length; i += 2) iv.push([ys[i], ys[i + 1]]); return iv;
+    };
+    const span = iv => iv.reduce((a, q) => a + q[1] - q[0], 0);
+    const clipAt = (poly, u, s, keepGE) => {           // Sutherland-Hodgman against u >= s (or u <= s)
+      const inside = q => keepGE ? q[u] >= s : q[u] <= s, out = [];
+      for (let i = 0; i < poly.length; i++) {
+        const cur = poly[i], prev = poly[(i + poly.length - 1) % poly.length], ci = inside(cur), pi = inside(prev);
+        if (ci !== pi) { const t = (s - prev[u]) / (cur[u] - prev[u]); out.push([prev[0] + (cur[0] - prev[0]) * t, prev[1] + (cur[1] - prev[1]) * t]); }
+        if (ci) out.push(cur);
+      }
+      return out;
+    };
+    const NECK = 4, STEP = 0.1;
+    for (const u of [0, 1]) {
+      const v = 1 - u, lo = Math.min(...P.map(q => q[u])), hi = Math.max(...P.map(q => q[u]));
+      const S = []; for (let s = lo + STEP / 2; s < hi; s += STEP) { const iv = cross(u, v, s); S.push({ s, iv, neck: iv.length > 0 && span(iv) <= NECK }); }
+      const necks = [];
+      for (let i = 1; i < S.length;) {
+        if (!S[i].neck) { i++; continue; }
+        let j = i; while (j + 1 < S.length && S[j + 1].neck) j++;
+        const before = S[i - 1], after = S[j + 1], s0 = S[i].s - STEP / 2, s1 = S[j].s + STEP / 2;
+        if (after && !before.neck && !after.neck && before.iv.length && after.iv.length && s1 - s0 >= 0.5 && s1 - s0 <= 6) {
+          const iv = cross(u, v, (s0 + s1) / 2);
+          if (iv.length) necks.push({ s0, s1, v0: Math.min(...iv.map(q => q[0])), v1: Math.max(...iv.map(q => q[1])) });
+        }
+        i = j + 1;
+      }
+      if (!necks.length) continue;
+      const boards = [];
+      for (let k = 0; k <= necks.length; k++) {
+        const a = k ? necks[k - 1].s1 : -Infinity, b = k < necks.length ? necks[k].s0 : Infinity, inS = c => c > a && c <= b;
+        let poly = P; if (isFinite(a)) poly = clipAt(poly, u, a, true); if (isFinite(b)) poly = clipAt(poly, u, b, false);
+        if (poly.length < 3) return none;
+        const xs = poly.map(q => q[0]), ys = poly.map(q => q[1]);
+        boards.push({ name: String.fromCharCode(65 + k), outline: poly.map(q => [r3(q[0]), r3(q[1])]),
+          x0: r3(Math.min(...xs)), y0: r3(Math.min(...ys)), x1: r3(Math.max(...xs)), y1: r3(Math.max(...ys)),
+          parts: parts.filter(p => inS(u === 0 ? (p.x0 + p.x1) / 2 : (p.y0 + p.y1) / 2)).map(p => p.ref),
+          holes: holes.filter(h => inS(u === 0 ? h.x : h.y)) });
+      }
+      const tabs = necks.map(n => u === 0 ? { x0: r3(n.s0), y0: r3(n.v0), x1: r3(n.s1), y1: r3(n.v1) } : { x0: r3(n.v0), y0: r3(n.s0), x1: r3(n.v1), y1: r3(n.s1) });
+      return { boards, tabs };
+    }
+    return none;
+  }
+
   // context: board data in script coordinates (origin = outline centre, y up, z = 0 at the board bottom)
   function context(L) {
     if (!L) return { pcb: null };
@@ -1557,7 +1613,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     });
     // board shape in words, and the radius of a round board (so scripts follow a resize)
     const sh = (typeof Model !== 'undefined' && Model.S.board.shape) || { type: 'rect' }, shape = sh.type === 'ellipse' ? (Math.abs(w - h) < 0.01 ? 'round' : 'ellipse') : sh.type === 'polygon' ? 'polygon' : sh.type === 'rounded' ? 'rounded' : 'rect';
-    return { pcb: { w: r(w), h: r(h), thickness: L.P.pcbThickness, shape, radius: r(Math.min(w, h) / 2), center: [0, 0], outline: L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), holes: L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts }, origin: [ox, oy, L.pcbZ] };
+    return { pcb: { w: r(w), h: r(h), thickness: L.P.pcbThickness, shape, radius: r(Math.min(w, h) / 2), center: [0, 0], outline: L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), holes: L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts, ...detectBoards(L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts) }, origin: [ox, oy, L.pcbZ] };
   }
 
   // ---------- Design: shapes placed by hand (Tinkercad style) on top of the script's parts ----------
@@ -1682,27 +1738,43 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     HQ3 = opts.quality === 'high'; K().setQuality(HQ3 ? 'high' : 'preview');
     FN = 0;
     const pcb = ctx.pcb || null;
+    const placements = {};                              // board name -> transform (placeBoard)
+    const boardOf = (name, fn) => {
+      if (!pcb) throw new Error(fn + '(): this project has no PCB yet');
+      const list = pcb.boards || [], b = list.find(x => x.name === String(name));
+      if (!b) throw new Error(fn + "(): no board '" + name + "' on the PCB (" + (list.length ? 'boards: ' + list.map(x => x.name).join(', ') : 'the outline is one board') + ')');
+      return b;
+    };
+    const localOf = b => { const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2; return { cx, cy, outline: new Shape2D(b.outline.map(q => [q[0] - cx, cy - q[1]])) }; };
+    const asBoard = b => b ? { outline: b.outline, parts: pcb.parts.filter(p => b.parts.includes(p.ref)), holes: b.holes, thickness: pcb.thickness, w: b.x1 - b.x0, h: b.y1 - b.y0 } : pcb;
     const lib = {
       square: api2.square, rect: api2.rect, circle: api2.circle, ellipse: api2.ellipse, roundedRect: api2.roundedRect, polygon: api2.polygon, hull2d: api2.hull2d,
       union2d: (...a) => bool2('union', a), difference2d: (...a) => bool2('difference', a), intersection2d: (...a) => bool2('intersection', a),
       cube, box: cube, roundedBox, cylinder, sphere, torus, extrude, linearExtrude: extrude, revolve, rotateExtrude: revolve, hull, union, difference, intersection,
-      pcbOutline: (off = 0) => { if (!pcb) throw new Error('pcbOutline(): this project has no PCB yet'); const s = new Shape2D(pcb.outline); return off ? s.offset(off) : s; },
-      board: (extra = 0) => { if (!pcb) throw new Error('board(): this project has no PCB yet'); return extrude(lib.pcbOutline(extra), pcb.thickness); },
+      pcbOutline: (off = 0, o = {}) => { if (off && typeof off === 'object') { o = off; off = 0; } if (!pcb) throw new Error('pcbOutline(): this project has no PCB yet'); const b = o.board != null ? boardOf(o.board, 'pcbOutline') : null, s = new Shape2D(b ? b.outline : pcb.outline); return off ? s.offset(off) : s; },
+      board: (extra = 0, o = {}) => { if (!pcb) throw new Error('board(): this project has no PCB yet'); return extrude(lib.pcbOutline(extra, o), pcb.thickness); },
       pcbPart: ref => { if (!pcb) throw new Error('pcbPart(): this project has no PCB yet'); const q = pcb.parts.find(x => x.ref === ref); if (!q) throw new Error(`pcbPart(): no part ${ref} on the board`); return q; },
       pad: key => { if (!pcb) throw new Error('pad(): this project has no PCB yet'); const i = String(key).lastIndexOf('.'), q = pcb.parts.find(x => x.ref === String(key).slice(0, i)), d = q && q.pads.find(x => String(x.num) === String(key).slice(i + 1)); if (!d) throw new Error(`pad(): no pad ${key} (use "REF.PIN")`); return d; },
       partBoxes: (o = {}) => {
         if (!pcb) throw new Error('partBoxes(): this project has no PCB yet');
-        const c = o.clearance ?? 0.5, ps = pcb.parts.filter(p => !o.side || p.side === o.side);
+        const c = o.clearance ?? 0.5, bd = o.board != null ? boardOf(o.board, 'partBoxes') : null, ps = pcb.parts.filter(p => (!o.side || p.side === o.side) && (!bd || bd.parts.includes(p.ref)));
         return union(ps.map(p => cube([p.x1 - p.x0 + 2 * c, p.y1 - p.y0 + 2 * c, p.h + c]).translate([p.x0 - c, p.y0 - c, p.side === 'top' ? pcb.thickness : -p.h - c])));
       },
       // part("U1") — one string: that PCB part (same as pcbPart); part(name, shape, options): register a printed part
       part: (name, shape, o = {}) => { if (shape === undefined && typeof name === 'string') return lib.pcbPart(name); need3(shape, 'part');
         // print: false / kind 'metal' | 'reference': not 3D-printed (electrode plates, a battery dummy) — no print checks, not in the print STLs
-        const kind = o.kind || (o.print === false ? 'reference' : 'print'); if (!['print', 'metal', 'reference'].includes(kind)) throw new Error("part(): kind must be 'print', 'metal' or 'reference'");
+        const kind = o.kind || (o.print === false ? 'reference' : 'print'); if (!['print', 'metal', 'reference', 'board'].includes(kind)) throw new Error("part(): kind must be 'print', 'metal', 'reference' or 'board'");
         parts.push({ name: String(name || 'part' + (parts.length + 1)).replace(/[^\w.-]+/g, '_'), shape, color: o.color, explode: o.explode ? vec3(o.explode, 'explode') : null, print: o.print && typeof o.print === 'object' ? o.print : null, kind, noPrint: kind !== 'print', sheet: o.thickness ? +o.thickness : null }); return shape; },
       resolution: n => { FN = Math.max(0, Math.min(256, Math.round(+n || 0))); },
       range: (a, b, s = 1) => { const out = []; for (let x = a; s > 0 ? x <= b + 1e-9 : x >= b - 1e-9; x += s) { out.push(+x.toFixed(9)); if (out.length > 10000) break; } return out; },
       log: (...a) => { logs.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')); },
+      // placeBoard('B', shape => TB(shape)): where a board sits in the case. Its outline is drawn there (kind 'board':
+      // shown in the preview, not printed, not collision-checked); its parts are checked at that place.
+      placeBoard: (name, fn) => {
+        if (typeof fn !== 'function') throw new Error("placeBoard(): give the transform as a function, e.g. placeBoard('B', shape => TB(shape))");
+        const b = boardOf(name, 'placeBoard'); placements[b.name] = fn;
+        lib.part('PCB ' + b.name, fn(extrude(localOf(b).outline, pcb.thickness)), { kind: 'board', color: 'green' });
+      },
       PI: Math.PI, pcb, rules,
       // name a feature so the manufacturability report can say "thin under engraving X: make it 0.4 deep"
       feature: (kind, shape, o = {}) => { features.push(Object.assign({ kind: String(kind), node: need3(shape, 'feature') }, o)); return shape; },
@@ -1713,7 +1785,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     K2.envelope = (o = {}) => {
       const gap = o.gap ?? 0.5, head = o.headroom ?? 0.8, standoff = o.standoff ?? 1.2;
       // no board yet: a w × l (default 32 × 24) cavity 6 mm tall, as if it held a bare board of that size
-      const pb = pcb || (() => { const w = (o.w ?? 32) / 2 - gap, l = (o.l ?? 24) / 2 - gap; return { outline: [[-w, -l], [w, -l], [w, l], [-w, l]], parts: [], thickness: 6 }; })();
+      const bd = o.board != null ? boardOf(o.board, 'envelope') : null, pb = bd ? asBoard(bd) : (pcb || (() => { const w = (o.w ?? 32) / 2 - gap, l = (o.l ?? 24) / 2 - gap; return { outline: [[-w, -l], [w, -l], [w, l], [-w, l]], parts: [], thickness: 6 }; })());
       const xs = pb.outline.map(q => q[0]), ys = pb.outline.map(q => q[1]);
       let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
       // side: 'top' / 'bottom' — only that side's parts; parts / exclude: by reference
@@ -1792,17 +1864,19 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     K2.hollow = (out, e, t, roundTop = 0, r = 1, o = {}) => o.flare ? union(K2.cavity(e, r), (() => { const z0 = o.z0 ?? e.zFloor, z1 = o.z1 ?? e.zTop, H = z1 - z0, fl = +o.flare, a = e.zFloor, b = e.zTop + 0.25; const at = z => fl * (z - z0) / H; return new Shape({ op: 'rings', rings: [{ z: a, pts: out.offset(-t - at(a)).pts }, { z: b, pts: out.offset(-t - at(b)).pts }] }); })()) : union(K2.cavity(e, r), roundTop > t + 0.05 ? K2.softSolid(out.offset(-t), e.zFloor, e.zTop + 0.25, roundTop - t, 0) : extrude(out.offset(-t), e.zTop + 0.25 - e.zFloor).translate([0, 0, e.zFloor]));
     K2.cavity = (e, r = 1) => extrude(api2.roundedRect(e.w, e.l, Math.min(r, e.w / 2 - 0.01, e.l / 2 - 0.01)).translate([e.cx, e.cy]), e.zTop + 0.25 - e.zFloor).translate([0, 0, e.zFloor]);
     // posts under the board corners (clear of bottom-side parts); pilot holes at PCB mounting holes
-    K2.boardPosts = (e, d = 3) => {
+    K2.boardPosts = (e, d = 3, o = {}) => {
+      if (d && typeof d === 'object') { o = d; d = o.d ?? 3; }
       if (!pcb) return null;
-      const xs = pcb.outline.map(q => q[0]), ys = pcb.outline.map(q => q[1]), i = d / 2 + 0.8, list = [];
-      const spots = pcb.holes.length ? pcb.holes.map(h => [h.x, h.y]) : [[Math.min(...xs) + i, Math.min(...ys) + i], [Math.max(...xs) - i, Math.min(...ys) + i], [Math.max(...xs) - i, Math.max(...ys) - i], [Math.min(...xs) + i, Math.max(...ys) - i]];
-      const inPoly = (x, y) => { let c = false; const P = pcb.outline; for (let a = 0, b = P.length - 1; a < P.length; b = a++) { const [xa, ya] = P[a], [xb, yb] = P[b]; if ((ya > y) !== (yb > y) && x < (xb - xa) * (y - ya) / (yb - ya) + xa) c = !c; } return c; };
+      const PB = o.board != null ? asBoard(boardOf(o.board, 'boardPosts')) : pcb;
+      const xs = PB.outline.map(q => q[0]), ys = PB.outline.map(q => q[1]), i = d / 2 + 0.8, list = [];
+      const spots = PB.holes.length ? PB.holes.map(h => [h.x, h.y]) : [[Math.min(...xs) + i, Math.min(...ys) + i], [Math.max(...xs) - i, Math.min(...ys) + i], [Math.max(...xs) - i, Math.max(...ys) - i], [Math.min(...xs) + i, Math.max(...ys) - i]];
+      const inPoly = (x, y) => { let c = false; const P = PB.outline; for (let a = 0, b = P.length - 1; a < P.length; b = a++) { const [xa, ya] = P[a], [xb, yb] = P[b]; if ((ya > y) !== (yb > y) && x < (xb - xa) * (y - ya) / (yb - ya) + xa) c = !c; } return c; };
       for (const [x, y] of spots) {
         if (!inPoly(x, y)) continue;
-        if (pcb.parts.some(p => p.side === 'bottom' && x > p.x0 - d / 2 - 0.3 && x < p.x1 + d / 2 + 0.3 && y > p.y0 - d / 2 - 0.3 && y < p.y1 + d / 2 + 0.3)) continue;
-        const B = e.battery; if (B && B.z1 < 0.1 && x > B.x0 - d / 2 - 0.3 && x < B.x1 + d / 2 + 0.3 && y > B.y0 - d / 2 - 0.3 && y < B.y1 + d / 2 + 0.3) continue;   // the cell is there
-        let post = cylinder({ d: pcb.holes.length ? Math.max(d, 4.5) : d, h: -e.zFloor + 0.01 }).translate([x, y, e.zFloor - 0.01]);
-        if (pcb.holes.length) post = difference(post, cylinder({ d: 2.5, h: 20, center: true }).translate([x, y, e.zFloor]));
+        if (PB.parts.some(p => p.side === 'bottom' && x > p.x0 - d / 2 - 0.3 && x < p.x1 + d / 2 + 0.3 && y > p.y0 - d / 2 - 0.3 && y < p.y1 + d / 2 + 0.3)) continue;
+        const B = e.battery; if (B && B.z1 < 0.1 && x > B.x0 - d / 2 - 0.3 && x < B.x1 + d / 2 + 0.3 && y > B.y0 - d / 2 - 0.3 && y < B.y1 + d / 2 + 0.3) continue;
+        let post = cylinder({ d: PB.holes.length ? Math.max(d, 4.5) : d, h: -e.zFloor + 0.01 }).translate([x, y, e.zFloor - 0.01]);
+        if (PB.holes.length) post = difference(post, cylinder({ d: 2.5, h: 20, center: true }).translate([x, y, e.zFloor]));
         list.push(post);
       }
       return list.length ? union(list) : null;
@@ -2154,16 +2228,25 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
       err.line = m ? +m[1] - 3 : null; err.logs = logs; budget = null; K().guard.deadline = 0; HQ3 = false; K().setQuality('preview'); throw err;
     }
     // fit report: shells must not cut into the board or the components
+    if (pcb && pcb.boards && pcb.boards.length > 1) for (const b of pcb.boards) if (!placements[b.name]) kitWarn.push('board ' + b.name + ' is not placed in the case: it is drawn flat. Add placeBoard(\'' + b.name + '\', shape => ...) with its transform');
     const report = { collisions: [], warnings: kitWarn.slice() };
     const bats = extras.filter(x => x.kind === 'battery');
     if (pcb && opts.check !== false && MK) {
       // exact: volume of each printed part inside the board / each component box / the battery
-      const M3 = MF.Manifold, tg = [{ with: 'PCB', m: xsec(new Shape2D(pcb.outline)).extrude(pcb.thickness) }];
-      kept(tg[0].m);
-      for (const q of pcb.parts.slice(0, 300)) { const w = Math.max(0.05, q.x1 - q.x0), d = Math.max(0.05, q.y1 - q.y0), h = Math.max(0.05, q.h); tg.push({ with: q.ref, m: kept(M3.cube([w, d, h]).translate([q.x0, q.y0, q.side === 'top' ? pcb.thickness : -h])) }); }
+      const M3 = MF.Manifold, tg = [];
+      for (const b of (pcb.boards && pcb.boards.length ? pcb.boards : [null])) {
+        const fn = b && placements[b.name], nm = b && pcb.boards.length > 1 ? 'PCB ' + b.name : 'PCB';
+        tg.push({ with: nm, m: fn ? evalM(fn(extrude(localOf(b).outline, pcb.thickness)).node) : kept(xsec(new Shape2D(b ? b.outline : pcb.outline)).extrude(pcb.thickness)) });
+      }
+      for (const q of pcb.parts.slice(0, 300)) {
+        const w = Math.max(0.05, q.x1 - q.x0), d = Math.max(0.05, q.y1 - q.y0), h = Math.max(0.05, q.h), zb = q.side === 'top' ? pcb.thickness : -h;
+        const bd = (pcb.boards || []).find(b => b.parts.includes(q.ref)), fn = bd && placements[bd.name], L = bd && localOf(bd);
+        tg.push({ with: q.ref, m: fn ? evalM(fn(lib.cube([w, d, h]).translate([q.x0 - L.cx, L.cy - q.y1, zb])).node) : kept(M3.cube([w, d, h]).translate([q.x0, q.y0, zb])) });
+      }
       for (const b of bats) if (b.rot) tg.push({ with: 'battery ' + b.name, m: evalM(K2.batteryBox({ battery: b }, 0).node) }); else tg.push({ with: 'battery ' + b.name, m: b.shape === 'coin' ? kept(kept(M3.cylinder(b.t, b.w / 2, b.w / 2, 64)).translate([b.cx, b.cy, b.z0]))
         : b.shape === 'cyl' ? kept(kept(kept(M3.cylinder(Math.max(b.w, b.l), b.t / 2, b.t / 2, 64, true)).rotate(b.w > b.l ? [0, 90, 0] : [90, 0, 0])).translate([b.cx, b.cy, (b.z0 + b.z1) / 2])) : kept(M3.cube([b.w, b.l, b.t]).translate([b.x0, b.y0, b.z0])) });
       for (const p of parts) {
+        if (p.kind === 'board') continue;   // drawn, not a printed part: no collision check against its own board
         const pb = mBounds(p.m);
         for (const t of tg) {
           if (!overlap(pb, mBounds(t.m))) continue;

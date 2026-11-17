@@ -442,14 +442,15 @@
     <div id="ghSaveBox" style="display:none;margin-top:12px;padding-top:10px;border-top:1px solid var(--line, #333)">
       <p class="small" style="margin:0 0 8px" id="ghWhere"></p>
       <div class="row-h" style="margin-bottom:8px">
-        <button id="ghSync">⇅ Load all designs from GitHub &amp; sync</button>
+        <button id="ghLoadAll" title="Download every design in the repository to this PC. Nothing is uploaded. A design you changed here since the last sync is kept, not overwritten.">⇩ Load all designs</button>
+        <button id="ghSync" title="Check what changed and move only that: designs changed on GitHub come down, designs changed on this PC go up. Designs changed on both sides are left alone and listed.">⇅ Sync (only what changed)</button>
       </div>
       <div class="row-h">
         <label class="small"><input type="checkbox" id="ghAuto"> Auto-save after changes</label>
         <button id="ghSaveAll">Save all designs</button>
         <button id="ghGo" class="primary">Save design now</button>
       </div>
-      <p class="muted small" style="margin:6px 0 0">Auto-save sends the design, Gerbers, BOM and CPL, EasyEDA files and netlist a few seconds after each change. Images, PDFs and enclosure files come with “Save design now”. Only changed files are uploaded. “Save all designs” saves every design stored on this PC, each in its own folder.</p>
+      <p class="muted small" style="margin:6px 0 0">Auto-save sends the design, Gerbers, BOM and CPL, EasyEDA files and netlist a few seconds after each change. Images, PDFs and enclosure files come with “Save design now”. Only changed files are uploaded. “Save all designs” saves every design stored on this PC, each in its own folder. “Load all designs” downloads every design in the repository; “Sync” only moves what changed since the last sync, in both directions.</p>
     </div>
     <p id="ghStatus" class="small" style="margin:10px 0 0;min-height:1.2em"></p>
     <p id="ghLink" style="margin:6px 0 0"></p>
@@ -540,7 +541,7 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
 <script src="js/github.js?v=202611162200"></script>
-<script src="js/app.js?v=202611162300"></script>
+<script src="js/app.js?v=202611170200"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

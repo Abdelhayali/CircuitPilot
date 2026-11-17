@@ -1234,18 +1234,17 @@ const App = (() => {
     return Object.assign(r, { skipped, repo });
   }
   const ghSave = opts => ghQueued(() => ghSaveRaw(opts));
-  // load every design of the repository into this PC (designs changed here since the last sync are kept and reported),
-  // then save the open design
-  async function ghSyncRaw() {
+  // Read designs from GitHub into this PC. all: every design in the repository (Load all); otherwise only those that
+  // changed on GitHub since the last load / save (Sync). A design changed here since then is kept, never overwritten.
+  async function ghPullRaw({ all = false, say = () => { } } = {}) {
     const repo = GitHub.getRepo(); if (!repo) throw new Error('Choose a repository first');
-    const say = t => { $('#ghStatus').textContent = t; };
     say('Reading the designs in ' + repo + '…');
     const designs = await GitHub.listDesigns(repo), map = ghMap(), synced = ghSynced(), open = Model.S.id || '';
     const folderOf = {}; for (const [pid, f] of Object.entries(map)) folderOf[f] = pid;
-    const rep = { loaded: 0, kept: [], skipped: [] }, conflicts = new Set(); let reopen = '';
+    const rep = { found: designs.length, loaded: 0, same: 0, kept: [], skipped: [] }, conflicts = new Set(); let reopen = '';
     for (const d of designs) {
       const rec = synced[d.folder] || {}; let pid = folderOf[d.folder] || '';
-      if (pid && rec.sha === d.sha) continue;   // unchanged on GitHub since the last sync
+      if (!all && pid && rec.sha === d.sha) { rep.same++; continue; }   // unchanged on GitHub since the last sync
       say(`Loading ${d.folder}…`);
       const text = await GitHub.readBlob(repo, d.sha), data = JSON.parse(text);
       if (!pid) {
@@ -1256,7 +1255,9 @@ const App = (() => {
       } else {
         const r = await fetch('/api/projects/' + encodeURIComponent(pid)), here = r.ok ? await r.json() : null;
         if (here) {
-          const changedHere = rec.local ? (await GitHub.gitSha(JSON.stringify(here))) !== rec.local : JSON.stringify(here) !== JSON.stringify(JSON.parse(text));
+          const hereHash = await GitHub.gitSha(JSON.stringify(here));
+          if (all && hereHash === (await GitHub.gitSha(JSON.stringify(data)))) { synced[d.folder] = { sha: d.sha, local: (await localHash(pid)) || '' }; rep.same++; continue; }
+          const changedHere = rec.local ? hereHash !== rec.local : JSON.stringify(here) !== JSON.stringify(data);
           if (changedHere) { rep.kept.push(d.folder); conflicts.add(d.folder); continue; }
         }
         await putProject(pid, data);
@@ -1266,26 +1267,67 @@ const App = (() => {
     }
     try { localStorage.setItem('cp.github.folders', JSON.stringify(map)); } catch (e) { }
     ghSetSynced(synced);
-    // the open design changed on GitHub: show that version (it was saved first when it had changes here)
+    // the open design changed on GitHub: show that version
     if (reopen && Projects.openId) await Projects.openId(reopen);
-    // then the open design goes up (light: images and PDFs come with “Save design now”), unless it changed on GitHub and here too
-    let pushed = null;
-    if (Model.S.components.length && !conflicts.has(ghFolder())) { say('Saving the open design…'); pushed = await ghSaveRaw({ light: true, onStep: say }); }
-    return { ...rep, pushed, conflict: conflicts.has(ghFolder()) };
+    return Object.assign(rep, { conflicts });
   }
-  const ghSync = () => ghQueued(ghSyncRaw);
-  async function ghSyncNow() {
-    const st = $('#ghStatus'), btn = $('#ghSync'); btn.disabled = true; $('#ghLink').innerHTML = '';
+  // Load all: every design of the repository comes to this PC (nothing is uploaded)
+  const ghLoadAll = say => ghQueued(() => ghPullRaw({ all: true, say }));
+  // Sync: check, then move only what changed. Down: designs changed on GitHub. Up: designs on this PC that are already in
+  // the repository and changed here since the last sync, plus the open design. Changed on both sides: left alone, reported.
+  // Uploads are light (no images, PDFs or enclosure files: “Save design now” sends those).
+  async function ghSyncRaw(say) {
+    const down = await ghPullRaw({ say });
+    const map = ghMap(), synced = ghSynced(), first = Model.S.id || '', up = { saved: 0, same: 0, failed: [], conflict: [...down.conflicts] };
+    const todo = [];
+    if (Projects.online) {
+      for (const [pid, folder] of Object.entries(map)) {
+        const rec = synced[folder]; if (!rec || down.conflicts.has(folder) || pid.startsWith('new:')) continue;
+        const h = await localHash(pid);
+        if (h !== null && h !== rec.local) todo.push(pid);
+      }
+    }
+    if (first && Model.S.components.length && !todo.includes(first) && !down.conflicts.has(ghFolder())) todo.push(first);
+    for (let i = 0; i < todo.length; i++) {
+      const pid = todo[i];
+      try {
+        if (Model.S.id !== pid) await Projects.openId(pid);
+        const label = Model.S.name || pid;
+        if (!Model.S.components.length) continue;
+        const r = await ghSaveRaw({ light: true, onStep: t => say(`Upload ${i + 1}/${todo.length} ${label}: ${t}`) });
+        if (r.changed) up.saved++; else up.same++;
+      } catch (e) { up.failed.push((Model.S.name || pid) + ' (' + e.message + ')'); }
+    }
+    if (first && Model.S.id !== first) { try { await Projects.openId(first); } catch (e) { } }
+    return { down, up, partial: !Projects.online };
+  }
+  const ghSync = say => ghQueued(() => ghSyncRaw(say));
+  function ghBusy(on) { for (const id of ['#ghLoadAll', '#ghSync', '#ghSaveAll', '#ghGo']) { const b = $(id); if (b) b.disabled = on; } if (on) $('#ghLink').innerHTML = ''; }
+  async function ghLoadAllNow() {
+    const st = $('#ghStatus'), say = t => { st.textContent = t; }; ghBusy(true);
     try {
-      const r = await ghSync();
-      const parts = [`${r.loaded} design${r.loaded === 1 ? '' : 's'} loaded from GitHub`];
-      parts.push(r.pushed ? (r.pushed.changed ? `open design saved (${r.pushed.changed} changed files)` : 'open design already up to date') : (r.conflict ? 'open design NOT saved: it changed here and on GitHub' : 'nothing to save'));
-      if (r.kept.length) parts.push(`kept here (changed on this PC and on GitHub): ${r.kept.join(', ')}`);
-      if (r.skipped.length) parts.push(`skipped: ${r.skipped.join(', ')}`);
+      const r = await ghLoadAll(say);
+      const parts = [`${r.found} design${r.found === 1 ? '' : 's'} on GitHub`, `${r.loaded} loaded`, `${r.same} already the same here`];
+      if (r.kept.length) parts.push(`kept here (changed on this PC since the last sync, use Sync or Save to send them): ${r.kept.join(', ')}`);
+      if (r.skipped.length) parts.push(`skipped (its id is used by another design here): ${r.skipped.join(', ')}`);
       st.textContent = parts.join(' · ') + '. Open Projects to see every design.';
       ghPaintIdle();
     } catch (e) { st.textContent = e.message; }
-    finally { btn.disabled = false; }
+    finally { ghBusy(false); }
+  }
+  async function ghSyncNow() {
+    const st = $('#ghStatus'), say = t => { st.textContent = t; }; ghBusy(true);
+    try {
+      const { down, up, partial } = await ghSync(say);
+      const parts = [`down: ${down.loaded} changed on GitHub, ${down.same} unchanged`, `up: ${up.saved} saved, ${up.same} already up to date`];
+      if (up.conflict.length) parts.push(`changed here AND on GitHub, left alone: ${up.conflict.join(', ')}`);
+      if (down.skipped.length) parts.push(`skipped: ${down.skipped.join(', ')}`);
+      if (up.failed.length) parts.push(`failed: ${up.failed.join('; ')}`);
+      if (partial) parts.push('only the open design was checked for upload (other designs need the app with server.py)');
+      st.textContent = (down.loaded || up.saved ? '' : 'Everything is in sync. ') + parts.join(' · ') + '.';
+      ghPaintIdle();
+    } catch (e) { st.textContent = e.message; }
+    finally { ghBusy(false); }
   }
   const ghAutoOn = () => { try { return localStorage.getItem('cp.github.auto') === '1'; } catch (e) { return false; } };
   let ghAutoT = null, ghAutoBusy = false, ghAutoAgain = false;
@@ -1662,6 +1704,7 @@ const App = (() => {
     $('#ghGo').onclick = ghSaveNow;
     $('#ghSaveAll').onclick = ghSaveAllNow;
     $('#ghSync').onclick = ghSyncNow;
+    $('#ghLoadAll').onclick = ghLoadAllNow;
     $('#ghUse').onclick = ghUseRepo;
     $('#ghRepo').onchange = ghRepoChanged;
     $('#ghSignOut').onclick = () => { GitHub.signOut(); $('#ghStatus').textContent = 'Signed out of GitHub in this browser.'; ghRefresh(); };

@@ -699,8 +699,97 @@ const Pcb = (() => {
 
   // Auto-place. With an existing board (or a given size) the outline is kept and parts are fitted inside it;
   // the board is only sized to the parts when there is none yet, or when opt.fit (auto-size) is set.
+  // ---------- several boards on one PCB (a panel joined by break-off tabs); each schematic sheet can belong to one ----------
+  // regions come from the outline (split at the tabs, the same detection the enclosure uses), named A, B, C … in order
+  // along the panel, or with the names make_panel gave them
+  let regCache = { key: '', regs: [] };
+  function boardRegions() {
+    const S = Model.S; if (!S.board || !(S.board.w > 0) || typeof Shape3D === 'undefined' || !Shape3D.detectBoards) return [];
+    const key = JSON.stringify([S.board.w, S.board.h, S.board.shape || null, S.board.panel ? S.board.panel.boards.map(b => b.name) : null]);
+    if (regCache.key === key) return regCache.regs;
+    let regs = [];
+    try {
+      const d = Shape3D.detectBoards(boardPoly(), [], []), P = S.board.panel, names = P && P.boards && P.boards.length === d.boards.length ? P.boards.map(b => b.name) : null;
+      regs = d.boards.map((b, i) => ({ name: names ? names[i] : b.name, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, poly: b.outline }));
+    } catch (e) { regs = []; }
+    regCache = { key, regs };
+    return regs;
+  }
+  const sheetBoard = i => { const sh = Model.S.sheets && Model.S.sheets[i]; return sh && sh.board ? String(sh.board) : null; };
+  const boardSheetsOn = () => (Model.S.sheets || []).some(sh => sh && sh.board) && boardRegions().length > 1;
+  // make_panel: boards side by side along x, centred on one line, each joined to the next by a break-off tab
+  function setPanel(o = {}) {
+    const S = Model.S;
+    const bs = (o.boards || []).map((b, i) => ({ name: String(b.name || String.fromCharCode(65 + i)).trim().slice(0, 20), w: +(b.w ?? b.width), h: +(b.h ?? b.height) }));
+    if (bs.length < 2) throw new Error('make_panel: give at least 2 boards, e.g. [{name: "A", w: 30, h: 25}, {name: "B", w: 25, h: 25}]');
+    for (const b of bs) if (!(b.w >= 5 && b.h >= 5)) throw new Error('make_panel: board ' + b.name + ' needs w and h of at least 5 mm');
+    if (new Set(bs.map(b => b.name)).size !== bs.length) throw new Error('make_panel: every board needs its own name');
+    const gap = o.gap == null ? 2 : +o.gap, tab = o.tab == null ? 3 : +o.tab, r = o.corner_radius == null ? 0.8 : +o.corner_radius;
+    if (!(gap >= 0.8 && gap <= 5)) throw new Error('make_panel: gap (the cut between two boards) must be 0.8 … 5 mm');
+    if (!(tab >= 1 && tab <= 3.5)) throw new Error('make_panel: tab (its width) must be 1 … 3.5 mm');
+    if (tab > Math.min(...bs.map(b => b.h)) - 2 * r - 1) throw new Error('make_panel: the tab is too wide for the smallest board');
+    const H = Math.max(...bs.map(b => b.h)), cy = H / 2, t2 = tab / 2;
+    let x = 0; for (const b of bs) { b.x0 = x; b.y0 = cy - b.h / 2; x += b.w + gap; }
+    const W = x - gap, low = [], high = [], last = bs.length - 1;
+    bs.forEach((b, i) => {
+      if (i) low.push([b.x0, cy - t2]);
+      low.push([b.x0, b.y0], [b.x0 + b.w, b.y0]);
+      if (i < last) low.push([b.x0 + b.w, cy - t2]);
+    });
+    for (let i = last; i >= 0; i--) {
+      const b = bs[i];
+      if (i < last) high.push([b.x0 + b.w, cy + t2]);
+      high.push([b.x0 + b.w, b.y0 + b.h], [b.x0, b.y0 + b.h]);
+      if (i) high.push([b.x0, cy + t2]);
+    }
+    const rd = v => +v.toFixed(3);
+    S.board.w = rd(W); S.board.h = rd(H);
+    S.board.shape = { type: 'polygon', pts: low.concat(high).map(q => [rd(q[0]), rd(q[1])]), r };
+    S.board.panel = { boards: bs.map(b => ({ name: b.name, w: b.w, h: b.h, x0: rd(b.x0), y0: rd(b.y0) })), gap, tab };
+    regCache = { key: '', regs: [] };
+    return { w: S.board.w, h: S.board.h, boards: S.board.panel.boards, tabs: bs.length - 1 };
+  }
+  // placement with boards: each sheet's parts go inside their board (parts of sheets without a board: the first board).
+  // The normal placer runs once per board, on a board the size and shape of that region.
+  function placeByBoards(opt) {
+    const S = Model.S, regs = boardRegions(), keepB = S.board, keepC = S.components;
+    const groups = regs.map(r => ({ r, cs: [] })), loose = [];
+    for (const c of keepC) { const n = sheetBoard(Model.sheetOf(c)), g = n && groups.find(q => q.r.name === n); (g ? g.cs : loose).push(c); }
+    if (loose.length) groups[0].cs.push(...loose);
+    const done = [];
+    try {
+      for (const { r, cs } of groups) {
+        if (!cs.some(c => Lib.footprint(c.footprint))) continue;
+        S.components = cs;
+        S.board = Object.assign({}, keepB, { w: r.x1 - r.x0, h: r.y1 - r.y0, shape: { type: 'polygon', pts: r.poly.map(q => [q[0] - r.x0, q[1] - r.y0]), r: 0 }, panel: null });
+        for (const c of cs) if (c.pcb && c.pcb.locked) { c.pcb.x -= r.x0; c.pcb.y -= r.y0; }
+        if (Model.invalidate) Model.invalidate();
+        try { fitInside(Object.assign({}, opt, { _region: true })); }
+        finally { for (const c of cs) if (c.pcb) { c.pcb.x += r.x0; c.pcb.y += r.y0; } }
+        done.push({ board: r.name, parts: cs.length });
+      }
+    } finally { S.board = keepB; S.components = keepC; if (Model.invalidate) Model.invalidate(); }
+    return { boards: done, parts_without_a_board: loose.map(c => c.ref) };
+  }
+  // DRC: a part outside the board its sheet belongs to; a net that joins two boards (it can only cross through a tab or a wire)
+  function boardRegionIssues(idx) {
+    const regs = boardRegions(), out = []; if (regs.length < 2) return out;
+    const where = c => regs.find(r => inPoly(c.pcb.x, c.pcb.y, r.poly)) || null, nets = new Map();
+    for (const c of placed()) {
+      const sn = Model.sheetOf(c), want = sheetBoard(sn), here = where(c);
+      if (want) {
+        if (!regs.some(r => r.name === want)) out.push({ msg: c.ref + ': sheet ' + (sn + 1) + ' is set to board ' + want + ', but the PCB has no board ' + want + ' (boards: ' + regs.map(r => r.name).join(', ') + ')', x: c.pcb.x, y: c.pcb.y });
+        else if (!here || here.name !== want) out.push({ msg: c.ref + ' belongs on board ' + want + ' (sheet ' + (sn + 1) + ') but sits ' + (here ? 'on board ' + here.name : 'outside every board'), x: c.pcb.x, y: c.pcb.y });
+      }
+      if (here) for (const p of padsOf(c, idx)) if (p.net) { if (!nets.has(p.net)) nets.set(p.net, new Map()); const m = nets.get(p.net); if (!m.has(here.name)) m.set(here.name, [c.pcb.x, c.pcb.y]); }
+    }
+    for (const [net, m] of nets) if (m.size > 1 && !Model.isGround(net)) { const at = [...m.values()][0]; out.push({ msg: 'net ' + net + ' joins boards ' + [...m.keys()].join(' + ') + ': it can only cross through a break-off tab (cut off later) or a wire / connector', x: at[0], y: at[1] }); }
+    return out;
+  }
+
   function autoPlace(opt = {}) {
     const S = Model.S;
+    if (!opt._region && boardSheetsOn()) return placeByBoards(opt);
     const given = +opt.w > 0 && +opt.h > 0;
     if (opt.fit || (!given && !(S.board.w > 0))) return opt.compact === false ? autoSize(opt) : compactPlace(opt);
     if (given && (Math.abs(+opt.w - S.board.w) > 1e-6 || Math.abs(+opt.h - S.board.h) > 1e-6)) {
@@ -2012,6 +2101,7 @@ const Pcb = (() => {
     const L = R.layers === 1 ? 1 : 2, objs = [];
     let orphan = 0;
     for (const c of cs) for (const p of padsOf(c, idx)) objs.push({ s: padShape(p), net: p.net || '~' + (orphan++), layers: L === 1 ? ['F'] : padCu(p, ['F', 'B']), what: `pad ${p.key}`, drill: p.drill, ring: p.drill ? (Math.min(p.w, p.h) - p.drill) / 2 : undefined, x: p.x, y: p.y });
+    for (const v of boardRegionIssues(idx)) add('board-region', v.msg, v.x, v.y, 'warning');
     { const bp = boardPoly(); for (const c of cs) {
       const m = partMargin(c, bp);
       if (m.copper_mm < 0) add('outline', `${c.ref}: copper ${(-m.copper_mm).toFixed(2)} mm outside the board outline`, c.pcb.x, c.pcb.y);
@@ -3143,7 +3233,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

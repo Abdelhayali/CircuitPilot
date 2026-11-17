@@ -1627,6 +1627,15 @@ const App = (() => {
       if (!net) return;
       try { Model.mutate(() => Pcb.addPour({ net, layer: 'both' })); showView('pcb'); toast(`${net} poured on both layers`); } catch (e) { toast(e.message); }
     };
+    $('#btnPanel').onclick = () => {
+      const P = Model.S.board.panel, cur = P && P.boards ? P.boards.map(b => b.name + '=' + b.w + 'x' + b.h).join(', ') : 'A=30x25, B=25x25';
+      const a = prompt('Several boards on one PCB, joined by break-off tabs (cut off after delivery).\nBoards in order, name=width x height in mm:', cur); if (a == null) return;
+      try {
+        const boards = a.split(/[,;]+/).map(t => t.trim()).filter(Boolean).map((t, i) => { const m = /^(?:([^=]+)=)?\s*([\d.]+)\s*[x×*]\s*([\d.]+)$/i.exec(t); if (!m) throw new Error('Could not read "' + t + '" (use name=WxH, e.g. A=30x25)'); return { name: (m[1] || String.fromCharCode(65 + i)).trim(), w: +m[2], h: +m[3] }; });
+        const r = Model.mutate(() => Pcb.setPanel({ boards }));
+        App.toast('Panel ' + r.w + ' × ' + r.h + ' mm: boards ' + r.boards.map(b => b.name).join(', ') + '. In the schematic, choose each sheet\'s PCB in the sheet bar, then place the parts.', 8000);
+      } catch (e) { App.toast(e.message, 7000); }
+    };
     $('#btnShape').onclick = () => { const b = Model.S.board, sh = b.shape || { type: 'rect' }; $('#shType').value = sh.type; $('#shW').value = b.w || ''; $('#shH').value = b.h || ''; $('#shR').value = sh.r || (sh.type === 'rounded' ? 3 : 0); $('#shapeModal').classList.remove('hidden'); };
     $('#shapeClose').onclick = () => $('#shapeModal').classList.add('hidden');
     $('#shApply').onclick = () => {

@@ -1605,6 +1605,11 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     return none;
   }
 
+  // the names make_panel gave the boards (same order along the panel); otherwise A, B, C …
+  function panelNames(d) {
+    try { const P = typeof Model !== 'undefined' && Model.S.board && Model.S.board.panel; if (P && P.boards && P.boards.length === d.boards.length) d.boards.forEach((b, i) => { b.name = P.boards[i].name; }); } catch (e) { }
+    return d;
+  }
   // context: board data in script coordinates (origin = outline centre, y up, z = 0 at the board bottom)
   function context(L) {
     if (!L) return { pcb: null };
@@ -1625,7 +1630,7 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     });
     // board shape in words, and the radius of a round board (so scripts follow a resize)
     const sh = (typeof Model !== 'undefined' && Model.S.board.shape) || { type: 'rect' }, shape = sh.type === 'ellipse' ? (Math.abs(w - h) < 0.01 ? 'round' : 'ellipse') : sh.type === 'polygon' ? 'polygon' : sh.type === 'rounded' ? 'rounded' : 'rect';
-    return { pcb: { w: r(w), h: r(h), thickness: L.P.pcbThickness, shape, radius: r(Math.min(w, h) / 2), center: [0, 0], outline: L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), holes: L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts, ...detectBoards(L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts) }, origin: [ox, oy, L.pcbZ] };
+    return { pcb: { w: r(w), h: r(h), thickness: L.P.pcbThickness, shape, radius: r(Math.min(w, h) / 2), center: [0, 0], outline: L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), holes: L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts, ...panelNames(detectBoards(L.bpoly.map(q => [r(q[0] - ox), r(q[1] - oy)]), L.holes.map(q => ({ x: r(q.x - ox), y: r(q.y - oy), d: q.d })), parts)) }, origin: [ox, oy, L.pcbZ] };
   }
 
   // ---------- Design: shapes placed by hand (Tinkercad style) on top of the script's parts ----------
@@ -2656,6 +2661,6 @@ part('lid', union(intersection(shell, cube([400, 400, 200]).translate([-200, -20
     return out.join('\n');
   }
 
-  return { DESIGN, DENSITY, joinedSheet, assemblySvg, sheetCheck, electrodePcb, assemblyGuide, dxfOfProfiles, stepOfProfiles, pdfOfFlat, dfmCheck, checkBox, PROCESSES, exportPack, stepOfPolys, stepOfSheet, dxfOf, profiles: P, run, context, useManifold, get fast() { return !!MF; }, HELP, EXAMPLES, TEMPLATES, PARAMS, fromTemplate, recipe, Shape, Shape2D };
+  return { DESIGN, DENSITY, joinedSheet, assemblySvg, detectBoards, sheetCheck, electrodePcb, assemblyGuide, dxfOfProfiles, stepOfProfiles, pdfOfFlat, dfmCheck, checkBox, PROCESSES, exportPack, stepOfPolys, stepOfSheet, dxfOf, profiles: P, run, context, useManifold, get fast() { return !!MF; }, HELP, EXAMPLES, TEMPLATES, PARAMS, fromTemplate, recipe, Shape, Shape2D };
 })();
 if (typeof module !== 'undefined') module.exports = Shape3D;

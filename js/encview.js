@@ -3,7 +3,7 @@
 const EncView = (() => {
   const $ = s => document.querySelector(s);
   const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
-  const WORKER = 'js/shape-worker.js?v=202611170100';
+  const WORKER = 'js/shape-worker.js?v=202611170400';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
   function loadThree() {

@@ -1,6 +1,9 @@
 'use strict';
 // Runs placement + the autorouter off the UI thread. Receives the design, returns the new PCB.
 importScripts('lib.js', 'model.js', 'strokefont.js', 'pcb.js');
+// board regions of a panel (several boards joined by break-off tabs) come from Shape3D.detectBoards: placement puts each
+// sheet's parts on its own board. Without it (load error) placement ignores the boards, routing is unaffected.
+try { importScripts('enclosure.js', 'shape3d.js'); } catch (e) { }
 self.onmessage = e => {
   const { state, opt = {}, place } = e.data;
   try {

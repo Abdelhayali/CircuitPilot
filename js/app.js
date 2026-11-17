@@ -29,6 +29,7 @@ const App = (() => {
     if (v === 'enc') EncView.show(); else EncView.hide();
     if (v === 'doc') DocView.show(); else DocView.hide();
     const sb = document.getElementById('sheetBar'); if (sb) sb.classList.toggle('hidden', v !== 'sch');
+    const pb = document.getElementById('pcbBar'); if (pb) pb.classList.toggle('hidden', v !== 'pcb');
     renderAll();
     if (v === 'pcb') { Pcb.vp.apply(); if (!showView._pcbFit) { Pcb.fit(); showView._pcbFit = true; } } else if (v === 'sch') Sch.vp.apply();
     revealSelection(v);
@@ -441,7 +442,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611170500');
+      worker = new Worker('js/route-worker.js?v=202611170600');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;

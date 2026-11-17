@@ -39,10 +39,10 @@ const Sch = (() => {
   }
   function sheetBar() {
     let bar = document.getElementById('sheetBar');
-    if (!bar) { bar = document.createElement('div'); bar.id = 'sheetBar'; bar.className = 'sheetbar'; svg.parentNode.appendChild(bar); bar.onclick = sheetClick; bar.onchange = sheetBoardChange; }
+    if (!bar) { bar = document.createElement('div'); bar.id = 'sheetBar'; bar.className = 'sheetbar'; svg.parentNode.appendChild(bar); bar.onclick = sheetClick; bar.onchange = sheetPcbChange; }
     const sh = sheets(), n = Model.S.components.filter(c => Model.sheetOf(c) === ui.sheet).length;
     bar.innerHTML = sh.map((s, i) => `<button data-sheet="${i}" class="${i === ui.sheet ? 'on' : ''}" title="Double-click to rename">${i + 1}: ${esc(s.name || 'Sheet ' + (i + 1))}</button>`).join('') +
-      `<button data-sheet="add" title="Add a sheet">＋</button>${sh.length > 1 && !n ? '<button data-sheet="del" title="Delete this empty sheet">✕</button>' : ''}<label class="sfr"><input type="checkbox" ${frameOn() ? 'checked' : ''} data-sheet="frame"> frame</label>` + boardPick();
+      `<button data-sheet="add" title="Add a sheet">＋</button>${sh.length > 1 && !n ? '<button data-sheet="del" title="Delete this empty sheet">✕</button>' : ''}<label class="sfr"><input type="checkbox" ${frameOn() ? 'checked' : ''} data-sheet="frame"> frame</label>` + pcbPick();
   }
   // two clicks on the same sheet tab within 450 ms rename it. Detected here, not with the native dblclick event,
   // because the first click re-renders the bar and the second click then lands on a new element.
@@ -50,7 +50,7 @@ const Sch = (() => {
   function sheetClick(e) {
     const b = e.target.closest('[data-sheet]'); if (!b) return;
     const k = b.dataset.sheet;
-    if (k === 'board') return;
+    if (k === 'board' || k === 'pcb') return;
     if (!isNaN(+k)) {
       const now = Date.now(), dbl = lastTab.k === k && now - lastTab.t < 450;
       lastTab = dbl ? { k: null, t: 0 } : { k, t: now };
@@ -61,17 +61,23 @@ const Sch = (() => {
     if (k === 'del') { const i = ui.sheet; Model.mutate(() => { const sh = sheets().slice(); sh.splice(i, 1); Model.S.sheets = sh; for (const c of Model.S.components) if (Model.sheetOf(c) > i) c.sheet = Model.sheetOf(c) - 1; }); ui.sheet = Math.max(0, i - 1); render(); fit(); return; }
     ui.sheet = +k; select(null); render(); fit();
   }
-  // which board of the panel this sheet's parts go on (shown when the PCB has several boards, or the sheet has one)
-  function boardPick() {
-    const regs = typeof Pcb !== 'undefined' && Pcb.boardRegions ? Pcb.boardRegions() : [], cur = (sheets()[ui.sheet] || {}).board || '';
-    if (regs.length < 2 && !cur) return '';
-    const names = regs.map(r => r.name); if (cur && !names.includes(cur)) names.push(cur);
-    return '<label class="sfr" title="The PCB this sheet\'s parts are placed on (several boards on one panel)">PCB <select data-sheet="board"><option value="">any</option>' + names.map(n => '<option value="' + esc(n) + '"' + (n === cur ? ' selected' : '') + '>' + esc(n) + (regs.some(r => r.name === n) ? '' : ' (missing)') + '</option>').join('') + '</select></label>';
+  // the PCB this sheet's parts are on (a project can have several PCBs, like it has several sheets)
+  function pcbPick() {
+    if (typeof Pcb === 'undefined' || !Pcb.pcbList) return '';
+    const L = Pcb.pcbList(), k = (L.find(p => p.sheets.includes(ui.sheet + 1)) || L[0]).index;
+    return '<label class="sfr" title="The PCB this sheet\'s parts go on. Add PCBs with ＋ in the PCB view">PCB <select data-sheet="pcb">' + L.map(p => '<option value="' + p.index + '"' + (p.index === k ? ' selected' : '') + '>' + (p.index + 1) + ': ' + esc(p.name) + '</option>').join('') + '<option value="new">＋ new PCB…</option></select></label>';
   }
-  function sheetBoardChange(e) {
-    const s = e.target.closest('select[data-sheet="board"]'); if (!s) return;
+  function sheetPcbChange(e) {
+    const s = e.target.closest('select[data-sheet="pcb"]'); if (!s) return;
     const i = ui.sheet;
-    Model.mutate(() => { const sh = sheets().map(x => Object.assign({}, x)); if (s.value) sh[i].board = s.value; else delete sh[i].board; Model.S.sheets = sh; });
+    try {
+      Model.mutate(() => {
+        let k = s.value;
+        if (k === 'new') { const n = prompt('Name of the new PCB', 'PCB ' + (Pcb.pcbList().length + 1)); if (n == null) return; k = Pcb.addPcb(n); }
+        Pcb.setSheetPcb(i + 1, +k + 1);
+      });
+    } catch (err) { App.toast(err.message, 6000); }
+    render();
   }
   function sheetRename(i) {
     const cur = sheets()[i]; if (!cur) return;

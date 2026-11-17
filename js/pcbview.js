@@ -990,7 +990,27 @@ const PcbView = (() => {
     if (ui.sel && !Model.comp(ui.sel)) ui.sel = null;
     for (const r of [...ui.multi]) if (!Model.comp(r)) ui.multi.delete(r);
   }
-  return { init, render: () => { validate(); render(); coord(); }, fit, key, ui, selected, setSelection, selectAll, rotate, del, flip, exportSVG, setVisible, bindBar, props, setTool, LAYERS, drawOutline: r => { ui.outlineR = +r || 0; setTool('outline'); App.toast('Click the outline corners; click the first corner to close'); }, get vp() { return vp; } };
+  // PCB tabs: one per PCB of the project; click = open it, double-click = rename, ＋ = new PCB, ✕ = delete an empty one
+  let lastTab = { k: null, t: 0 };
+  function pcbBar() {
+    let bar = document.getElementById('pcbBar');
+    if (!bar) { bar = document.createElement('div'); bar.id = 'pcbBar'; bar.className = 'sheetbar' + (svg.classList.contains('hidden') ? ' hidden' : ''); svg.parentNode.appendChild(bar); bar.onclick = pcbTabClick; }
+    const L = Pcb.pcbList(), a = Pcb.activePcb(), cur = L[a];
+    bar.innerHTML = L.map(p => '<button data-pcb="' + p.index + '" class="' + (p.active ? 'on' : '') + '" title="' + esc(p.name) + (p.sheets.length ? ' — schematic sheet ' + p.sheets.join(', ') : ' — no sheet on it yet: choose its PCB in the schematic sheet bar') + '. Double-click to rename">' + (p.index + 1) + ': ' + esc(p.name) + '</button>').join('') +
+      '<button data-pcb="add" title="Add a PCB (then put schematic sheets on it)">＋</button>' + (L.length > 1 && !cur.sheets.length ? '<button data-pcb="del" title="Delete this PCB (no sheet is on it)">✕</button>' : '');
+  }
+  function pcbTabClick(e) {
+    const b = e.target.closest('[data-pcb]'); if (!b) return;
+    const k = b.dataset.pcb;
+    try {
+      if (k === 'add') { Model.mutate(() => { const i = Pcb.addPcb(); Pcb.selectPcb(i + 1); }); setSelection([]); fit(); return; }
+      if (k === 'del') { Model.mutate(() => Pcb.deletePcb(Pcb.activePcb() + 1)); fit(); return; }
+      const now = Date.now(), dbl = lastTab.k === k && now - lastTab.t < 450; lastTab = dbl ? { k: null, t: 0 } : { k, t: now };
+      if (dbl) { const n = prompt('PCB name', Pcb.pcbList()[+k].name); if (n != null && n.trim()) Model.mutate(() => Pcb.renamePcb(+k + 1, n)); return; }
+      if (+k !== Pcb.activePcb()) { Model.mutate(() => Pcb.selectPcb(+k + 1)); setSelection([]); fit(); }
+    } catch (err) { App.toast(err.message, 6000); }
+  }
+  return { init, render: () => { validate(); render(); coord(); pcbBar(); }, fit, key, ui, selected, setSelection, selectAll, rotate, del, flip, exportSVG, setVisible, bindBar, props, setTool, LAYERS, drawOutline: r => { ui.outlineR = +r || 0; setTool('outline'); App.toast('Click the outline corners; click the first corner to close'); }, get vp() { return vp; } };
 })();
 // Expose the editor through the Pcb namespace used by the rest of the app.
 Object.assign(Pcb, { init: PcbView.init, render: PcbView.render, fit: PcbView.fit, key: PcbView.key, exportSVG: PcbView.exportSVG, ui: PcbView.ui });

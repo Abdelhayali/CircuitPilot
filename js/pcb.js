@@ -627,7 +627,85 @@ const Pcb = (() => {
     return { added, pours: S.pcb.pours.length, islands: info, note: info.some(q => q.removed) ? 'Pieces of copper that touch no ' + net + ' copper, or are smaller than the rule pourMinArea, were removed (dead copper)' : undefined };
   }
 
-  const placed = () => Model.S.components.filter(c => c.pcb && Lib.footprint(c.footprint));
+  // ---------- several PCBs per project (like schematic sheets) ----------
+  // S.pcbs = [{ name, board, pcb, parts }] — PCB n is S.pcbs[n - 1]. The ACTIVE PCB (S.activePcb) lives where every PCB
+  // tool expects it: S.board, S.pcb and its parts' c.pcb; the other PCBs keep theirs in S.pcbs (parts: { ref: c.pcb }).
+  // A schematic sheet goes on a PCB with sheets[i].pcb (index); a sheet without one is on PCB 1.
+  const pcbCount = () => (Model.S.pcbs && Model.S.pcbs.length) || 1;
+  const activePcb = () => pcbCount() > 1 ? Math.min(pcbCount() - 1, Math.max(0, Model.S.activePcb | 0)) : 0;
+  const pcbOfSheet = i => { const sh = Model.S.sheets && Model.S.sheets[i], k = sh && Number.isInteger(sh.pcb) ? sh.pcb : 0; return k >= 0 && k < pcbCount() ? k : 0; };
+  const onActivePcb = c => pcbCount() < 2 || pcbOfSheet(Model.sheetOf(c)) === activePcb();
+  const pcbList = () => (Model.S.pcbs && Model.S.pcbs.length ? Model.S.pcbs : [{ name: 'PCB 1' }]).map((p, i) => ({ index: i, name: p.name || 'PCB ' + (i + 1), active: i === activePcb(),
+    sheets: (Model.S.sheets && Model.S.sheets.length ? Model.S.sheets : [{ name: 'Main' }]).map((sh, j) => pcbOfSheet(j) === i ? j + 1 : 0).filter(Boolean),
+    parts: Model.S.components.filter(c => pcbOfSheet(Model.sheetOf(c)) === i).length,
+    board: i === activePcb() ? (Model.S.board.w ? [Model.S.board.w, Model.S.board.h] : null) : (p.board && p.board.w ? [p.board.w, p.board.h] : null) }));
+  // the active PCB goes into its S.pcbs entry (parts that now belong to another PCB lose their place: placed again there)
+  function stashActive() {
+    const S = Model.S, a = activePcb(), parts = {};
+    for (const c of S.components) if (c.pcb) { if (pcbOfSheet(Model.sheetOf(c)) === a) parts[c.ref] = c.pcb; delete c.pcb; }
+    S.pcbs[a] = Object.assign({}, S.pcbs[a], { board: S.board, pcb: S.pcb, parts });
+  }
+  function unstash(k) {
+    const S = Model.S, e = S.pcbs[k] || {};
+    S.board = e.board || { w: 0, h: 0 }; S.pcb = e.pcb || Model.blank().pcb;
+    for (const c of S.components) { const p = e.parts && e.parts[c.ref]; if (p && pcbOfSheet(Model.sheetOf(c)) === k) c.pcb = p; }
+    S.pcbs[k] = { name: e.name || 'PCB ' + (k + 1) };
+    S.activePcb = k; regCache = { key: '', regs: [] };
+  }
+  const pcbIndex = v => {
+    const L = pcbList(); if (typeof v === 'number' || /^\d+$/.test(String(v))) { const k = Math.round(+v) - 1; if (k >= 0 && k < L.length) return k; }
+    const f = L.find(p => p.name.toLowerCase() === String(v).trim().toLowerCase()); if (f) return f.index;
+    throw new Error('No PCB ' + v + ' (PCBs: ' + L.map(p => (p.index + 1) + ' ' + p.name).join(', ') + ')');
+  };
+  function selectPcb(v) { const k = pcbIndex(v); if (k !== activePcb()) { stashActive(); unstash(k); } return pcbList(); }
+  function addPcb(name) {
+    const S = Model.S; if (!S.pcbs || !S.pcbs.length) { S.pcbs = [{ name: 'PCB 1' }]; S.activePcb = 0; }
+    const nm = String(name || 'PCB ' + (S.pcbs.length + 1)).trim().slice(0, 40);
+    if (pcbList().some(p => p.name.toLowerCase() === nm.toLowerCase())) throw new Error('There is already a PCB called ' + nm);
+    S.pcbs.push({ name: nm, board: { w: 0, h: 0 }, pcb: Model.blank().pcb, parts: {} });
+    return S.pcbs.length - 1;
+  }
+  function renamePcb(v, name) {
+    const k = pcbIndex(v), nm = String(name || '').trim().slice(0, 40); if (!nm) throw new Error('Give the PCB a name');
+    if (pcbList().some(p => p.index !== k && p.name.toLowerCase() === nm.toLowerCase())) throw new Error('There is already a PCB called ' + nm);
+    const S = Model.S; if (!S.pcbs || !S.pcbs.length) { S.pcbs = [{ name: 'PCB 1' }]; S.activePcb = 0; }
+    S.pcbs[k] = Object.assign({}, S.pcbs[k], { name: nm });
+  }
+  // a PCB with no sheet on it can go; later PCBs move up one number
+  function deletePcb(v) {
+    const S = Model.S, k = pcbIndex(v); if (pcbCount() < 2) throw new Error('A project keeps at least one PCB');
+    const L = pcbList(); if (L[k].sheets.length) throw new Error('Sheet ' + L[k].sheets.join(', ') + ' is on ' + L[k].name + ': move it to another PCB first');
+    if (k === activePcb()) selectPcb(k === 0 ? 2 : 1);
+    const a = activePcb(); S.pcbs.splice(k, 1); S.activePcb = a > k ? a - 1 : a;
+    for (const sh of S.sheets || []) if (Number.isInteger(sh.pcb) && sh.pcb > k) sh.pcb -= 1;
+    if (S.pcbs.length < 2) { delete S.pcbs; delete S.activePcb; }
+  }
+  // tracks and vias of nets that no longer have a pad on PCB k (its parts moved to another PCB) are removed from it
+  function cleanCopper(k) {
+    const S = Model.S, refs = new Set(S.components.filter(c => pcbOfSheet(Model.sheetOf(c)) === k).map(c => c.ref));
+    const keep = new Set(Object.keys(S.nets).filter(n => S.nets[n].some(m => refs.has(m.slice(0, m.lastIndexOf('.'))))));
+    const P = k === activePcb() ? S.pcb : S.pcbs && S.pcbs[k] && S.pcbs[k].pcb; if (!P) return 0;
+    const n0 = (P.traces || []).length + (P.vias || []).length;
+    P.traces = (P.traces || []).filter(t => !t.net || keep.has(t.net)); P.vias = (P.vias || []).filter(v => !v.net || keep.has(v.net));
+    if (P.routed) for (const n of Object.keys(P.routed)) if (!keep.has(n)) delete P.routed[n];
+    return n0 - P.traces.length - P.vias.length;
+  }
+  // a sheet goes on a PCB: its parts leave the PCB they were on (they are placed again on the new one)
+  function setSheetPcb(sheet, v) {
+    const S = Model.S, i = Math.round(+sheet) - 1, n = (S.sheets && S.sheets.length) || 1;
+    if (!(i >= 0 && i < n)) throw new Error('No sheet ' + sheet + ' (the design has ' + n + ')');
+    const k = pcbIndex(v), was = pcbOfSheet(i); if (k === was) return pcbList();
+    if (!S.sheets || !S.sheets.length) S.sheets = [{ name: 'Main' }];
+    S.sheets = S.sheets.map(x => Object.assign({}, x)); S.sheets[i].pcb = k;
+    const a = activePcb();
+    for (const c of S.components) {
+      if (Model.sheetOf(c) !== i) continue;
+      if (was === a) delete c.pcb; else if (S.pcbs && S.pcbs[was] && S.pcbs[was].parts) delete S.pcbs[was].parts[c.ref];
+    }
+    cleanCopper(was);
+    return pcbList();
+  }
+  const placed = () => Model.S.components.filter(c => c.pcb && Lib.footprint(c.footprint) && onActivePcb(c));
 
   // ---------- auto placement ----------
   // Connectors go on the board edge. Parts with an opening (USB, jacks, RF, card slots) face outward, flush with the edge.
@@ -802,7 +880,7 @@ const Pcb = (() => {
   }
 
   function fitInside(opt = {}) {
-    const S = Model.S, cs = S.components.filter(c => Lib.footprint(c.footprint));
+    const S = Model.S, cs = S.components.filter(c => Lib.footprint(c.footprint) && onActivePcb(c));
     if (!cs.length) throw new Error('No components with footprints to place');
     const R = rules(), W = S.board.w, H = S.board.h, poly = boardPoly();
     const margin = Math.max(R.edgeClearance + 0.4, 0.8), cx0 = W / 2, cy0 = H / 2;
@@ -1171,7 +1249,7 @@ const Pcb = (() => {
     return { board: boardBrief(), placed: cs.length, compacted: steps, fits: !still.length && !outside.length, overlapping: still.length ? still : undefined, outside: outside.length ? outside : undefined, seconds: +((Date.now() - t0) / 1000).toFixed(1) };
   }
   function autoSize(opt = {}) {
-    const S = Model.S, cs = S.components.filter(c => Lib.footprint(c.footprint));
+    const S = Model.S, cs = S.components.filter(c => Lib.footprint(c.footprint) && onActivePcb(c));
     if (!cs.length) throw new Error('No components with footprints to place');
     const k = 0.085, gap = 1.0, m = opt.margin ?? 3;
     for (const c of cs) { const side = c.pcb && c.pcb.side; c.pcb = { x: c.x * k, y: c.y * k, rot: c.rot || 0 }; if (side === 'B') c.pcb.side = 'B'; }
@@ -3077,8 +3155,8 @@ const Pcb = (() => {
     const netsOf = c => Object.keys(S.nets).filter(n => S.nets[n].some(k => k.startsWith(c.ref + '.')));
     const rip = new Set(), drop = ns => { for (const n of ns) { rip.add(n); delete S.pcb.routed[n]; } S.pcb.traces = S.pcb.traces.filter(t => !ns.includes(t.net)); S.pcb.vias = S.pcb.vias.filter(v => !ns.includes(v.net)); };
 
-    const fresh = S.components.filter(c => !c.pcb && Lib.footprint(c.footprint));
-    const noFp = S.components.filter(c => !c.pcb && !Lib.footprint(c.footprint)).map(c => c.ref);
+    const fresh = S.components.filter(c => !c.pcb && Lib.footprint(c.footprint) && onActivePcb(c));
+    const noFp = S.components.filter(c => !c.pcb && !Lib.footprint(c.footprint) && onActivePcb(c)).map(c => c.ref);
     if (opt.place === false) {
       // column(s) to the right of the board, 1 mm apart, top to bottom
       let x = S.board.w + 3, y = 0, colW = 0;
@@ -3233,7 +3311,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

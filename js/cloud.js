@@ -10,9 +10,25 @@ const Cloud = (() => {
   const API = 'https://www.googleapis.com/drive/v3/files', UP = 'https://www.googleapis.com/upload/drive/v3/files';
   const clientId = () => { try { return localStorage.getItem('cp.googleClientId') || (window.CP_CONFIG && CP_CONFIG.googleClientId) || ''; } catch (e) { return (window.CP_CONFIG && CP_CONFIG.googleClientId) || ''; } };
   // what was synced last: per project the Drive file, its modifiedTime and the local `updated` it matched
-  let st = { email: '', name: '', picture: '', map: {}, lib: null, last: 0 };
-  try { st = Object.assign(st, JSON.parse(localStorage.getItem('cp.cloud') || '{}')); } catch (e) { }
-  const keep = () => { try { localStorage.setItem('cp.cloud', JSON.stringify(st)); } catch (e) { } };
+  // The record belongs to ONE local project store. The desktop app and server.py both serve http://localhost:5173 (the
+  // same browser storage) but use different projects.db files: with one shared record, projects of the other store
+  // looked "deleted here" and were marked deleted in Drive. Each store (its data folder) now keeps its own record.
+  const blank = () => ({ email: '', name: '', picture: '', map: {}, lib: null, last: 0 });
+  let st = blank(), KEY = 'cp.cloud', storeDir = '', ready = null, full = false;
+  const readState = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+  const keep = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) { } };
+  async function pickStore() {
+    let dir = '';
+    try { const r = await fetch('/api/version', { cache: 'no-store' }); if (r.ok) dir = String((await r.json()).data_dir || ''); } catch (e) { }
+    if (!dir) { st = Object.assign(blank(), readState(KEY) || {}); return; }   // pcbgo.site: one store per browser
+    storeDir = dir; KEY = 'cp.cloud@' + dir.toLowerCase().replace(/\\/g, '/');
+    const mine = readState(KEY);
+    if (mine) { st = Object.assign(blank(), mine); return; }
+    // first time for this store: the same Google account, but nothing is known about what THIS store synced, so the
+    // first sync merges both ways (newer wins, nothing is taken as deleted)
+    const legacy = readState('cp.cloud') || {};
+    st = Object.assign(blank(), { email: legacy.email || '', name: legacy.name || '', picture: legacy.picture || '' }); keep();
+  }
   let token = null, tokenExp = 0, tc = null, pending = null, busy = null, status = 'off', statusMsg = '', pushT = null, askConsent = false;
   const DRIVE = 'https://www.googleapis.com/auth/drive.appdata';
   const NEED = 'CircuitPilot did not get the Google Drive permission. Click Sync now and, on the Google page, tick “See, create and delete its own configuration data in your Google Drive”.';
@@ -70,7 +86,7 @@ const Cloud = (() => {
   }
   function signOut() {
     if (token && window.google && google.accounts) try { google.accounts.oauth2.revoke(token, () => { }); } catch (e) { }
-    token = null; st = { email: '', name: '', picture: '', map: {}, lib: null, last: 0 }; keep(); setStatus('off');
+    token = null; st = blank(); keep(); setStatus('off');
     App.toast('Signed out. Your projects stay on this PC and in your Google Drive.', 6000); render();
   }
 
@@ -100,9 +116,10 @@ const Cloud = (() => {
   // ---------- sync ----------
   function sync(all) { if (busy) return busy; busy = run(all).finally(() => { busy = null; }); return busy; }
   async function run() {
+    await ready;
     if (!st.email) return;
     setStatus('busy', 'Syncing with Google Drive…');
-    let up = 0, down = 0, del = 0;
+    let up = 0, down = 0, del = 0, gone = 0;
     try {
       const [mine, remote] = await Promise.all([local('GET', '/api/projects'), listRemote()]);
       const byPid = new Map(), L = new Map(mine.map(p => [p.id, p]));
@@ -124,7 +141,7 @@ const Cloud = (() => {
             if (remoteWins) { const d = await download(f.id); const r = await local('PUT', '/api/projects/' + id, d); st.map[id] = { rid: f.id, rmod: f.modifiedTime, lup: r.updated }; down++; }
             else { const r = await upload(f.id, `cp-project-${id}.json`, await local('GET', '/api/projects/' + id), props(p)); st.map[id] = { rid: r.id, rmod: r.modifiedTime, lup: p.updated }; up++; }
           } else if (f) {
-            if (a.deleted === '1') continue;
+            if (a.deleted === '1') { gone++; continue; }
             if (s) { await setProps(f.id, Object.assign({}, a, { deleted: '1' })); delete st.map[id]; del++; continue; }   // deleted here since the last sync
             const d = await download(f.id); const r = await local('PUT', '/api/projects/' + id, d); st.map[id] = { rid: f.id, rmod: f.modifiedTime, lup: r.updated }; down++;
           } else if (p) {
@@ -143,7 +160,8 @@ const Cloud = (() => {
         if (add.length) { await Projects.loadLibrary(); if (window.App && App.renderAll) App.renderAll(); }
       } catch (e) { if (/not connected|expired/.test(e.message)) throw e; console.warn('library sync', e); }
       st.last = Date.now(); keep();
-      setStatus('ok', `Synced ${new Date().toLocaleTimeString()}${up || down || del ? ` · ${up} up, ${down} down${del ? `, ${del} deleted` : ''}` : ''}`);
+      setStatus('ok', `Synced ${new Date().toLocaleTimeString()}${up || down || del ? ` · ${up} up, ${down} down${del ? `, ${del} deleted` : ''}` : ''}${full && gone ? ` · ${gone} project${gone > 1 ? 's' : ''} deleted earlier stay deleted` : ''}`);
+      if (full) App.toast(`This PC and your Google Drive now hold the same projects: ${up} uploaded, ${down} downloaded${gone ? `, ${gone} deleted earlier left deleted` : ''}`, 8000);
       if (down || del) App.toast(`Google Drive: ${down ? down + ' project' + (down > 1 ? 's' : '') + ' updated from your other devices' : ''}${down && del ? ', ' : ''}${del ? del + ' deleted' : ''}`, 6000);
     } catch (e) { if (status !== 'reconnect') setStatus('error', e.message); }
     render();
@@ -154,6 +172,7 @@ const Cloud = (() => {
     clearTimeout(pushT); pushT = setTimeout(() => push(id), 4000);
   }
   async function push(id) {
+    await ready;
     if (busy) { await busy; }
     try {
       const m = await local('GET', '/api/projects/' + id + '/meta'), s = st.map[id];
@@ -164,6 +183,12 @@ const Cloud = (() => {
     } catch (e) { if (status !== 'reconnect') setStatus('error', e.message); }
   }
 
+  // forget what this store synced and merge both ways: every project ends up on both sides (newer copy wins)
+  async function fullSync() {
+    try { await getToken(true); } catch (e) { App.toast(e.message, 6000); return; }
+    await ready; st.map = {}; st.lib = null; keep();
+    full = true; try { await sync(true); } finally { full = false; render(); }
+  }
   // ---------- top-bar button + panel ----------
   function setStatus(s, msg = '') { status = s; statusMsg = msg; const b = $('#cloudBtn'); if (b) paintBtn(b); }
   function paintBtn(b) {
@@ -180,13 +205,15 @@ const Cloud = (() => {
       : !st.email ? `<b>Your projects on every PC</b><p class="muted small">Sign in with Google and CircuitPilot keeps all your projects and My Library in your own Google Drive — in a hidden folder only CircuitPilot can see (it does not show among your files). On another PC, sign in and everything is there. CircuitPilot only asks for access to that folder: not your other files, not your e-mail beyond your address.</p><button id="cloudIn" class="primary">Sign in with Google</button>`
       : `<div class="cloudme">${st.picture ? `<img src="${esc(st.picture)}" alt="" referrerpolicy="no-referrer">` : ''}<div><b>${esc(st.name)}</b><div class="muted small">${esc(st.email)}</div></div></div>
          <p class="small ${status === 'error' || status === 'reconnect' ? 'bad' : 'muted'}">${esc(statusMsg || (st.last ? 'Last synced ' + new Date(st.last).toLocaleString() : 'Not synced yet'))}</p>
-         <p class="muted small">${Object.keys(st.map).length} projects in your Google Drive. Edits upload a few seconds after each save; other PCs get them when they open CircuitPilot or press Sync.</p>
-         <div class="row"><button id="cloudSync" class="primary">${status === 'reconnect' ? 'Reconnect and sync' : '↻ Sync now'}</button><button id="cloudOut">Sign out</button></div>`;
+         <p class="muted small">${Object.keys(st.map).length} projects in your Google Drive. Edits upload a few seconds after each save; other PCs get them when they open CircuitPilot or press Sync.${storeDir ? ` Projects on this PC: <code>${esc(storeDir)}</code>.` : ''}</p>
+         <div class="row"><button id="cloudSync" class="primary">${status === 'reconnect' ? 'Reconnect and sync' : '↻ Sync now'}</button><button id="cloudAll" title="Every project on this PC goes to your Google Drive and every project in Drive comes to this PC; where both have one, the newer copy wins">⇄ Make this PC and Drive the same</button><button id="cloudOut">Sign out</button></div>`;
     if ($('#cloudIn')) $('#cloudIn').onclick = () => signIn();
     if ($('#cloudSync')) $('#cloudSync').onclick = async () => { try { await getToken(true); await sync(true); } catch (e) { App.toast(e.message, 6000); } };
+    if ($('#cloudAll')) $('#cloudAll').onclick = fullSync;
     if ($('#cloudOut')) $('#cloudOut').onclick = signOut;
   }
-  function init() {
+  async function init() {
+    ready = pickStore(); await ready;
     const b = $('#cloudBtn'), p = $('#cloudPanel'); if (!b || !p) return;
     // no Google client ID in this copy (js/config.js / ⚙ Settings): the feature is not offered at all
     b.parentElement.classList.toggle('hidden', !clientId()); if (!clientId()) return;

@@ -1335,7 +1335,7 @@ const Pcb = (() => {
   // Defaults follow JLCPCB's standard 2-layer (1 oz) capabilities; verify current limits at jlcpcb.com/capabilities.
   // JLCPCB capabilities (1–2 layers, 1 oz, checked 2026-10-23): 0.1 / 0.1 mm track / space, vias down to 0.15 mm hole /
   // 0.25 mm diameter (extra cost), diameter ≥ hole + 0.1, plated through-hole ring ≥ 0.18 mm, copper ≥ 0.2 mm from the edge
-  const JLC_MIN = { minTraceWidth: 0.1, minClearance: 0.1, minViaDrill: 0.15, minViaDiameter: 0.25, minAnnularRing: 0.05, minPthRing: 0.18, minHoleToHole: 0.5, minEdgeClearance: 0.2, minHoleSize: 0.15, minHoleToTrack: 0.2, minPthToTrack: 0.28 };
+  const JLC_MIN = { minTraceWidth: 0.1, minClearance: 0.1, minViaDrill: 0.15, minViaDiameter: 0.25, minAnnularRing: 0.05, minPthRing: 0.18, minHoleToHole: 0.5, minEdgeClearance: 0.2, minHoleSize: 0.15, minHoleToTrack: 0.2, minPthToTrack: 0.28, minPadToPad: 0.15 };
   // JLCPCB via pricing: no extra charge with hole ≥ 0.3 mm and diameter ≥ 0.4 mm; on boards with more than 2 layers a 0.2 mm
   // hole is also free when the diameter is ≥ 0.45 mm. Smaller vias cost extra. Diameter ≥ hole + 0.1 mm (0.15 preferred).
   const costsExtra = (v, layers = rules().layers) => !((v.drill >= 0.3 - 1e-9 && v.d >= 0.4 - 1e-9) || (layers > 2 && v.drill >= 0.2 - 1e-9 && v.d >= 0.45 - 1e-9));
@@ -1393,7 +1393,7 @@ const Pcb = (() => {
     for (const [n, v] of Object.entries(R.netWidths)) if (+v < R.minTraceWidth) w.push(`Net ${n} width ${v} < fab minimum ${R.minTraceWidth} mm`);
     return w;
   }
-  const NUM_KEYS = ['traceWidth', 'powerTraceWidth', 'clearance', 'viaDiameter', 'viaDrill', 'edgeClearance', 'minTraceWidth', 'minClearance', 'minViaDrill', 'minViaDiameter', 'minAnnularRing', 'minPthRing', 'minHoleToHole', 'minEdgeClearance', 'minHoleSize', 'minHoleToTrack', 'minPthToTrack', 'padClearance', 'viaClearance', 'pourClearance', 'partGap'];
+  const NUM_KEYS = ['minPadToPad', 'traceWidth', 'powerTraceWidth', 'clearance', 'viaDiameter', 'viaDrill', 'edgeClearance', 'minTraceWidth', 'minClearance', 'minViaDrill', 'minViaDiameter', 'minAnnularRing', 'minPthRing', 'minHoleToHole', 'minEdgeClearance', 'minHoleSize', 'minHoleToTrack', 'minPthToTrack', 'padClearance', 'viaClearance', 'pourClearance', 'partGap'];
   // Merge a partial rule update into the project (preset first, then overrides).
   function setRules(u = {}) {
     let base = Model.S.rules || {};
@@ -2289,6 +2289,7 @@ const Pcb = (() => {
         let pc = cl, holeRule = false;
         if (A.what.startsWith('via') || B.what.startsWith('via')) pc = viaCl(R);
         else if ((A.what.startsWith('pad') && !B.what.startsWith('pad')) || (B.what.startsWith('pad') && !A.what.startsWith('pad'))) pc = padCl(R);
+        else if (A.what.startsWith('pad') && B.what.startsWith('pad') && !A.drill && !B.drill) pc = Math.max(cl, +R.minPadToPad || 0);   // SMD pad to SMD pad (JLCPCB 0.15 mm)
         for (const [X, Y] of [[A, B], [B, A]]) if (X.drill && Y.what.startsWith('trace')) {
           const ring = X.ring != null ? X.ring : 0, need = (X.what.startsWith('pad') ? (+R.minPthToTrack || 0) : (+R.minHoleToTrack || 0)) - ring;
           if (need > pc + 1e-9) { pc = +need.toFixed(3); holeRule = true; }
@@ -2301,6 +2302,11 @@ const Pcb = (() => {
           if (holeRule && d >= cl - 1e-3) {
             const H = A.what.startsWith('trace') ? B : A, T = H === A ? B : A, min = H.what.startsWith('pad') ? R.minPthToTrack : R.minHoleToTrack;
             add('hole-to-track', `${H.what} hole is ${(d + (H.ring || 0)).toFixed(3)} mm from ${T.what} (JLCPCB minimum ${min} mm hole to track)`, (A.x + B.x) / 2, (A.y + B.y) / 2, 'error');
+          }
+          else if (both && !A.drill && !B.drill && d > 0 && d < (+R.minPadToPad || 0) - 1e-3) {
+            // SMD pads of two different parts: placement makes the gap, so it is an error; inside one footprint (fine pitch) a warning
+            const refOf = q => q.what.slice(4).split('.')[0], own = refOf(A) === refOf(B);
+            add('pad-to-pad', `${A.what} and ${B.what} are ${d.toFixed(3)} mm apart (JLCPCB minimum ${R.minPadToPad} mm between SMD pads of different nets)${own ? ' — inside one footprint: check its pad size / pitch' : ' — move the parts apart'}`, (A.x + B.x) / 2, (A.y + B.y) / 2, own ? 'warning' : 'error');
           }
           else add(d <= 0 ? 'short' : 'clearance', `${d <= 0 ? 'Short' : 'Clearance ' + d.toFixed(3) + ' mm'} between ${A.what} and ${B.what} (rule ${pc})`, (A.x + B.x) / 2, (A.y + B.y) / 2,
             both ? 'warning' : (d < R.minClearance || d <= 0 ? 'error' : 'warning'));

@@ -258,6 +258,7 @@ const App = (() => {
     if (mode === 'pcb') {
       await filling();
       download(fname('-pcb.easyeda.json'), EasyEDA.exportPcb(), 'application/json');
+      setTimeout(() => download(fname('-RULES_EasyEDA-Pro.json'), EasyEDA.proRulesText(), 'application/json'), 700);   // the board's rules for EasyEDA Pro (Design → Design Rule → Import)
       { const rn = Pcb.easyedaRuleNote ? Pcb.easyedaRuleNote() : ''; if (rn) setTimeout(() => toast('⚠ ' + rn, 30000), 9000); }
       toast('EasyEDA PCB saved: footprints, tracks, vias, copper pours and the board outline. EasyEDA Pro: File → Import → EasyEDA (Standard) · Standard: File → Open → EasyEDA Source · the copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B) · EasyEDA Pro checks with its own rules: set the clearance to ' + Pcb.rules().clearance + ' mm (Design → Design Rule) or it reports gaps under 6 mil as errors' + pourWarn(), 20000);
       return;
@@ -268,7 +269,7 @@ const App = (() => {
     if (mode === 'project') { await filling(); try { pcb = EasyEDA.exportPcb(ids); } catch (e) { pcb = null; } }
     if (mode === 'project') {
       const base = (S.name || 'Project').replace(/[\\/:*?"<>|]+/g, '_');
-      const files = { [`SCH_${base}.json`]: sch }; if (pcb) files[`PCB_${base}.json`] = pcb;
+      const files = { [`SCH_${base}.json`]: sch }; if (pcb) { files[`PCB_${base}.json`] = pcb; files[`RULES_${base}_EasyEDA-Pro.json`] = EasyEDA.proRulesText(); }
       download(fname('-easyeda.zip'), makeZip(files));
     } else download(fname('-schematic.easyeda.json'), sch, 'application/json');
     const sz = t => (String(t || '').match(/(?:^|\D)(0201|0402|0603|0805|1206|1210|2512)(?!\d)/) || [])[1];
@@ -444,7 +445,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611190500');
+      worker = new Worker('js/route-worker.js?v=202611190600');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;

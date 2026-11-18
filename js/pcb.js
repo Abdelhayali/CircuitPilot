@@ -337,9 +337,9 @@ const Pcb = (() => {
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const i = y * W + x; if (ok[i] && shapeDist({ k: 'circ', c: [x * gStep, y * gStep], r: 0 }, sh) < r) ok[i] = 0; }
     };
     const L2 = R.layers === 1 ? ['F'] : ['F', 'B'];
-    for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net !== pr.net && padCu(q, L2).includes(pr.layer)) block(padShape(q), cl);
+    for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net !== pr.net && padCu(q, L2).includes(pr.layer)) { block(padShape(q), cl); if (q.drill && q.drill / 2 + pthHoleGap(R) > cl) block({ k: 'circ', c: [q.x, q.y], r: q.drill / 2 + pthHoleGap(R) - cl }, cl); }
     for (const t of S.pcb.traces) if (t.net !== pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) block({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, cl);
-    for (const v of S.pcb.vias) if (v.net !== pr.net) block({ k: 'circ', c: [v.x, v.y], r: v.d / 2 }, cl);
+    for (const v of S.pcb.vias) if (v.net !== pr.net) block({ k: 'circ', c: [v.x, v.y], r: Math.max(v.d / 2, (+v.drill || 0) / 2 + viaHoleGap(R) - cl) }, cl);
     for (const h of S.pcb.holes || []) block({ k: 'circ', c: [h.x, h.y], r: h.d / 2 }, cl);
     for (const k of pourKeepouts(pr.layer)) {
       const b = koBox(k), x0 = Math.max(0, Math.floor(b[0] / gStep) - 1), x1 = Math.min(W - 1, Math.ceil(b[2] / gStep) + 1), y0 = Math.max(0, Math.floor(b[1] / gStep) - 1), y1 = Math.min(H - 1, Math.ceil(b[3] / gStep) + 1);
@@ -508,9 +508,9 @@ const Pcb = (() => {
     polyTerm(boardPoly(), R.edgeClearance, 1);
     polyTerm(pp, -dl, 1);   // the trace lands on the pour outline itself
     for (const k of pourKeepouts(pr.layer)) polyTerm(k.pts, 0, -1);
-    for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net !== pr.net && padCu(q, L2).includes(pr.layer)) obstacle(padShape(q), cl);
+    for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net !== pr.net && padCu(q, L2).includes(pr.layer)) { obstacle(padShape(q), cl); if (q.drill && q.drill / 2 + pthHoleGap(R) > cl) obstacle({ k: 'circ', c: [q.x, q.y], r: q.drill / 2 + pthHoleGap(R) - cl }, cl); }
     for (const t of S.pcb.traces) if (t.net !== pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) obstacle({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, cl);
-    for (const v of S.pcb.vias) if (v.net !== pr.net) obstacle({ k: 'circ', c: [v.x, v.y], r: v.d / 2 }, cl);
+    for (const v of S.pcb.vias) if (v.net !== pr.net) obstacle({ k: 'circ', c: [v.x, v.y], r: Math.max(v.d / 2, (+v.drill || 0) / 2 + viaHoleGap(R) - cl) }, cl);
     for (const h of S.pcb.holes || []) obstacle({ k: 'circ', c: [h.x, h.y], r: h.d / 2 }, cl);
     // rule smdPadRelief: the pour's own SMD pads get a gap of cl all round, joined by 4 spokes (thermal relief), so each
     // pad is a solder spot of its own (on a milled board the pad shows; the iron does not have to heat the whole pour)
@@ -1363,6 +1363,9 @@ const Pcb = (() => {
   // ≥ minPthToTrack (0.28). As a copper gap: that minus the ring width — 0.125 mm for a 0.45 / 0.3 via
   // gaps per object kind: tracks to tracks = clearance; anything to a pad = padClearance; anything to a via = viaClearance;
   // copper pour to other copper = pourClearance (each at least clearance)
+  // drill-hole minimums for copper of another net (JLCPCB: via hole 0.2 mm, plated through-hole 0.28 mm) — tracks keep them,
+  // copper pours too: a pour that only keeps the copper clearance from a via ring comes about 0.18 mm from its hole
+  const viaHoleGap = R => +R.minHoleToTrack || 0, pthHoleGap = R => +R.minPthToTrack || 0;
   const padCl = R => Math.max(R.clearance, +R.padClearance || 0), viaCl = R => Math.max(R.clearance, +R.viaClearance || 0);
   const pourCl = (R, pr) => (pr && pr.clearance) || Math.max(R.clearance, +R.pourClearance || 0);
   const viaGap = (R, d = R.viaDiameter, drill = R.viaDrill) => Math.max(viaCl(R), (+R.minHoleToTrack || 0) - (d - drill) / 2);
@@ -2966,7 +2969,7 @@ const Pcb = (() => {
   function easyedaRuleNote() {
     const c = easyedaRuleCheck(); if (!c || !c.below) return '';
     return 'EasyEDA Pro will list spacing errors (' + c.below + ' spots here are closer than 0.152 mm to a pad or via; EasyEDA counts every track piece, so its number is larger): it checks its own default rule (0.152 mm / 6 mil), not this board\'s rules (' + c.project + ' mm next to pads and vias' + (c.smallest ? ', closest gap ' + c.smallest.toFixed(3) + ' mm' : '') + ' — fine for JLCPCB, which makes 0.1 mm). ' +
-      'To clear them in EasyEDA Pro: Design → Design Rule → Spacing → Safe Spacing, set the Default rule to 0.1 mm (4 mil), then run DRC again. ' +
+      'To clear them in EasyEDA Pro: Design → Design Rule → Import, choose the RULES_…_EasyEDA-Pro.json that comes with the EasyEDA export (this board\'s own rules), then run DRC again. ' +
       'Or route the board with the jlcpcb_free_min preset (0.16 mm next to pads and vias), which EasyEDA Pro accepts as it is.';
   }
 
@@ -2989,7 +2992,9 @@ const Pcb = (() => {
     const drawCopper = (A, b, layer, grow, net) => {
       for (const t of S.pcb.traces) if (t.layer === layer && (net === undefined || t.net !== net)) { b.push(A(`C,${f6(t.w + grow)}`) + '*'); b.push(X(...t.pts[0]) + 'D02*'); for (const q of t.pts.slice(1)) b.push(X(...q) + 'D01*'); }
       for (const p of pads) if (onLayer(p, layer) && (net === undefined || p.net !== net)) { b.push(A(padAp(p, grow)) + '*'); b.push(X(p.x, p.y) + 'D03*'); }
-      for (const v of S.pcb.vias) if (net === undefined || v.net !== net) { b.push(A(`C,${f6(v.d + grow)}`) + '*'); b.push(X(v.x, v.y) + 'D03*'); }
+      // clearing a pour (net given): around other nets' vias at least the via-hole minimum from the drill, as for tracks
+      for (const v of S.pcb.vias) if (net === undefined || v.net !== net) { b.push(A(`C,${f6(net === undefined ? v.d + grow : Math.max(v.d + grow, (+v.drill || 0) + 2 * viaHoleGap(R)))}`) + '*'); b.push(X(v.x, v.y) + 'D03*'); }
+      if (net !== undefined) for (const p of pads) if (p.drill && p.net !== net && onLayer(p, layer)) { b.push(A(`C,${f6(p.drill + 2 * pthHoleGap(R))}`) + '*'); b.push(X(p.x, p.y) + 'D03*'); }
       if (net !== undefined) for (const h of S.pcb.holes || []) { b.push(A(`C,${f6(h.d + grow)}`) + '*'); b.push(X(h.x, h.y) + 'D03*'); }
       for (const l of S.pcb.lines || []) if (l.layer === layer && l.pts.length > 1) { b.push(A(`C,${f6(l.w + grow)}`) + '*'); b.push(X(...l.pts[0]) + 'D02*'); for (const q of l.pts.slice(1)) b.push(X(...q) + 'D01*'); }
     };

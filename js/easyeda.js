@@ -224,13 +224,15 @@ const EasyEDA = (() => {
     // fill grid: 0.05 mm on small boards (the traced copper then needs only 0.04 mm extra margin), 0.1 mm on big ones
     const fineFill = S.board.w * S.board.h <= 2500, fg = fineFill ? 0.05 : 0.1, fm = fineFill ? 0.04 : 0.08, fills = [];
     exportPcb.warnings = [];
+    // the clearance EasyEDA refills a pour with: also the via-hole minimum (JLCPCB 0.2 mm from the drill, as for tracks)
+    const RR = Pcb.rules(), holeCl = Math.max(0, ...(S.pcb.vias || []).map(v => (+RR.minHoleToTrack || 0) - ((+v.d || 0) - (+v.drill || 0)) / 2 + 0.003));   // + 3 µm: EasyEDA keeps 0.01 of its 10 mil unit
     for (const p of S.pcb.pours || []) {
       const pts = Pcb.pourPoly(p); if (!pts || pts.length < 3 || !S.nets[p.net]) continue;
       // the fill as EasyEDA stores it: one path per piece of copper, its outer ring and holes as sub-paths of the same
       // string (a hole as a separate string would be drawn as copper)
       let fill = '[]';
       try { const fr = Pcb.pourFillRings(p, fg, fm); fills.push({ p, fr }); fill = JSON.stringify(fr.map(rings => [rings.map(rg => 'M' + rg.map(q => X(q[0]) + ',' + Y(q[1])).join(' ') + 'z').join(' ')])); } catch (e) { fill = '[]'; }
-      shapes.push(`COPPERAREA~${u(0.254)}~${cuL(p.layer)}~${clean(p.net)}~${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${u(Pcb.pourCl(Pcb.rules(), p))}~solid~${id()}~direct~none~${fill}~0`);
+      shapes.push(`COPPERAREA~${u(0.254)}~${cuL(p.layer)}~${clean(p.net)}~${pts.map(q => X(q[0]) + ' ' + Y(q[1])).join(' ')}~${u(Math.max(Pcb.pourCl(Pcb.rules(), p), holeCl))}~solid~${id()}~direct~none~${fill}~0`);
     }
     try { exportPcb.warnings = pourSplits(fills, idx); } catch (e) { }
     // free silkscreen text and the board name as silkscreen lines — the same strokes as the Gerber silkscreen. As TEXT
@@ -411,6 +413,50 @@ const EasyEDA = (() => {
     return { components: libs.filter(l => l.c).length, footprints: made, nets: Object.keys(nets).length, tracks: tracks.length, vias: vias.length, pours: S.pcb.pours.length, board_mm: [bw, bh], outline: loop ? (isRect ? 'rectangle' : 'polygon') : 'none (sized to the parts)', notes: log };
   }
   const isEasyEDA = j => { try { return !!unwrap(j); } catch (e) { return /EasyEDA schematic/.test(e.message) ? 'schematic' : false; } };
-  return { exportSchematic, exportPcb, importPcb, isEasyEDA, pathToPolys };
+  // EasyEDA Pro design rules (Design → Design Rule → Import) made from this board's own rules, so EasyEDA Pro checks what the
+  // board was routed with instead of its 6 mil defaults. Values are rounded DOWN to 0.001 mm (a gap exactly at the rule passes).
+  function proRules() {
+    const S = Model.S, R = Pcb.rules(), rd = v => Math.floor(v * 1000 + 1e-6) / 1000;
+    const cl = R.clearance, pc = Math.max(cl, +R.padClearance || 0), vc = Math.max(cl, +R.viaClearance || 0), zc = Math.max(cl, +R.pourClearance || 0);
+    const vias = S.pcb.vias || [], vd = Math.min(R.viaDiameter, ...vias.map(v => +v.d || R.viaDiameter)), vh = Math.min(R.viaDrill, ...vias.map(v => +v.drill || R.viaDrill));
+    const tw = Math.min(R.traceWidth, ...(S.pcb.traces || []).map(t => +t.w || R.traceWidth));
+    const holeCu = Math.min(+R.minHoleToTrack || 0.2, (vd - vh) / 2 + vc, 0.176);   // drill hole edge to copper of another net
+    const cols = ['Track', 'SMD Pad', 'TH Pad', 'SMD Test Point', 'TH Test Point', 'Via', 'Fill Region/Teardrop', 'Copper/Plane Zone', 'Slot Region', 'Line', 'Text/Image', 'Board Outline'];
+    const rows = cols.concat(['Hole']), PAD = /Pad|Test Point/, COPPER = new Set(['Track', 'SMD Pad', 'TH Pad', 'SMD Test Point', 'TH Test Point', 'Via', 'Fill Region/Teardrop', 'Line', 'Text/Image']);
+    const DEF = { slot: 0.152, slotTrack: 0.3, slotZone: 0.254, slotLine: 0.3, edgeSlot: 0.3, holeEdge: 0.176, holeSlot: 0.176 };
+    const val = (a, b) => {
+      if (a === 'Hole') return b === 'Board Outline' ? DEF.holeEdge : b === 'Slot Region' ? DEF.holeSlot : rd(holeCu);
+      if (a === 'Board Outline' || b === 'Board Outline') { const o = a === 'Board Outline' ? b : a; return o === 'Slot Region' ? DEF.edgeSlot : o === 'Board Outline' ? rd(R.edgeClearance) : rd(R.edgeClearance); }
+      if (a === 'Slot Region' || b === 'Slot Region') { const o = a === 'Slot Region' ? b : a; return o === 'Track' ? DEF.slotTrack : o === 'Line' ? DEF.slotLine : o === 'Copper/Plane Zone' ? DEF.slotZone : DEF.slot; }
+      if (a === 'Copper/Plane Zone' || b === 'Copper/Plane Zone') return rd(zc);
+      if (a === 'Via' || b === 'Via') return rd(vc);
+      const pa = PAD.test(a), pb = PAD.test(b);
+      if (pa !== pb) return rd(pc);   // a track / copper line next to a pad
+      return rd(cl);                  // track to track, pad to pad (footprints' own pad gaps)
+    };
+    const table = rows.map((r, i) => cols.slice(0, Math.min(i + 1, cols.length)).map(c => val(r, c)));
+    const safe = (name, isDefault, t) => ({ editName: name, unit: 'mm', isSetDefault: isDefault, column: cols, row: rows, status: 0, tables: { 1: { status: 1, content: t } }, isRule: true, categorayKey: 'Safe Spacing', redStar: false });
+    const twoOz = rows.map((r, i) => cols.slice(0, Math.min(i + 1, cols.length)).map(c => Math.max(val(r, c), r === 'Track' && c === 'Track' ? 0.203 : 0)));
+    const track = (name, isDefault, min) => ({ editName: name, unit: 'mm', isSetDefault: isDefault, form: { status: 1, data: { 1: { minValue: min, defaultValue: rd(R.traceWidth), maxValue: 2.54 } } }, isRule: true, categorayKey: 'Track', redStar: false });
+    const rule = (key, name, form) => ({ editName: name, unit: 'mm', isSetDefault: true, form, isRule: true, categorayKey: key, redStar: false });
+    const zone = { status: 1, data: { 1: { connectMode: 0, lineClearance: 0.254, lineWidth: 0.254, lineAngle: 90 } } };
+    return {
+      Spacing: { 'Safe Spacing': { copperThickness1oz: safe('copperThickness1oz', true, table), copperThickness2oz: safe('copperThickness2oz', false, twoOz) },
+        'Other Spacing': { otherClearance: rule('Other Spacing', 'otherClearance', { device2device: 0, thru2Smd: 0, hole2Hole: 0.3 }) } },
+      Physics: {
+        Track: { copperThickness1oz: track('copperThickness1oz', true, rd(tw)), copperThickness2oz: track('copperThickness2oz', false, Math.max(rd(tw), 0.203)) },
+        'Net Length Range': { netLength: rule('Net Length Range', 'netLength', { netLengthMin: 0, netLengthMax: 0 }) },
+        'Net Length Tolerance': { netLengthTolerance: rule('Net Length Tolerance', 'netLengthTolerance', { netLengthTolerance: 25.4 }) },
+        'Differential Pair': { differentialPair: rule('Differential Pair', 'differentialPair', { strokeWidthTables: { status: 1, data: { 1: { minValue: rd(tw), defaultValue: rd(R.traceWidth), maxValue: 2.54 } } }, diffPairSpacingTables: { status: 1, data: { 1: { minValue: rd(cl), defaultValue: Math.max(rd(cl), 0.15), maxValue: null } } }, differentailPairLenTolerMax: 0.254 }) },
+        'Blind/Buried Via': { blindVia: { editName: 'blindVia', isSetDefault: true, table: [], isRule: true, categorayKey: 'Blind/Buried Via', redStar: false } },
+        'Via Size': { viaSize: rule('Via Size', 'viaSize', { viaOuterdiameterMin: rd(vd), viaOuterdiameterMax: 10, viaOuterdiameterDefault: rd(R.viaDiameter), viaInnerdiameterMin: rd(vh), viaInnerdiameterMax: 6.3, viaInnerdiameterDefault: rd(R.viaDrill) }) },
+      },
+      Plane: { 'Plane Zone': { innerPlane: rule('Plane Zone', 'innerPlane', zone) }, 'Copper Zone': { copperRegion: rule('Copper Zone', 'copperRegion', { singleLayerPadModel: zone, multiLayerPadModel: zone, trackConnectModel: { status: 1, data: { 1: { trackConnectMode: 0 } } } }) } },
+      Expansion: { 'Paste Mask Expansion': { pasteMaskExpansion: rule('Paste Mask Expansion', 'pasteMaskExpansion', { padToplayerExpansion: 0, padBottomlayerExpansion: 0, testPointToplayerExpansion: -25.4, testPointBottomlayerExpansion: -25.4 }) },
+        'Solder Mask Expansion': { solderMaskExpansion: rule('Solder Mask Expansion', 'solderMaskExpansion', { padToplayerExpansion: 0.05, padBottomlayerExpansion: 0.05, viaToplayerExpansion: -25.4, viaBottomlayerExpansion: -25.4, testPointToplayerExpansion: 0.05, testPointBottomlayerExpansion: 0.05 }) } },
+    };
+  }
+  const proRulesText = () => JSON.stringify(proRules(), null, 2);
+  return { exportSchematic, exportPcb, importPcb, isEasyEDA, pathToPolys, proRules, proRulesText };
 })();
 if (typeof module !== 'undefined') module.exports = EasyEDA;

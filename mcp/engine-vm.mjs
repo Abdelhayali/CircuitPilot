@@ -52,8 +52,9 @@ export async function projectFiles(ctx, inc) {
     if (inc.has('easyeda')) {
       try {
         const sch = ctx.EasyEDA.exportSchematic({}), pcb = ctx.EasyEDA.exportPcb();
-        files[`easyeda/SCH_${base}.json`] = sch; files[`easyeda/PCB_${base}.json`] = pcb;
-        files[`easyeda/${base}-easyeda.zip`] = await zip({ [`SCH_${base}.json`]: sch, [`PCB_${base}.json`]: pcb });
+        const rules = ctx.EasyEDA.proRulesText();   // the board's rules for EasyEDA Pro (Design → Design Rule → Import)
+        files[`easyeda/SCH_${base}.json`] = sch; files[`easyeda/PCB_${base}.json`] = pcb; files[`easyeda/RULES_${base}_EasyEDA-Pro.json`] = rules;
+        files[`easyeda/${base}-easyeda.zip`] = await zip({ [`SCH_${base}.json`]: sch, [`PCB_${base}.json`]: pcb, [`RULES_${base}_EasyEDA-Pro.json`]: rules });
         const rn = Pcb.easyedaRuleNote ? Pcb.easyedaRuleNote() : ''; if (rn) files['easyeda/EASYEDA-DRC-NOTE.txt'] = rn + '\n';
       } catch (e) { skipped.push('EasyEDA: ' + e.message); }
     }

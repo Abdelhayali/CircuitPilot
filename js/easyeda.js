@@ -437,7 +437,7 @@ const EasyEDA = (() => {
     const table = rows.map((r, i) => cols.slice(0, Math.min(i + 1, cols.length)).map(c => val(r, c)));
     const safe = (name, isDefault, t) => ({ editName: name, unit: 'mm', isSetDefault: isDefault, column: cols, row: rows, status: 0, tables: { 1: { status: 1, content: t } }, isRule: true, categorayKey: 'Safe Spacing', redStar: false });
     const twoOz = rows.map((r, i) => cols.slice(0, Math.min(i + 1, cols.length)).map(c => Math.max(val(r, c), r === 'Track' && c === 'Track' ? 0.203 : 0)));
-    const track = (name, isDefault, min) => ({ editName: name, unit: 'mm', isSetDefault: isDefault, form: { status: 1, data: { 1: { minValue: min, defaultValue: rd(R.traceWidth), maxValue: 2.54 } } }, isRule: true, categorayKey: 'Track', redStar: false });
+    const track = (name, isDefault, min) => ({ editName: name, unit: 'mm', isSetDefault: isDefault, form: { status: 1, data: { 1: { minValue: min, defaultValue: Math.max(rd(R.traceWidth), min), maxValue: 2.54 } } }, isRule: true, categorayKey: 'Track', redStar: false });
     const rule = (key, name, form) => ({ editName: name, unit: 'mm', isSetDefault: true, form, isRule: true, categorayKey: key, redStar: false });
     const zone = { status: 1, data: { 1: { connectMode: 0, lineClearance: 0.254, lineWidth: 0.254, lineAngle: 90 } } };
     return {

@@ -53,6 +53,9 @@ export async function projectFiles(ctx, inc) {
       try {
         const sch = ctx.EasyEDA.exportSchematic({}), pcb = ctx.EasyEDA.exportPcb();
         const rules = ctx.EasyEDA.proRulesText();   // the board's rules for EasyEDA Pro (Design → Design Rule → Import)
+        // several PCBs: the open one and its sheets (EasyEDA keeps one PCB per project)
+        const L = Pcb.pcbList ? Pcb.pcbList() : [], open = L.length > 1 ? L[Pcb.activePcb()] : null;
+        if (open) files['easyeda/WHICH-PCB.txt'] = 'This EasyEDA project is PCB ' + (open.index + 1) + ' "' + open.name + '" with schematic sheet ' + open.sheets.join(', ') + '. The design has ' + L.length + ' PCBs: open another one (select_pcb) and export again for it.\n';
         files[`easyeda/SCH_${base}.json`] = sch; files[`easyeda/PCB_${base}.json`] = pcb; files[`easyeda/RULES_${base}_EasyEDA-Pro.json`] = rules;
         files[`easyeda/${base}-easyeda.zip`] = await zip({ [`SCH_${base}.json`]: sch, [`PCB_${base}.json`]: pcb, [`RULES_${base}_EasyEDA-Pro.json`]: rules });
         const rn = Pcb.easyedaRuleNote ? Pcb.easyedaRuleNote() : ''; if (rn) files['easyeda/EASYEDA-DRC-NOTE.txt'] = rn + '\n';

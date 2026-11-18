@@ -264,23 +264,26 @@ const App = (() => {
       return;
     }
     const { ids, failed } = await linkEasyEDA(), S = Model.S;
+    // several PCBs: the open one and its sheets (EasyEDA keeps one PCB per project)
+    const multi = Pcb.pcbList && Pcb.pcbList().length > 1, open = multi ? Pcb.pcbList()[Pcb.activePcb()] : null, comps = S.components.filter(c => EasyEDA.onOpenPcb(c));
+    const pcbTag = open ? ' (PCB ' + (open.index + 1) + ' ' + open.name + ', sheet ' + open.sheets.join(', ') + ')' : '';
     const sch = EasyEDA.exportSchematic(ids);
     let pcb = null;
     if (mode === 'project') { await filling(); try { pcb = EasyEDA.exportPcb(ids); } catch (e) { pcb = null; } }
     if (mode === 'project') {
-      const base = (S.name || 'Project').replace(/[\\/:*?"<>|]+/g, '_');
+      const base = ((S.name || 'Project') + (open ? '_' + open.name : '')).replace(/[\\/:*?"<>|]+/g, '_');
       const files = { [`SCH_${base}.json`]: sch }; if (pcb) { files[`PCB_${base}.json`] = pcb; files[`RULES_${base}_EasyEDA-Pro.json`] = EasyEDA.proRulesText(); }
-      download(fname('-easyeda.zip'), makeZip(files));
+      download(fname((open ? '-' + open.name.replace(/[^\w.-]+/g, '_') : '') + '-easyeda.zip'), makeZip(files));
     } else download(fname('-schematic.easyeda.json'), sch, 'application/json');
     const sz = t => (String(t || '').match(/(?:^|\D)(0201|0402|0603|0805|1206|1210|2512)(?!\d)/) || [])[1];
-    const noCode = S.components.filter(c => !Model.lcscOf(c)).map(c => c.ref);
-    const edited = S.components.filter(c => { const k = Model.lcscOf(c), l = c.type === 'part' ? S.lib[c.lcsc] : null, a = sz(l && l.footprint && l.footprint.name), b = sz(ids[k] && ids[k].package); return a && b && a !== b; }).map(c => c.ref);
+    const noCode = comps.filter(c => !Model.lcscOf(c)).map(c => c.ref);
+    const edited = comps.filter(c => { const k = Model.lcscOf(c), l = c.type === 'part' ? S.lib[c.lcsc] : null, a = sz(l && l.footprint && l.footprint.name), b = sz(ids[k] && ids[k].package); return a && b && a !== b; }).map(c => c.ref);
     const notes = [noCode.length && `no LCSC part (choose the footprint in EasyEDA): ${noCode.join(', ')}`,
       failed.length && `not found in the EasyEDA library: ${failed.join(', ')}`,
       edited.length && `footprint edited here, EasyEDA uses the part's own footprint: ${edited.join(', ')}`].filter(Boolean);
     if (mode === 'project' && !pcb) notes.unshift('no PCB yet, so only the schematic is in the zip');
     if (pcb && Pcb.easyedaRuleNote) { const rn = Pcb.easyedaRuleNote(); if (rn) notes.push('⚠ ' + rn); }
-    toast(`EasyEDA ${mode === 'project' ? 'project (schematic' + (pcb ? ' + PCB)' : ')') : 'schematic'} saved — ${S.components.length - noCode.length - failed.length}/${S.components.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Pro: File → Import → EasyEDA (Standard) and choose the file · Standard: File → Open → EasyEDA Source${pcb && (Model.S.pcb.pours || []).length ? ' · The copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B)' : ''}${pcb ? ` · EasyEDA Pro checks with its own rules: set the clearance to ${Pcb.rules().clearance} mm (Design → Design Rule) or it reports gaps under 6 mil as errors` : ''}${pcb ? pourWarn() : ''}`, 20000);
+    toast(`EasyEDA ${mode === 'project' ? 'project (schematic' + (pcb ? ' + PCB)' : ')') : 'schematic'} saved${pcbTag} — ${comps.length - noCode.length - failed.filter(r => comps.some(c => c.ref === r)).length}/${comps.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Pro: File → Import → EasyEDA (Standard) and choose the file · Standard: File → Open → EasyEDA Source${pcb && (Model.S.pcb.pours || []).length ? ' · The copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B)' : ''}${pcb ? ` · EasyEDA Pro checks with its own rules: set the clearance to ${Pcb.rules().clearance} mm (Design → Design Rule) or it reports gaps under 6 mil as errors` : ''}${pcb ? pourWarn() : ''}`, 20000);
   }
 
   // ---------- screenshots for the AI (view_design): schematic, 2D PCB, 3D board, enclosure ----------
@@ -445,7 +448,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611190700');
+      worker = new Worker('js/route-worker.js?v=202611191100');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;

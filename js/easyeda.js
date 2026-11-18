@@ -71,15 +71,18 @@ const EasyEDA = (() => {
   // library symbol and footprint (otherwise "Footprints Verification: can't find this footprint on the server").
   // EasyEDA Pro pairs a schematic symbol with its PCB footprint by the LIB id, so both exports derive it from the designator
   const libId = ref => 'ggeL' + String(ref).replace(/[^A-Za-z0-9]/g, '_');
+  // a project with several PCBs: only the open PCB's sheets (an EasyEDA project has one PCB)
+  const multiPcb = () => typeof Pcb !== 'undefined' && Pcb.pcbList && Pcb.pcbList().length > 1;
+  const onOpenPcb = c => !multiPcb() || Pcb.onActivePcb(c);
   function exportSchematic(ids = {}) {
-    const S = Model.S, sheetOf = c => (Model.sheetOf ? Model.sheetOf(c) : 0);
-    const used = [...new Set(S.components.map(sheetOf))].sort((a, b) => a - b);
-    if (used.length <= 1) return exportSchematicRaw(ids, null, S.name || 'Sheet_1');
+    const S = Model.S, sheetOf = c => (Model.sheetOf ? Model.sheetOf(c) : 0), comps = S.components.filter(onOpenPcb);
+    const used = [...new Set(comps.map(sheetOf))].sort((a, b) => a - b);
+    if (used.length <= 1) return exportSchematicRaw(ids, multiPcb() ? comps : null, (multiPcb() && used.length ? (S.sheets || [])[used[0]] && S.sheets[used[0]].name : '') || S.name || 'Sheet_1');
     const names = (S.sheets || []).map(s => s && s.name);
     const pages = used.map((i, k) => {
       const title = String(names[i] || `Sheet_${k + 1}`).replace(/[~^`]/g, '-');
       // the page data both at the top of the sheet entry and in dataStr: readers take either form
-      const doc = JSON.parse(exportSchematicRaw(ids, S.components.filter(c => sheetOf(c) === i), title));
+      const doc = JSON.parse(exportSchematicRaw(ids, comps.filter(c => sheetOf(c) === i), title));
       return Object.assign({ docType: '1', title, description: '' }, doc, { dataStr: doc });
     });
     return JSON.stringify({ editorVersion: '6.5.22', docType: '5', title: S.name || 'Schematic', description: 'Exported by CircuitPilot', colors: {}, schematics: pages });
@@ -459,6 +462,6 @@ const EasyEDA = (() => {
     };
   }
   const proRulesText = () => JSON.stringify(proRules(), null, 2);
-  return { exportSchematic, exportPcb, importPcb, isEasyEDA, pathToPolys, proRules, proRulesText };
+  return { onOpenPcb, exportSchematic, exportPcb, importPcb, isEasyEDA, pathToPolys, proRules, proRulesText };
 })();
 if (typeof module !== 'undefined') module.exports = EasyEDA;

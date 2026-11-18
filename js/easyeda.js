@@ -441,10 +441,12 @@ const EasyEDA = (() => {
     const rule = (key, name, form) => ({ editName: name, unit: 'mm', isSetDefault: true, form, isRule: true, categorayKey: key, redStar: false });
     const zone = { status: 1, data: { 1: { connectMode: 0, lineClearance: 0.254, lineWidth: 0.254, lineAngle: 90 } } };
     return {
-      Spacing: { 'Safe Spacing': { copperThickness1oz: safe('copperThickness1oz', true, table), copperThickness2oz: safe('copperThickness2oz', false, twoOz) },
+      // 'Default' is the rule set a board imported from EasyEDA Standard checks against; a native EasyEDA Pro board starts with
+      // copperThickness1oz / 2oz. Both carry this board's values, and 'Default' is the one in force.
+      Spacing: { 'Safe Spacing': { Default: safe('Default', true, table), copperThickness1oz: safe('copperThickness1oz', false, table), copperThickness2oz: safe('copperThickness2oz', false, twoOz) },
         'Other Spacing': { otherClearance: rule('Other Spacing', 'otherClearance', { device2device: 0, thru2Smd: 0, hole2Hole: 0.3 }) } },
       Physics: {
-        Track: { copperThickness1oz: track('copperThickness1oz', true, rd(tw)), copperThickness2oz: track('copperThickness2oz', false, Math.max(rd(tw), 0.203)) },
+        Track: { Default: track('Default', true, rd(tw)), copperThickness1oz: track('copperThickness1oz', false, rd(tw)), copperThickness2oz: track('copperThickness2oz', false, Math.max(rd(tw), 0.203)) },
         'Net Length Range': { netLength: rule('Net Length Range', 'netLength', { netLengthMin: 0, netLengthMax: 0 }) },
         'Net Length Tolerance': { netLengthTolerance: rule('Net Length Tolerance', 'netLengthTolerance', { netLengthTolerance: 25.4 }) },
         'Differential Pair': { differentialPair: rule('Differential Pair', 'differentialPair', { strokeWidthTables: { status: 1, data: { 1: { minValue: rd(tw), defaultValue: rd(R.traceWidth), maxValue: 2.54 } } }, diffPairSpacingTables: { status: 1, data: { 1: { minValue: rd(cl), defaultValue: Math.max(rd(cl), 0.15), maxValue: null } } }, differentailPairLenTolerMax: 0.254 }) },

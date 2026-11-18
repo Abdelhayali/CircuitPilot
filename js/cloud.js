@@ -6,7 +6,11 @@
 // both sides changed, the newer one wins — the desktop app keeps the other as a project version, Drive keeps revisions.
 const Cloud = (() => {
   const $ = s => document.querySelector(s);
-  const SCOPE = 'https://www.googleapis.com/auth/drive.appdata openid email profile';
+  // drive.file: only files this app creates (the visible project list CircuitPilot-projects.csv); the projects themselves
+  // stay in the hidden app-data folder
+  const SCOPE = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file openid email profile';
+  const FILE = 'https://www.googleapis.com/auth/drive.file', INDEX_NAME = 'CircuitPilot-projects.csv';
+  let fileOk = false;
   const API = 'https://www.googleapis.com/drive/v3/files', UP = 'https://www.googleapis.com/upload/drive/v3/files';
   const clientId = () => { try { return localStorage.getItem('cp.googleClientId') || (window.CP_CONFIG && CP_CONFIG.googleClientId) || ''; } catch (e) { return (window.CP_CONFIG && CP_CONFIG.googleClientId) || ''; } };
   // what was synced last: per project the Drive file, its modifiedTime and the local `updated` it matched
@@ -53,6 +57,7 @@ const Cloud = (() => {
           if (r.error) return rej(new Error(r.error_description || r.error));
           // Google lets the user untick single permissions: without Drive the token is useless here
           if (!google.accounts.oauth2.hasGrantedAllScopes(r, DRIVE)) { token = null; askConsent = true; setStatus('reconnect', NEED); return rej(new Error(NEED)); }
+          fileOk = google.accounts.oauth2.hasGrantedAllScopes(r, FILE);
           askConsent = false; token = r.access_token; tokenExp = Date.now() + (+r.expires_in || 3600) * 1000; res(token);
         },
         error_callback: e => rej(new Error(e && e.type === 'popup_closed' ? 'Sign-in window closed' : e && e.type === 'popup_failed_to_open' ? 'The browser blocked the Google window — allow pop-ups for this site' : (e && e.message) || 'Sign-in failed')),
@@ -158,7 +163,7 @@ const Cloud = (() => {
             }
             if (!lc && !rc) continue;
             // both changed (or first sync on this PC): the newer one wins
-            const remoteWins = rc && (!lc || +a.updated > p.updated);
+            const remoteWins = rc && (!lc || (+a.edited || +a.updated || 0) > (+p.edited || +p.updated || 0));
             if (remoteWins) { const d = await download(f.id); const r = await local('PUT', '/api/projects/' + id, d); st.map[id] = { rid: f.id, rmod: f.modifiedTime, lup: r.updated }; down++; }
             else { const r = await upload(f.id, `cp-project-${id}.json`, await local('GET', '/api/projects/' + id), props(p)); st.map[id] = { rid: r.id, rmod: r.modifiedTime, lup: p.updated }; up++; }
           } else if (f) {
@@ -171,6 +176,8 @@ const Cloud = (() => {
         } catch (e) { if (/not connected|expired/.test(e.message)) throw e; console.warn('sync', id, e); }
         keep();
       }
+      // the project list in My Drive (opens in Excel / Google Sheets): what every PC that syncs now holds
+      try { await writeIndex(); } catch (e) { if (/not connected|expired/.test(e.message)) throw e; console.warn('project list', e); }
       // My Library: the union of both sides (parts are added far more often than removed)
       try {
         const mineLib = await local('GET', '/api/library'), theirs = libFile ? await download(libFile.id) : [];
@@ -186,6 +193,30 @@ const Cloud = (() => {
       if (down || del) App.toast(`Google Drive: ${down ? down + ' project' + (down > 1 ? 's' : '') + ' updated from your other devices' : ''}${down && del ? ', ' : ''}${del ? del + ' deleted' : ''}`, 6000);
     } catch (e) { if (status !== 'reconnect') setStatus('error', e.message); }
     render();
+  }
+  // CircuitPilot-projects.csv in My Drive: name, project id, created, last modified (UTC), parts — rewritten when it changes
+  const isoUtc = t => t > 0 ? new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 19) : '';
+  function indexText(list) {
+    const cell = v => { const s = String(v == null ? '' : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const rows = list.slice().sort((a, b) => (+(b.edited || b.updated) || 0) - (+(a.edited || a.updated) || 0)).map(p => [p.name || 'Untitled', p.id, isoUtc(+p.created), isoUtc(+(p.edited || p.updated)), p.parts || 0]);
+    return '\ufeff' + [['Name', 'Project ID', 'Created (UTC)', 'Last modified (UTC)', 'Parts']].concat(rows).map(r => r.map(cell).join(',')).join('\r\n') + '\r\n';
+  }
+  async function writeIndex() {
+    if (!fileOk) return;
+    const text = indexText(await local('GET', '/api/projects'));
+    if (st.indexText === text && st.indexId) return;
+    let id = st.indexId;
+    if (!id) {   // this app's own file in My Drive (drive.file only sees files the app made)
+      const q = new URLSearchParams({ q: "name='" + INDEX_NAME + "' and trashed=false", spaces: 'drive', fields: 'files(id)' });
+      const r = await g('GET', API + '?' + q); id = r.files && r.files[0] && r.files[0].id;
+    }
+    if (id) await g('PATCH', UP + '/' + id + '?uploadType=media&fields=id', text, { 'content-type': 'text/csv; charset=UTF-8' });
+    else {
+      const b = 'cp' + Math.random().toString(36).slice(2), meta = { name: INDEX_NAME, mimeType: 'text/csv', description: 'CircuitPilot: every project kept in this Google account (name, created, last modified). Written by CircuitPilot on each sync.' };
+      const body = '--' + b + '\r\ncontent-type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(meta) + '\r\n--' + b + '\r\ncontent-type: text/csv; charset=UTF-8\r\n\r\n' + text + '\r\n--' + b + '--';
+      id = (await g('POST', UP + '?uploadType=multipart&fields=id', body, { 'content-type': 'multipart/related; boundary=' + b })).id;
+    }
+    st.indexId = id; st.indexText = text; keep();
   }
   // after an autosave: upload this project (a few seconds later, so a burst of edits is one upload)
   function saved(id) {
@@ -227,6 +258,7 @@ const Cloud = (() => {
       : `<div class="cloudme">${st.picture ? `<img src="${esc(st.picture)}" alt="" referrerpolicy="no-referrer">` : ''}<div><b>${esc(st.name)}</b><div class="muted small">${esc(st.email)}</div></div></div>
          <p class="small ${status === 'error' || status === 'reconnect' ? 'bad' : 'muted'}">${esc(statusMsg || (st.last ? 'Last synced ' + new Date(st.last).toLocaleString() : 'Not synced yet'))}</p>
          <p class="muted small">${Object.keys(st.map).length} projects in your Google Drive. Edits upload a few seconds after each save; other PCs get them when they open CircuitPilot or press Sync.${storeDir ? ` Projects on this PC: <code>${esc(storeDir)}</code>.` : ''}</p>
+         <p class="muted small">${st.indexId ? `Project list (name, created, last modified): <a href="https://drive.google.com/file/d/${esc(st.indexId)}/view" target="_blank" rel="noopener">${INDEX_NAME}</a> in your Google Drive — opens in Excel or Google Sheets.` : fileOk ? `The project list ${INDEX_NAME} appears in your Google Drive after the next sync.` : `For the project list ${INDEX_NAME} in your Google Drive, press Sync now and allow CircuitPilot to create its own files in your Drive.`}</p>
          <div class="row"><button id="cloudSync" class="primary">${status === 'reconnect' ? 'Reconnect and sync' : '↻ Sync now'}</button><button id="cloudAll" title="Every project on this PC goes to your Google Drive and every project in Drive comes to this PC; where both have one, the newer copy wins">⇄ Make this PC and Drive the same</button><button id="cloudOut">Sign out</button></div>`;
     if ($('#cloudIn')) $('#cloudIn').onclick = () => signIn();
     if ($('#cloudSync')) $('#cloudSync').onclick = async () => { try { await getToken(true); await sync(true); } catch (e) { App.toast(e.message, 6000); } };

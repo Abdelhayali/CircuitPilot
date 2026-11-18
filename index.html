@@ -287,7 +287,7 @@
 <div id="projModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>Projects</h2><button id="projClose">✕</button></div>
-    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><button id="projNew" class="primary">＋ New project</button><button id="projImportAll" title="Every project (.json) in a folder and its subfolders">Import folder…</button><button id="projImport" title="A CircuitPilot project (.json), an EasyEDA Pro project (.epro / .epro2: File → Save As / Export → Project) with schematic and PCB, or an EasyEDA Standard PCB (File → Export → EasyEDA Source)">Import (.json, EasyEDA Pro / Std)</button></div>
+    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><select id="projSort" title="Order of the list"><option value="edited-desc">Last modified ↓ (newest first)</option><option value="edited-asc">Last modified ↑ (oldest first)</option><option value="created-desc">Created ↓ (newest first)</option><option value="created-asc">Created ↑ (oldest first)</option><option value="name-asc">Name A → Z</option><option value="name-desc">Name Z → A</option></select><button id="projNew" class="primary">＋ New project</button><button id="projImportAll" title="Every project (.json) in a folder and its subfolders">Import folder…</button><button id="projImport" title="A CircuitPilot project (.json), an EasyEDA Pro project (.epro / .epro2: File → Save As / Export → Project) with schematic and PCB, or an EasyEDA Standard PCB (File → Export → EasyEDA Source)">Import (.json, EasyEDA Pro / Std)</button></div>
     <div id="projList"></div>
   </div>
 </div>
@@ -537,8 +537,8 @@
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202610301800"></script>
-<script src="js/projects.js?v=202611180100"></script>
-<script src="js/cloud.js?v=202611180100"></script>
+<script src="js/projects.js?v=202611190200"></script>
+<script src="js/cloud.js?v=202611190200"></script>
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
 <script src="js/github.js?v=202611190100"></script>

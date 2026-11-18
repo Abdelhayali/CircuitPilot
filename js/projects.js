@@ -121,7 +121,10 @@ const Projects = (() => {
     list.innerHTML = '<div class="muted">Loading…</div>';
     try {
       const ps = await api('GET', '/api/projects'), q = $('#projSearch').value.toLowerCase();
-      const rows = ps.filter(p => !q || (p.name || '').toLowerCase().includes(q)).sort((a, b) => editedOf(b) - editedOf(a));
+      const sort = $('#projSort') ? $('#projSort').value : 'edited-desc', created = p => +p.created || 0, nm = p => String(p.name || 'Untitled');
+      const order = { 'edited-desc': (a, b) => editedOf(b) - editedOf(a), 'edited-asc': (a, b) => editedOf(a) - editedOf(b), 'created-desc': (a, b) => created(b) - created(a), 'created-asc': (a, b) => created(a) - created(b),
+        'name-asc': (a, b) => nm(a).localeCompare(nm(b), undefined, { numeric: true, sensitivity: 'base' }), 'name-desc': (a, b) => nm(b).localeCompare(nm(a), undefined, { numeric: true, sensitivity: 'base' }) }[sort] || ((a, b) => editedOf(b) - editedOf(a));
+      const rows = ps.filter(p => !q || (p.name || '').toLowerCase().includes(q)).sort(order);
       const dups = dupGroups(ps), dupOf = new Map(); for (const a of dups) a.forEach((p, i) => dupOf.set(p.id, i ? 'older' : 'newest'));
       const dupNote = dups.length ? `<div class="row-h" style="margin-bottom:8px"><span class="small bad">${dups.length} design${dups.length > 1 ? 's are' : ' is'} here more than once (same name).</span><button data-a="merge" title="Keep the most recently edited copy of each, remove the older ones">Merge duplicates</button></div>` : '';
       const signed = typeof Cloud !== 'undefined' && Cloud.email;
@@ -130,7 +133,7 @@ const Projects = (() => {
         : `<div class="muted small" style="margin-bottom:8px">${window.CPStatic && CPStatic.mode === 'static' ? 'Web version: projects are saved in this browser. ' : ''}<a href="#" id="projCloud">☁ Sign in with Google</a> to keep every project in your Google Drive and open them on any PC.</div>`;
       list.innerHTML = note + dupNote + (rows.length ? rows.map(p => `<div class="proj${p.id === Model.S.id ? ' cur' : ''}" data-id="${esc(p.id)}">
         <div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}${p.id === Model.S.id ? ' <span class="badge basic">open</span>' : ''}${dupOf.get(p.id) === 'newest' ? ' <span class="badge basic" title="This name is here more than once: this copy was edited last">newest copy</span>' : dupOf.get(p.id) === 'older' ? ' <span class="badge" title="This name is here more than once: another copy was edited later">older copy</span>' : ''}</div>
-        <div class="muted small">${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · last edited <b title="${esc(new Date(editedOf(p) * 1000).toLocaleString())}">${stamp(editedOf(p))}</b> (${ago(editedOf(p))})</div></div>
+        <div class="muted small">${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · last edited <b title="${esc(new Date(editedOf(p) * 1000).toLocaleString())}">${stamp(editedOf(p))}</b> (${ago(editedOf(p))})${p.created ? ` · created ${stamp(+p.created)}` : ''}</div></div>
         <div class="pact"><button data-a="open" class="primary">Open</button><button data-a="dup" title="Duplicate">⧉</button>${hasHistory ? '<button data-a="hist" title="Earlier versions (restore)">⟲</button>' : ''}<button data-a="ren" title="Rename">✎</button><button data-a="del" class="danger" title="Delete">🗑</button></div></div>`).join('')
         : '<div class="muted">No projects yet.</div>') + (hasHistory ? '<div class="proj"><div class="pinfo muted small">Every project keeps earlier versions (⟲). </div><div class="pact"><button data-a="deleted">Deleted projects…</button></div></div>' : '');
       if ($('#projCloud')) $('#projCloud').onclick = e => { e.preventDefault(); Cloud.signIn().then(render); };
@@ -253,6 +256,7 @@ const Projects = (() => {
     } else setStatus('local');
     $('#projClose').onclick = close;
     $('#projSearch').oninput = render;
+    if ($('#projSort')) { try { $('#projSort').value = localStorage.getItem('cp.projSort') || 'edited-desc'; } catch (e) { } $('#projSort').onchange = () => { try { localStorage.setItem('cp.projSort', $('#projSort').value); } catch (e) { } render(); }; }
     $('#projNew').onclick = () => { const n = prompt('Project name', 'New project'); if (n !== null) create(n.trim() || 'Untitled'); };
     $('#projImport').onclick = () => $('#fileIn').click();
     $('#projList').onclick = async e => {

@@ -2948,6 +2948,26 @@ const Pcb = (() => {
   function removeLine(i) { const a = Model.S.pcb.lines || []; if (!a[i]) throw new Error('No free line #' + i); a.splice(i, 1); return { removed: i }; }
   const strokeLines = (A, b, X, layer) => { for (const l of Model.S.pcb.lines || []) if (l.layer === layer && l.pts.length > 1) { b.push(A('C,' + l.w.toFixed(6)) + '*'); b.push(X(...l.pts[0]) + 'D02*'); for (const q of l.pts.slice(1)) b.push(X(...q) + 'D01*'); } };
 
+  // ---------- EasyEDA Pro's own rule ----------
+  // EasyEDA Pro checks an imported board against ITS default rule (6 mil = 0.1524 mm between all copper), not the rules
+  // in the file. A board routed tighter (e.g. jlcpcb_tight, 0.1 mm — fine for JLCPCB) then shows spacing "errors" there.
+  const EASYEDA_CL = 0.1524;
+  function easyedaRuleCheck() {
+    const S = Model.S, R = rules(); if (!placed().length || !S.board.w) return null;
+    if (Math.min(R.clearance, padCl(R), viaCl(R)) >= EASYEDA_CL - 1e-6) return { below: 0, rule: EASYEDA_CL, project: R.clearance };
+    const keep = S.rules;
+    S.rules = Object.assign({}, keep, { clearance: Math.max(R.clearance, EASYEDA_CL), padClearance: Math.max(padCl(R), EASYEDA_CL), viaClearance: Math.max(viaCl(R), EASYEDA_CL) });
+    let d; try { d = drc(); } finally { S.rules = keep; }
+    const v = d.violations.filter(x => x.type === 'clearance'), gaps = v.map(x => +((/Clearance ([\d.]+) mm/.exec(x.msg) || [])[1])).filter(x => isFinite(x));
+    return { below: v.length, rule: EASYEDA_CL, project: R.clearance, smallest: gaps.length ? Math.min(...gaps) : null };
+  }
+  function easyedaRuleNote() {
+    const c = easyedaRuleCheck(); if (!c || !c.below) return '';
+    return 'EasyEDA Pro will list spacing errors (' + c.below + ' spots here are closer than 0.152 mm; EasyEDA counts every track piece, so its number is larger): it checks its own default rule (0.152 mm / 6 mil), not this board\'s rules (' + c.project + ' mm' + (c.smallest ? ', closest gap ' + c.smallest.toFixed(3) + ' mm' : '') + ' — fine for JLCPCB, which makes 0.1 mm). ' +
+      'To clear them in EasyEDA Pro: Design → Design Rule → Spacing → Safe Spacing, set the Default rule to 0.1 mm (4 mil), then run DRC again. ' +
+      'Or route the board with the jlcpcb_free_min preset (0.16 mm next to pads and vias), which EasyEDA Pro accepts as it is.';
+  }
+
   function gerbers() {
     const S = Model.S, idx = Model.pinIndex(), cs = placed(), Hb = S.board.h;
     if (!cs.length || !S.board.w) throw new Error('No PCB to export');
@@ -3338,7 +3358,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { addLine, updateLine, removeLine, LINE_LAYERS, pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { easyedaRuleCheck, easyedaRuleNote, addLine, updateLine, removeLine, LINE_LAYERS, pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

@@ -258,6 +258,7 @@ const App = (() => {
     if (mode === 'pcb') {
       await filling();
       download(fname('-pcb.easyeda.json'), EasyEDA.exportPcb(), 'application/json');
+      { const rn = Pcb.easyedaRuleNote ? Pcb.easyedaRuleNote() : ''; if (rn) setTimeout(() => toast('⚠ ' + rn, 30000), 9000); }
       toast('EasyEDA PCB saved: footprints, tracks, vias, copper pours and the board outline. EasyEDA Pro: File → Import → EasyEDA (Standard) · Standard: File → Open → EasyEDA Source · the copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B) · EasyEDA Pro checks with its own rules: set the clearance to ' + Pcb.rules().clearance + ' mm (Design → Design Rule) or it reports gaps under 6 mil as errors' + pourWarn(), 20000);
       return;
     }
@@ -277,6 +278,7 @@ const App = (() => {
       failed.length && `not found in the EasyEDA library: ${failed.join(', ')}`,
       edited.length && `footprint edited here, EasyEDA uses the part's own footprint: ${edited.join(', ')}`].filter(Boolean);
     if (mode === 'project' && !pcb) notes.unshift('no PCB yet, so only the schematic is in the zip');
+    if (pcb && Pcb.easyedaRuleNote) { const rn = Pcb.easyedaRuleNote(); if (rn) notes.push('⚠ ' + rn); }
     toast(`EasyEDA ${mode === 'project' ? 'project (schematic' + (pcb ? ' + PCB)' : ')') : 'schematic'} saved — ${S.components.length - noCode.length - failed.length}/${S.components.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Pro: File → Import → EasyEDA (Standard) and choose the file · Standard: File → Open → EasyEDA Source${pcb && (Model.S.pcb.pours || []).length ? ' · The copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B)' : ''}${pcb ? ` · EasyEDA Pro checks with its own rules: set the clearance to ${Pcb.rules().clearance} mm (Design → Design Rule) or it reports gaps under 6 mil as errors` : ''}${pcb ? pourWarn() : ''}`, 20000);
   }
 
@@ -442,7 +444,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611180200');
+      worker = new Worker('js/route-worker.js?v=202611190400');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;

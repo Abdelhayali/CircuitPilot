@@ -96,7 +96,19 @@ const Projects = (() => {
   const ago = t => { const s = Date.now() / 1000 - t; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + ' min ago' : s < 86400 ? Math.floor(s / 3600) + ' h ago' : new Date(t * 1000).toLocaleDateString(); };
   // the same design under two ids (copies from another PC, GitHub or Google Drive): matched by name; generic names never
   const nameKey = n => { const k = String(n || '').trim().toLowerCase().replace(/\s+/g, ' '); return !k || /^(untitled|new project|design|project)( \d+)?$/.test(k) ? '' : k; };
-  const editedOf = p => +(p.edited || p.updated) || 0;
+  // Created / last modified as the shared project lists give them (CircuitPilot-projects.csv on GitHub and in Google
+  // Drive, kept after each sync), so every PC shows the same dates: created = the earliest the lists know (the first PC
+  // that saved the design), last modified = the latest (an edit here after the last sync is newer than the list).
+  const TIMES = 'cp.projIndexTimes';
+  let IT = {};
+  function setIndexTimes(source, rows) { try { const all = JSON.parse(localStorage.getItem(TIMES) || '{}'); all[source] = { at: Date.now() / 1000, rows }; localStorage.setItem(TIMES, JSON.stringify(all)); } catch (e) { } }
+  function indexTimes() {
+    const out = {};
+    try { const all = JSON.parse(localStorage.getItem(TIMES) || '{}'); for (const [src, v] of Object.entries(all)) for (const [pid, t] of Object.entries(v.rows || {})) { const o = out[pid] || (out[pid] = { created: 0, edited: 0, src: [] }); if (+t.created > 0 && (!o.created || +t.created < o.created)) o.created = +t.created; if (+t.edited > o.edited) o.edited = +t.edited; o.src.push(src); } } catch (e) { }
+    return out;
+  }
+  const editedOf = p => Math.max(+(p.edited || p.updated) || 0, (IT[p.id] && IT[p.id].edited) || 0);
+  const createdOf = p => (IT[p.id] && IT[p.id].created) || +p.created || 0;
   const stamp = t => { const d = new Date(t * 1000); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
   function dupGroups(ps) {
     const g = new Map(); for (const p of ps) { const k = nameKey(p.name); if (!k) continue; if (!g.has(k)) g.set(k, []); g.get(k).push(p); }
@@ -116,12 +128,13 @@ const Projects = (() => {
   }
   async function openQuiet(id) { const d = await api('GET', '/api/projects/' + id); Model.load(d); lastSaved = Model.snapshot(); serverUpdated = (await api('GET', '/api/projects/' + id + '/meta')).updated; remember(); Model.emit('meta'); }
   async function render() {
+    IT = indexTimes();
     const list = $('#projList');
     if (!online) { list.innerHTML = '<div class="muted">Project storage needs the app to run with <code>server.py</code>. You can still download / import project files.</div>'; return; }
     list.innerHTML = '<div class="muted">Loading…</div>';
     try {
       const ps = await api('GET', '/api/projects'), q = $('#projSearch').value.toLowerCase();
-      const sort = $('#projSort') ? $('#projSort').value : 'edited-desc', created = p => +p.created || 0, nm = p => String(p.name || 'Untitled');
+      const sort = $('#projSort') ? $('#projSort').value : 'edited-desc', created = createdOf, nm = p => String(p.name || 'Untitled');
       const order = { 'edited-desc': (a, b) => editedOf(b) - editedOf(a), 'edited-asc': (a, b) => editedOf(a) - editedOf(b), 'created-desc': (a, b) => created(b) - created(a), 'created-asc': (a, b) => created(a) - created(b),
         'name-asc': (a, b) => nm(a).localeCompare(nm(b), undefined, { numeric: true, sensitivity: 'base' }), 'name-desc': (a, b) => nm(b).localeCompare(nm(a), undefined, { numeric: true, sensitivity: 'base' }) }[sort] || ((a, b) => editedOf(b) - editedOf(a));
       const rows = ps.filter(p => !q || (p.name || '').toLowerCase().includes(q)).sort(order);
@@ -133,7 +146,7 @@ const Projects = (() => {
         : `<div class="muted small" style="margin-bottom:8px">${window.CPStatic && CPStatic.mode === 'static' ? 'Web version: projects are saved in this browser. ' : ''}<a href="#" id="projCloud">☁ Sign in with Google</a> to keep every project in your Google Drive and open them on any PC.</div>`;
       list.innerHTML = note + dupNote + (rows.length ? rows.map(p => `<div class="proj${p.id === Model.S.id ? ' cur' : ''}" data-id="${esc(p.id)}">
         <div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}${p.id === Model.S.id ? ' <span class="badge basic">open</span>' : ''}${dupOf.get(p.id) === 'newest' ? ' <span class="badge basic" title="This name is here more than once: this copy was edited last">newest copy</span>' : dupOf.get(p.id) === 'older' ? ' <span class="badge" title="This name is here more than once: another copy was edited later">older copy</span>' : ''}</div>
-        <div class="muted small">${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · last edited <b title="${esc(new Date(editedOf(p) * 1000).toLocaleString())}">${stamp(editedOf(p))}</b> (${ago(editedOf(p))})${p.created ? ` · created ${stamp(+p.created)}` : ''}</div></div>
+        <div class="muted small">${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · last edited <b title="${esc(new Date(editedOf(p) * 1000).toLocaleString())}">${stamp(editedOf(p))}</b> (${ago(editedOf(p))})${createdOf(p) ? ` · created ${stamp(createdOf(p))}` : ''}${IT[p.id] ? ` <span class="muted" title="Dates from the project list ${esc(IT[p.id].src.join(' and '))} (the same on every PC that syncs)">⇅</span>` : ''}</div></div>
         <div class="pact"><button data-a="open" class="primary">Open</button><button data-a="dup" title="Duplicate">⧉</button>${hasHistory ? '<button data-a="hist" title="Earlier versions (restore)">⟲</button>' : ''}<button data-a="ren" title="Rename">✎</button><button data-a="del" class="danger" title="Delete">🗑</button></div></div>`).join('')
         : '<div class="muted">No projects yet.</div>') + (hasHistory ? '<div class="proj"><div class="pinfo muted small">Every project keeps earlier versions (⟲). </div><div class="pact"><button data-a="deleted">Deleted projects…</button></div></div>' : '');
       if ($('#projCloud')) $('#projCloud').onclick = e => { e.preventDefault(); Cloud.signIn().then(render); };
@@ -284,5 +297,5 @@ const Projects = (() => {
       } catch (err) { App.toast(err.message); }
     };
   }
-  return { init, show, close, saveNow, saveAs, create, nameKey, openId: open, pause: v => { paused = !!v; if (paused) clearTimeout(timer); }, get online() { return online; }, get myLib() { return myLib; }, loadLibrary, savePart, deletePart, markLoaded: () => { lastSaved = ''; } };
+  return { init, show, close, saveNow, saveAs, create, nameKey, setIndexTimes, openId: open, pause: v => { paused = !!v; if (paused) clearTimeout(timer); }, get online() { return online; }, get myLib() { return myLib; }, loadLibrary, savePart, deletePart, markLoaded: () => { lastSaved = ''; } };
 })();

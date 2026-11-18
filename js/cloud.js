@@ -171,13 +171,16 @@ const Cloud = (() => {
             if (s) { await setProps(f.id, Object.assign({}, a, { deleted: '1' })); delete st.map[id]; del++; continue; }   // deleted here since the last sync
             const d = await download(f.id); const r = await local('PUT', '/api/projects/' + id, d); st.map[id] = { rid: f.id, rmod: f.modifiedTime, lup: r.updated }; down++;
           } else if (p) {
-            const r = await upload(null, `cp-project-${id}.json`, await local('GET', '/api/projects/' + id), props(p)); st.map[id] = { rid: r.id, rmod: r.modifiedTime, lup: p.updated }; up++;
+            const r = await upload(null, `cp-project-${id}.json`, await local('GET', '/api/projects/' + id), props(p, { created: String(p.created || 0) })); st.map[id] = { rid: r.id, rmod: r.modifiedTime, lup: p.updated }; up++;
           }
         } catch (e) { if (/not connected|expired/.test(e.message)) throw e; console.warn('sync', id, e); }
         keep();
       }
+      // the dates: created = the one Drive keeps for the project (the PC that first uploaded it), else this PC's
+      const createdAt = new Map(); for (const [pid, f] of byPid) { const c = +((f.appProperties || {}).created) || 0; if (c) createdAt.set(pid, c); }
+      try { const times = {}; for (const p of await local('GET', '/api/projects')) times[p.id] = { created: createdAt.get(p.id) || +p.created || 0, edited: +(p.edited || p.updated) || 0 }; if (typeof Projects !== 'undefined' && Projects.setIndexTimes) Projects.setIndexTimes('in Google Drive', times); } catch (e) { }
       // the project list in My Drive (opens in Excel / Google Sheets): what every PC that syncs now holds
-      try { await writeIndex(); } catch (e) { if (/not connected|expired/.test(e.message)) throw e; console.warn('project list', e); }
+      try { await writeIndex(createdAt); } catch (e) { if (/not connected|expired/.test(e.message)) throw e; console.warn('project list', e); }
       // My Library: the union of both sides (parts are added far more often than removed)
       try {
         const mineLib = await local('GET', '/api/library'), theirs = libFile ? await download(libFile.id) : [];
@@ -196,14 +199,14 @@ const Cloud = (() => {
   }
   // CircuitPilot-projects.csv in My Drive: name, project id, created, last modified (UTC), parts — rewritten when it changes
   const isoUtc = t => t > 0 ? new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 19) : '';
-  function indexText(list) {
+  function indexText(list, createdAt = new Map()) {
     const cell = v => { const s = String(v == null ? '' : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    const rows = list.slice().sort((a, b) => (+(b.edited || b.updated) || 0) - (+(a.edited || a.updated) || 0)).map(p => [p.name || 'Untitled', p.id, isoUtc(+p.created), isoUtc(+(p.edited || p.updated)), p.parts || 0]);
+    const rows = list.slice().sort((a, b) => (+(b.edited || b.updated) || 0) - (+(a.edited || a.updated) || 0)).map(p => [p.name || 'Untitled', p.id, isoUtc(createdAt.get(p.id) || +p.created), isoUtc(+(p.edited || p.updated)), p.parts || 0]);
     return '\ufeff' + [['Name', 'Project ID', 'Created (UTC)', 'Last modified (UTC)', 'Parts']].concat(rows).map(r => r.map(cell).join(',')).join('\r\n') + '\r\n';
   }
-  async function writeIndex() {
+  async function writeIndex(createdAt) {
     if (!fileOk) return;
-    const text = indexText(await local('GET', '/api/projects'));
+    const text = indexText(await local('GET', '/api/projects'), createdAt);
     if (st.indexText === text && st.indexId) return;
     let id = st.indexId;
     if (!id) {   // this app's own file in My Drive (drive.file only sees files the app made)

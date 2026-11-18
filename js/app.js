@@ -1320,14 +1320,15 @@ const App = (() => {
     const tOf = p => +(p.edited || p.updated) || 0, fileName = n => (Exports.slug ? Exports.slug(n) : 'design') + '.circuit.json';
     const newFolder = n => { const b = GitHub.slug(n, 'design'); let f = b, i = 2; while (folders.has(f)) f = b + '-' + i++; folders.add(f); return f; };
     let reopen = '';
+    const times = {};   // the dates of the list for every design here (the Projects list shows these)
     for (const { p, r } of pairs) {
       const empty = !p.parts && !p.pcb;
-      if (r && Math.abs(tOf(p) - (r.edited || 0)) <= 1) { rep.same++; map[p.id] = r.folder; continue; }
+      if (r && Math.abs(tOf(p) - (r.edited || 0)) <= 1) { rep.same++; map[p.id] = r.folder; times[p.id] = { created: r.created || 0, edited: r.edited || 0 }; continue; }
       if (r && (r.edited || 0) > tOf(p)) {          // newer on GitHub: down
         say('Downloading ' + r.folder + '…');
         const d = JSON.parse(await GitHub.readBlob(repo, snap.files.get(jsonOf(r.folder)))); d.id = p.id;
         await putProject(p.id, d); map[p.id] = r.folder; synced[r.folder] = { sha: snap.files.get(jsonOf(r.folder)), local: (await localHash(p.id)) || '' };
-        rep.down.push(d.name || r.folder); if (p.id === open) reopen = p.id; continue;
+        rep.down.push(d.name || r.folder); times[p.id] = { created: r.created || 0, edited: r.edited || 0 }; if (p.id === open) reopen = p.id; continue;
       }
       if (!r && empty) { rep.skipped.push(p.name || 'Untitled'); continue; }   // empty designs are not uploaded
       // newer here, or not on GitHub yet: up (the project file, as it is stored here)
@@ -1337,6 +1338,7 @@ const App = (() => {
       const row = r || (index.push({ folder, created: +p.created || 0 }), index[index.length - 1]);
       Object.assign(row, { name: p.name || folder, id: p.id, created: row.created || +p.created || 0, edited: tOf(p), parts: p.parts || 0, sha: await GitHub.gitSha(text) });
       synced[folder] = { sha: row.sha, local: (await localHash(p.id)) || '' };
+      times[p.id] = { created: row.created || 0, edited: row.edited || 0 };
       rep.up.push(p.name || folder);
     }
     // on GitHub only: down (keeps its project id unless another design here uses it)
@@ -1350,10 +1352,12 @@ const App = (() => {
       if (pid) await putProject(pid, d);
       else { delete d.id; const res = await (await fetch('/api/projects/', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(d) })).json(); pid = res.id; }
       ids.add(pid); map[pid] = r.folder; synced[r.folder] = { sha: snap.files.get(jsonOf(r.folder)), local: (await localHash(pid)) || '' };
+      times[pid] = { created: r.created || 0, edited: r.edited || 0 };
       rep.down.push(d.name || r.folder);
     }
     try { localStorage.setItem('cp.github.folders', JSON.stringify(map)); } catch (e) { }
     ghSetSynced(synced);
+    if (Projects.setIndexTimes) Projects.setIndexTimes('on GitHub (' + repo + ')', times);
     // the uploads and the index in one commit (the index also when only rows were filled in from the files)
     const csv = GitHub.indexCsv(index);
     if (Object.keys(files).length || snap.files.get(GitHub.INDEX) !== await GitHub.gitSha(csv)) {

@@ -166,6 +166,7 @@ const Pcb = (() => {
     for (const h of P.holes || []) { h.x = +(h.x + dx).toFixed(3); h.y = +(h.y + dy).toFixed(3); }
     for (const k of P.keepouts || []) k.pts = k.pts.map(mv);
     for (const t of P.texts || []) { t.x = +(+t.x + dx).toFixed(3); t.y = +(+t.y + dy).toFixed(3); }
+    for (const l of P.lines || []) l.pts = l.pts.map(mv);
     if (P.boardLabel && P.boardLabel.x != null) { P.boardLabel.x = +(P.boardLabel.x + dx).toFixed(3); P.boardLabel.y = +(P.boardLabel.y + dy).toFixed(3); }
   }
   // the outline of a part's body for "is it on the board": a round single-pad part (electrode, round test pad) is the circle
@@ -2237,6 +2238,7 @@ const Pcb = (() => {
       }
     }
     (S.pcb.holes || []).forEach((h, i) => objs.push({ s: { k: 'circ', c: [h.x, h.y], r: h.d / 2 }, net: '~hole' + i, layers: ['F', 'B'], what: `mounting hole ${i + 1}`, drill: h.d, ring: 0, x: h.x, y: h.y }));
+    (S.pcb.lines || []).forEach((l, i) => { if (l.layer !== 'F' && l.layer !== 'B') return; for (let k = 1; k < l.pts.length; k++) { const a = l.pts[k - 1], b = l.pts[k]; objs.push({ s: { k: 'seg', a, b, r: l.w / 2 }, net: '~line' + i, layers: [l.layer], what: `free copper line ${i + 1}`, x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 }); } });
     const boxes = objs.map(o => bboxOf(o.s));
     // Trace copper that lies inside a pad of the same net adds no copper: measure only the part outside own pads.
     const padsByNet = {};
@@ -2923,6 +2925,29 @@ const Pcb = (() => {
   function silkInfo() {
     return ['F', 'B'].flatMap(side => silkLabels(side).map(l => { const [x, y] = labelCentre(l); return Object.assign({ kind: l.kind, side: side === 'F' ? 'top' : 'bottom', text: l.text, x, y, size: l.h, rotation: l.rot || 0, auto: l.auto }, l.kind === 'part' ? { ref: l.ref } : {}, l.kind === 'text' ? { index: l.i } : {}, l.overPads ? { covers_pads: true } : {}); }));
   }
+  // ---------- free lines drawn by hand on one layer: copper (no net), silkscreen or solder mask opening ----------
+  // S.pcb.lines = [{ layer: 'F' | 'B' | 'FS' | 'BS' | 'FM' | 'BM', w, pts: [[x, y], …] }] (mm, board coordinates)
+  const LINE_LAYERS = { F: 'top copper', B: 'bottom copper', FS: 'top silkscreen', BS: 'bottom silkscreen', FM: 'top solder mask (opening)', BM: 'bottom solder mask (opening)' };
+  const LINE_ALIAS = { top_copper: 'F', bottom_copper: 'B', top_silk: 'FS', top_silkscreen: 'FS', bottom_silk: 'BS', bottom_silkscreen: 'BS', top_mask: 'FM', bottom_mask: 'BM', toplayer: 'F', bottomlayer: 'B', topsilklayer: 'FS', bottomsilklayer: 'BS', topsoldermasklayer: 'FM', bottomsoldermasklayer: 'BM' };
+  const lineLayer = v => { const k = String(v == null ? '' : v).trim(); if (LINE_LAYERS[k.toUpperCase()]) return k.toUpperCase(); const a = LINE_ALIAS[k.toLowerCase().replace(/[\s-]+/g, '_')] || LINE_ALIAS[k.toLowerCase().replace(/[\s_-]+/g, '')]; if (a) return a; throw new Error('A free line goes on ' + Object.entries(LINE_LAYERS).map(([id, n]) => id + ' (' + n + ')').join(', ')); };
+  const lineWidthDefault = layer => layer === 'F' || layer === 'B' ? Math.max(0.2, rules().traceWidth || 0.25) : layer === 'FM' || layer === 'BM' ? 0.3 : 0.15;
+  function addLine(o = {}) {
+    const layer = lineLayer(o.layer), pts = (o.points || o.pts || []).map(q => [+(+q[0]).toFixed(3), +(+q[1]).toFixed(3)]).filter((q, i, a) => !i || q[0] !== a[i - 1][0] || q[1] !== a[i - 1][1]);
+    if (pts.length < 2 || pts.some(q => !isFinite(q[0]) || !isFinite(q[1]))) throw new Error('A free line needs at least 2 points [[x, y], …] (mm)');
+    const w = o.width == null ? lineWidthDefault(layer) : +o.width;
+    if (!(w >= 0.08 && w <= 10)) throw new Error('Line width must be 0.08 … 10 mm');
+    const P = Model.S.pcb; P.lines = (P.lines || []).concat([{ layer, w: +w.toFixed(3), pts }]);
+    return { index: P.lines.length - 1, layer, layer_name: LINE_LAYERS[layer], width: +w.toFixed(3), points: pts.length };
+  }
+  function updateLine(i, o = {}) {
+    const l = (Model.S.pcb.lines || [])[i]; if (!l) throw new Error('No free line #' + i);
+    if (o.layer != null) l.layer = lineLayer(o.layer);
+    if (o.width != null) { const w = +o.width; if (!(w >= 0.08 && w <= 10)) throw new Error('Line width must be 0.08 … 10 mm'); l.w = +w.toFixed(3); }
+    return { index: i, layer: l.layer, width: l.w };
+  }
+  function removeLine(i) { const a = Model.S.pcb.lines || []; if (!a[i]) throw new Error('No free line #' + i); a.splice(i, 1); return { removed: i }; }
+  const strokeLines = (A, b, X, layer) => { for (const l of Model.S.pcb.lines || []) if (l.layer === layer && l.pts.length > 1) { b.push(A('C,' + l.w.toFixed(6)) + '*'); b.push(X(...l.pts[0]) + 'D02*'); for (const q of l.pts.slice(1)) b.push(X(...q) + 'D01*'); } };
+
   function gerbers() {
     const S = Model.S, idx = Model.pinIndex(), cs = placed(), Hb = S.board.h;
     if (!cs.length || !S.board.w) throw new Error('No PCB to export');
@@ -2944,6 +2969,7 @@ const Pcb = (() => {
       for (const p of pads) if (onLayer(p, layer) && (net === undefined || p.net !== net)) { b.push(A(padAp(p, grow)) + '*'); b.push(X(p.x, p.y) + 'D03*'); }
       for (const v of S.pcb.vias) if (net === undefined || v.net !== net) { b.push(A(`C,${f6(v.d + grow)}`) + '*'); b.push(X(v.x, v.y) + 'D03*'); }
       if (net !== undefined) for (const h of S.pcb.holes || []) { b.push(A(`C,${f6(h.d + grow)}`) + '*'); b.push(X(h.x, h.y) + 'D03*'); }
+      for (const l of S.pcb.lines || []) if (l.layer === layer && l.pts.length > 1) { b.push(A(`C,${f6(l.w + grow)}`) + '*'); b.push(X(...l.pts[0]) + 'D02*'); for (const q of l.pts.slice(1)) b.push(X(...q) + 'D01*'); }
     };
     const outline = boardPoly();
     const copper = (layer, func) => file(func, (A, b) => {
@@ -2965,7 +2991,7 @@ const Pcb = (() => {
       }
       drawCopper(A, b, layer, 0);
     });
-    const mask = (layer, func) => file(func, (A, b) => { for (const p of pads) if (onLayer(p, layer)) { b.push(A(padAp(p, 0.1)) + '*'); b.push(X(p.x, p.y) + 'D03*'); } });
+    const mask = (layer, func) => file(func, (A, b) => { for (const p of pads) if (onLayer(p, layer)) { b.push(A(padAp(p, 0.1)) + '*'); b.push(X(p.x, p.y) + 'D03*'); } strokeLines(A, b, X, layer + 'M'); });
     const paste = (layer, func) => file(func, (A, b) => { for (const p of pads) if (!p.drill && (p.layer || 'F') === layer) { b.push(A(padAp(p)) + '*'); b.push(X(p.x, p.y) + 'D03*'); } });
     const rectPath = (b, x0, y0, x1, y1) => { b.push(X(x0, y0) + 'D02*'); b.push(X(x1, y0) + 'D01*'); b.push(X(x1, y1) + 'D01*'); b.push(X(x0, y1) + 'D01*'); b.push(X(x0, y0) + 'D01*'); };
     const silk = side => (A, b) => {
@@ -2973,6 +2999,7 @@ const Pcb = (() => {
       b.push(A('C,0.500000') + '*'); for (const c of cs) if ((isBottom(c) ? 'B' : 'F') === side) { const d = pin1Dot(c); if (d) b.push(X(d.x, d.y) + 'D03*'); }
       // part references and the board name, as strokes
       for (const l of silkLabels(side)) { b.push(A(`C,${f6(l.w)}`) + '*'); for (const pl of l.lines) { b.push(X(...pl[0]) + 'D02*'); for (const q of (pl.length > 1 ? pl.slice(1) : pl)) b.push(X(...q) + 'D01*'); } }
+      strokeLines(A, b, X, side + 'S');   // free lines drawn on the silkscreen
     };
     const files = {
       'board-F_Cu.gtl': copper('F', 'Copper,L1,Top'),
@@ -2994,7 +3021,7 @@ const Pcb = (() => {
     // a 1-layer board has no bottom copper: its bottom files would only be empty (and confusing on the order)
     if (rules().layers === 1) {
       for (const f of ['board-B_Cu.gbl', 'board-B_Mask.gbs', 'board-B_Paste.gbp']) delete files[f];
-      if (!placed().some(c => isBottom(c)) && !(S.pcb.texts || []).some(t => t.side === 'B')) delete files['board-B_Silkscreen.gbo'];
+      if (!placed().some(c => isBottom(c)) && !(S.pcb.texts || []).some(t => t.side === 'B') && !(S.pcb.lines || []).some(l => l.layer === 'BS')) delete files['board-B_Silkscreen.gbo'];
     }
     const holes = [...pads.filter(p => p.drill).map(p => ({ x: p.x, y: p.y, d: p.drill })), ...S.pcb.vias.map(v => ({ x: v.x, y: v.y, d: v.drill }))];
     const tools = [...new Set(holes.map(h => h.d.toFixed(3)))];
@@ -3311,7 +3338,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { addLine, updateLine, removeLine, LINE_LAYERS, pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

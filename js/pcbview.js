@@ -25,6 +25,7 @@ const PcbView = (() => {
     { id: 'arc', key: 'A', name: 'Arc track', icon: '<path d="M4 19A15 15 0 0 1 20 5" fill="none" stroke-width="2.4"/>' },
     { id: 'pour', key: 'E', name: 'Copper area (pour)', icon: '<path d="M4 6l7-3 9 4-2 12-12 1z" stroke-width="1.6" opacity="0.85"/>' },
     { id: 'keepout', key: 'K', name: 'Keep-out area on the active layer — top or bottom (T / B) — no tracks / vias / copper pour inside: click corners, click the first corner to close', icon: '<path d="M4 4h16v16H4z" fill="none" stroke-width="2" stroke-dasharray="3 2"/><path d="M8 8l8 8M16 8l-8 8" stroke-width="2"/>' },
+    { id: 'line', key: 'D', name: 'Free line on the selected layer — click a layer name in Layers (top / bottom copper, silkscreen or solder mask), then click points; double-click, Enter or right-click finishes, Esc cancels, Backspace removes the last point', icon: '<path d="M3 18l5-9 5 6 4-9 4 5" fill="none" stroke-width="2.2"/>' },
     { id: 'text', key: 'T', name: 'Text on the silkscreen (click to place on the active side)', icon: '<path d="M5 5h14M12 5v14M9 19h6" fill="none" stroke-width="2.4"/>' },
     { id: 'measure', key: 'M', name: 'Measure', icon: '<path d="M3 16l13-13 5 5-13 13z" fill="none" stroke-width="1.8"/><path d="M7 12l2 2M10 9l2 2M13 6l2 2" stroke-width="1.6"/>' },
   ];
@@ -45,7 +46,7 @@ const PcbView = (() => {
     Model.S.pcb.traces.forEach((t, i) => { if (v.net && t.net && t.net !== v.net) return; for (const k of [0, t.pts.length - 1]) if (Math.hypot(t.pts[k][0] - v.x, t.pts[k][1] - v.y) < 1e-3) out.push([i, k]); });
     return out;
   }
-  const LNAME = { F: 'TopLayer', B: 'BottomLayer' };
+  const LNAME = { F: 'TopLayer', B: 'BottomLayer', FS: 'TopSilkLayer', BS: 'BottomSilkLayer', FM: 'TopSolderMaskLayer', BM: 'BottomSolderMaskLayer' };
 
   let svg, world, grid, vp, overlay, boxEl, cache = { pads: [] };
   const $ = s => document.querySelector(s);
@@ -84,7 +85,8 @@ const PcbView = (() => {
       const row = e.target.closest('[data-l]'); if (!row) return; const id = row.dataset.l;
       if (e.target.closest('.leye')) { ui.layers[id].on = !ui.layers[id].on; persist(); }
       else if (e.target.closest('.lsw')) return; // colour picker
-      else if (LAYERS.find(l => l.id === id).copper) { ui.active = id; ui.layers[id].on = true; if (ui.route) switchLayer(id); }
+      else if (LAYERS.find(l => l.id === id).copper) { ui.active = id; ui.drawLayer = id; ui.layers[id].on = true; if (ui.route) switchLayer(id); }
+      else if (['FS', 'BS', 'FM', 'BM'].includes(id)) { ui.drawLayer = id; ui.layers[id].on = true; if (ui.tool !== 'line') App.toast(LNAME[id] + ' selected for drawing: use the line tool (D)'); }
       renderLayers(); render(); syncBar();
     };
     $('#layerRows').oninput = e => { const row = e.target.closest('[data-l]'); if (row && e.target.type === 'color') { ui.layers[row.dataset.l].color = e.target.value; persist(); renderLayers(); render(); } };
@@ -94,17 +96,21 @@ const PcbView = (() => {
     if (svg.getBoundingClientRect().width < 900 || window.innerWidth < 1200) { $('#layerPanel').classList.add('collapsed'); overlay.querySelector('.ltitle').textContent = '▸ Layers'; }
   }
   function renderLayers() {
-    $('#layerRows').innerHTML = LAYERS.map(l => `<div class="lrow${ui.active === l.id ? ' act' : ''}${ui.layers[l.id].on ? '' : ' off'}" data-l="${l.id}" title="${l.copper ? 'Click to make active (T / B)' : ''}">
-      <span class="lact">${ui.active === l.id ? '✎' : ''}</span>
+    const actL = ui.tool === 'line' ? lineLayer() : ui.active;
+    $('#layerRows').innerHTML = LAYERS.map(l => `<div class="lrow${actL === l.id ? ' act' : ''}${ui.layers[l.id].on ? '' : ' off'}" data-l="${l.id}" title="${l.copper ? 'Click to make active (T / B)' : ''}">
+      <span class="lact">${actL === l.id ? '✎' : ''}</span>
       <label class="lsw" style="background:${ui.layers[l.id].color}"><input type="color" value="${ui.layers[l.id].color}"></label>
       <span class="lname">${l.name}</span><span class="leye" title="Show / hide">${ui.layers[l.id].on ? '👁' : '—'}</span></div>`).join('');
     $('#ldim').checked = ui.dim;
   }
   function setVisible(on) { overlay && overlay.classList.toggle('hidden', !on); }
+  const lineLayer = () => ['F', 'B', 'FS', 'BS', 'FM', 'BM'].includes(ui.drawLayer) ? ui.drawLayer : ui.active;
   function setTool(t) {
     if (ui.route && t !== 'track') finishRoute();
     ui.tool = t; ui.measure = null; ui.arc = null; ui.poly = null;
     overlay && overlay.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+    if (overlay) renderLayers();
+    if (t === 'line') App.toast('Free line on ' + LNAME[lineLayer()] + ' — click a layer name in Layers to draw on another one', 4000);
     if (svg) svg.style.cursor = t === 'select' ? 'default' : 'crosshair';
     render(); coord();
   }
@@ -300,8 +306,16 @@ const PcbView = (() => {
     const pts = arcPoints(A.a, A.b, m), w = curWidth(A.net);
     Model.mutate(() => Model.S.pcb.traces.push({ net: A.net, layer: A.layer, w, pts, manual: true, arc: true }));
   }
+  function finishLine(P) {
+    if (!P || P.pts.length < 2) { renderLive(); return; }
+    try {
+      const r = Model.mutate(() => Pcb.addLine({ layer: lineLayer(), points: P.pts, width: ui.lineW || undefined }));
+      ui.sel = null; ui.multi = new Set(); ui.hlNet = null; ui.item = { k: 'ln', i: r.index }; ui.onSelect(null); render();
+    } catch (e) { App.toast(e.message, 6000); renderLive(); }
+  }
   function closePoly() {
-    const P = ui.poly; ui.poly = null; if (!P || P.pts.length < 3) { renderLive(); return; }
+    const P = ui.poly; ui.poly = null; if (P && P.kind === 'line') return finishLine(P);
+    if (!P || P.pts.length < 3) { renderLive(); return; }
     try {
       if (P.kind === 'keepout') {
         const r = Model.mutate(() => Pcb.addKeepout({ points: P.pts, layer: ui.active }));
@@ -361,6 +375,12 @@ const PcbView = (() => {
       else P.push([sp.x, sp.y]);
       renderLive(); return;
     }
+    if (ui.tool === 'line') {
+      const sp = { x: +snapG(pt.x).toFixed(3), y: +snapG(pt.y).toFixed(3) };
+      if (!ui.poly) ui.poly = { kind: 'line', pts: [] };
+      const P = ui.poly.pts, q = P[P.length - 1]; if (!q || q[0] !== sp.x || q[1] !== sp.y) P.push([sp.x, sp.y]);
+      renderLive(); return;
+    }
     if (ui.tool === 'text') {
       const t = prompt('Text on the ' + (ui.active === 'B' ? 'bottom' : 'top') + ' silkscreen', ''); if (t === null || !t.trim()) return;
       const r = Model.mutate(() => Pcb.addText({ text: t.trim(), x: +snapG(pt.x).toFixed(3), y: +snapG(pt.y).toFixed(3), side: ui.active === 'B' ? 'bottom' : 'top' }));
@@ -391,6 +411,7 @@ const PcbView = (() => {
       drag = { kind: near != null ? 'vertex' : 'seg', i, s: sg, v: near, orig: t.pts.map(q => q.slice()), x0: pt.x, y0: pt.y, moved: false };
       return;
     }
+    if (el && el.dataset.k === 'ln') { ui.sel = null; ui.multi = new Set(); ui.item = { k: 'ln', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); render(); return; }
     if (el && el.dataset.k === 'ko') { ui.sel = null; ui.multi = new Set(); ui.item = { k: 'ko', i: +el.dataset.i }; ui.hlNet = null; ui.onSelect(null); render(); return; }
     if (el && el.dataset.k === 'koa') { ui.sel = null; ui.multi = new Set(); ui.item = { k: 'koa', ref: el.dataset.ref }; ui.hlNet = null; ui.onSelect(null); render(); return; }
     if (el && el.dataset.k === 'pour') { ui.sel = null; ui.item = { k: 'pour', i: +el.dataset.i }; ui.hlNet = (Model.S.pcb.pours[+el.dataset.i] || {}).net; ui.onSelect(null); render(); pan = { x: e.clientX, y: e.clientY }; return; }
@@ -469,6 +490,7 @@ const PcbView = (() => {
   function dbl(e) {
     if (ui.tool === 'select') { const el = e.target.closest('[data-k="t"]'); if (el) selectItem({ k: 'T', i: +el.dataset.i }); }
     else if (ui.tool === 'track' && ui.route) finishRoute();
+    else if (ui.tool === 'line' && ui.poly) closePoly();
   }
   function move(e) {
     if (!svg || svg.classList.contains('hidden')) return;
@@ -546,7 +568,7 @@ const PcbView = (() => {
     if (rdown && e.button === 2) {
       const moved = Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y) > 4, r = rdown; rdown = null;
       if (!moved) {
-        if (ui.route) switchLayer(); else if (ui.tool !== 'select') setTool('select');   // routing: right-click = via + other layer
+        if (ui.route) switchLayer(); else if (ui.tool === 'line' && ui.poly) closePoly(); else if (ui.tool !== 'select') setTool('select');   // routing: right-click = via + other layer
         else { // context menu
           if (r.ref && !isSel(r.ref)) setSelection([r.ref]);
           ui.mouse = vp.toWorld(e.clientX, e.clientY);
@@ -571,6 +593,7 @@ const PcbView = (() => {
     if (k === 'Enter' && ui.poly) { closePoly(); return true; }
     if (k === 's') { setTool('select'); return true; }
     if (k === 't' || k === 'b') { const to = k === 't' ? 'F' : 'B'; if (ui.route) switchLayer(to); else { ui.active = to; ui.layers[to].on = true; renderLayers(); syncBar(); render(); } return true; }
+    if (k === 'd') { setTool(ui.tool === 'line' ? 'select' : 'line'); return true; }
     if (k === 'l') { const to = ui.active === 'F' ? 'B' : 'F'; if (ui.route) switchLayer(to); else { ui.active = to; renderLayers(); syncBar(); render(); } return true; }
     if (k === ' ') { ui.angle = ui.angle === '45' ? '90' : ui.angle === '90' ? 'any' : '45'; persist(); syncBar(); renderLive(); App.toast('Routing angle: ' + (ui.angle === 'any' ? 'any' : ui.angle + '°')); return true; }
     if (k === '/') { ui.flip = !ui.flip; renderLive(); return true; }
@@ -641,6 +664,7 @@ const PcbView = (() => {
       else if (it.k === 'koa') S.pcb.epKeepoutOff = [...new Set([...(S.pcb.epKeepoutOff || []), it.ref])];
       else if (it.k === 'h') S.pcb.holes.splice(it.i, 1);
       else if (it.k === 'txt') Pcb.removeText(it.i);
+      else if (it.k === 'ln') Pcb.removeLine(it.i);
       else if (it.k === 'blbl') Pcb.setSilkLabel('board', { hidden: true });
       else if (it.k === 'T') S.pcb.traces.splice(it.i, 1);
       else if (it.k === 't') {
@@ -739,6 +763,12 @@ const PcbView = (() => {
       out.push(`<path d="${d}" fill="url(#hatch${ids[0]})" stroke="none" pointer-events="none" opacity="0.5"/>`);
       out.push(`<path ${k.auto ? `data-k="koa" data-ref="${esc(k.epRef)}" ` : `data-k="ko" data-i="${i}" `}class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="${col(ids[0])}" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="stroke"><title>${k.auto ? 'Automatic keep-out ' : 'Keep-out '}"${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')} · click to select, Del removes</title></path>`);
     });
+    (S.pcb.lines || []).forEach((l, i) => {
+      if (!vis(l.layer) || l.pts.length < 2) return;
+      const on = ui.item && ui.item.k === 'ln' && ui.item.i === i, pts = l.pts.map(q => q.join(',')).join(' ');
+      out.push(`<polyline data-k="ln" data-i="${i}" points="${pts}" fill="none" stroke="${col(l.layer)}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round"${['FM', 'BM'].includes(l.layer) ? ' opacity="0.6"' : ''}/>`);
+      if (on) out.push(`<polyline points="${pts}" fill="none" stroke="#fff" stroke-width="${Math.max(0.06, l.w * 0.25)}" stroke-dasharray="0.3 0.2" pointer-events="none"/>`);
+    });
     out.push(`<g id="pnames"></g>`);
     out.push(`<g id="prats">${ratsHtml()}</g>`);
     if (vis('DRC') && ui.drc) ui.drc.violations.forEach((v, i) => { if (v.x == null) return;
@@ -817,7 +847,10 @@ const PcbView = (() => {
       const pts = A.b ? arcPoints(A.a, A.b, cur) : [A.a, cur];
       out.push(`<polyline points="${pts.map(p => p.join(',')).join(' ')}" stroke="${col(A.layer)}" stroke-width="${curWidth(A.net)}" class="rprev"/>`);
     }
-    if (ui.poly) {
+    if (ui.poly && ui.poly.kind === 'line') {
+      const P = ui.poly.pts.concat(c ? [[c.x, c.y]] : []), L = lineLayer();
+      out.push(`<polyline points="${P.map(p => p.join(',')).join(' ')}" fill="none" stroke="${col(L)}" stroke-width="${ui.lineW || Pcb.rules().traceWidth || 0.2}" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>`);
+    } else if (ui.poly) {
       const P = ui.poly.pts.concat(c ? [[c.x, c.y]] : []), colr = ui.poly.kind === 'outline' ? col('OL') : ui.poly.kind === 'keepout' ? col(ui.active === 'B' ? 'KOB' : 'KOT') : col(ui.active);
       out.push(`<polygon points="${P.map(p => p.join(',')).join(' ')}" fill="${colr}" fill-opacity="0.18" stroke="${colr}" stroke-width="0.1" stroke-dasharray="0.4 0.25"/>`);
       if (P.length) out.push(`<circle cx="${P[0][0]}" cy="${P[0][1]}" r="0.35" fill="none" stroke="#fff" stroke-width="0.08"/>`);
@@ -862,6 +895,19 @@ const PcbView = (() => {
       const upd = o => Model.mutate(() => Pcb.updateText(it.i, o));
       $('#ptT').onchange = e => upd({ text: e.target.value }); $('#ptH').onchange = e => upd({ size: +e.target.value }); $('#ptR').onchange = e => upd({ rotation: +e.target.value || 0 }); $('#ptS').onchange = e => upd({ side: e.target.value });
       $('#ptX').onchange = e => upd({ x: +e.target.value }); $('#ptY').onchange = e => upd({ y: +e.target.value });
+      $('#ppDel').onclick = deleteItem;
+      return true;
+    }
+    if (it.k === 'ln') {
+      const l = (S.pcb.lines || [])[it.i]; if (!l) return false;
+      const len = l.pts.slice(1).reduce((a, q, k) => a + Math.hypot(q[0] - l.pts[k][0], q[1] - l.pts[k][1]), 0);
+      el.innerHTML = `<div class="ph">Free line</div>
+        <label>Layer<select id="plL">${Object.entries(Pcb.LINE_LAYERS).map(([id, n]) => `<option value="${id}" ${id === l.layer ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+        <label>Width (mm)<input id="plW" type="number" step="0.05" min="0.08" value="${l.w}"></label>
+        <div class="muted small">${l.pts.length} points · ${len.toFixed(2)} mm long${l.layer === 'F' || l.layer === 'B' ? ' · copper with no net: DRC keeps it clear of every other copper' : ''}. New lines use the width of the last one you set here.</div>
+        <div class="row"><button id="ppDel" class="danger">Delete line (Del)</button></div>`;
+      $('#plL').onchange = e => Model.mutate(() => Pcb.updateLine(it.i, { layer: e.target.value }));
+      $('#plW').onchange = e => { const w = +e.target.value; try { Model.mutate(() => Pcb.updateLine(it.i, { width: w })); ui.lineW = w; } catch (err) { App.toast(err.message); } };
       $('#ppDel').onclick = deleteItem;
       return true;
     }
@@ -985,7 +1031,7 @@ const PcbView = (() => {
   function validate() {
     const S = Model.S;
     const it = ui.item, gone = it && (it.k === 'v' ? !S.pcb.vias[it.i] : it.k === 'pour' ? !(S.pcb.pours || [])[it.i] : it.k === 'ko' ? !(S.pcb.keepouts || [])[it.i] : it.k === 'koa' ? !Pcb.epKeepouts().some(q => q.epRef === it.ref) : it.k === 'h' ? !(S.pcb.holes || [])[it.i]
-      : it.k === 'txt' ? !(S.pcb.texts || [])[it.i] : it.k === 'blbl' ? false : !S.pcb.traces[it.i]);   // t / T: tracks
+      : it.k === 'txt' ? !(S.pcb.texts || [])[it.i] : it.k === 'ln' ? !(S.pcb.lines || [])[it.i] : it.k === 'blbl' ? false : !S.pcb.traces[it.i]);   // t / T: tracks
     if (gone) ui.item = null;
     if (ui.sel && !Model.comp(ui.sel)) ui.sel = null;
     for (const r of [...ui.multi]) if (!Model.comp(r)) ui.multi.delete(r);

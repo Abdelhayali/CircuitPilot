@@ -45,6 +45,64 @@ const GitHub = (() => {
   }
   const slug = (n, fb) => String(n || fb).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 90) || fb;
 
+  // ---------- the project index: CircuitPilot-projects.csv at the top of the repository (opens in Excel) ----------
+  // one row per design: name, folder, project id, created, last modified (the design's own edit time, UTC), parts and the
+  // version (git blob id) of its .circuit.json when the row was written — a row whose file changed since is re-read
+  const INDEX = 'CircuitPilot-projects.csv';
+  const COLS = ['Name', 'Folder', 'Project ID', 'Created (UTC)', 'Last modified (UTC)', 'Parts', 'File version'];
+  const iso = t => t > 0 ? new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 19) : '';
+  const unIso = s => { const d = Date.parse(String(s || '').trim().replace(' ', 'T') + 'Z'); return isNaN(d) ? 0 : d / 1000; };
+  function csvParse(t) {
+    const rows = []; let row = [], f = '', q = false;
+    t = String(t || '').replace(/^\ufeff/, '');
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+      else if (c === '"') q = true;
+      else if (c === ',') { row.push(f); f = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+      else f += c;
+    }
+    if (f || row.length) { row.push(f); rows.push(row); }
+    return rows;
+  }
+  function indexParse(t) {
+    const rows = csvParse(t); if (!rows.length) return [];
+    const h = rows[0].map(x => x.trim().toLowerCase()), col = name => h.findIndex(x => x.startsWith(name));
+    const c = { name: col('name'), folder: col('folder'), id: col('project id'), created: col('created'), edited: col('last modified'), parts: col('parts'), sha: col('file version') };
+    return rows.slice(1).filter(r => r.length > 1 && c.folder >= 0 && r[c.folder]).map(r => ({ name: r[c.name] || '', folder: r[c.folder].trim(), id: c.id >= 0 ? (r[c.id] || '').trim() : '', created: c.created >= 0 ? unIso(r[c.created]) : 0, edited: c.edited >= 0 ? unIso(r[c.edited]) : 0, parts: c.parts >= 0 ? +r[c.parts] || 0 : 0, sha: c.sha >= 0 ? (r[c.sha] || '').trim() : '' }));
+  }
+  function indexCsv(list) {
+    const cell = v => { const s = String(v == null ? '' : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const rows = list.slice().sort((a, b) => (b.edited || 0) - (a.edited || 0)).map(r => [r.name, r.folder, r.id, iso(r.created), iso(r.edited), r.parts || 0, r.sha || '']);
+    return '\ufeff' + [COLS].concat(rows).map(r => r.map(cell).join(',')).join('\r\n') + '\r\n';   // BOM: Excel reads UTF-8 names right
+  }
+  // the whole branch at once: { head, tree, files: Map(path -> blob id) }
+  async function snapshot(repo) {
+    const base = `/repos/${repo}`, head = await api('GET', `${base}/git/ref/heads/${BRANCH}`);
+    const commit = await api('GET', `${base}/git/commits/${head.object.sha}`);
+    const tree = await api('GET', `${base}/git/trees/${commit.tree.sha}?recursive=1`);
+    return { head: head.object.sha, tree: commit.tree.sha, files: new Map(tree.tree.filter(e => e.type === 'blob').map(e => [e.path, e.sha])) };
+  }
+  // several files (any folders) in ONE commit; nothing is deleted. files: { path: string | bytes }
+  async function commitFiles({ repo, files, message, onStep = () => { } }) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const base = `/repos/${repo}`, s = await snapshot(repo), entries = [], todo = [];
+        for (const [path, d] of Object.entries(files)) if (s.files.get(path) !== await gitSha(d)) todo.push([path, d]);
+        if (!todo.length) return { changed: 0 };
+        let next = 0, done = 0;
+        await Promise.all(Array.from({ length: 4 }, async () => {
+          while (next < todo.length) { const [path, d] = todo[next++]; const blob = await api('POST', `${base}/git/blobs`, { content: b64(d), encoding: 'base64' }); entries.push({ path, mode: '100644', type: 'blob', sha: blob.sha }); onStep(`Uploading ${++done}/${todo.length}…`); }
+        }));
+        const nt = await api('POST', `${base}/git/trees`, { base_tree: s.tree, tree: entries });
+        const nc = await api('POST', `${base}/git/commits`, { message, tree: nt.sha, parents: [s.head] });
+        await api('PATCH', `${base}/git/refs/heads/${BRANCH}`, { sha: nc.sha, force: false });
+        return { changed: todo.length };
+      } catch (e) { if (e.status !== 422 || attempt >= 3) throw e; }
+    }
+  }
+
   // the README of one design folder: what the files are and where they came from (paths relative to the folder)
   function readme(name, paths) {
     const groups = [['Design', p => /\.json$/.test(p)], ['Gerbers and drill (fabrication)', p => p.startsWith('gerbers/')], ['JLCPCB assembly (BOM + CPL)', p => p.startsWith('jlcpcb/')],
@@ -135,7 +193,7 @@ const GitHub = (() => {
       catch (e) { if (e.status !== 422 || attempt >= 3) throw e; }
     }
   }
-  async function commitOnce({ repo, folder, name, files, onStep = () => { } }) {
+  async function commitOnce({ repo, folder, name, files, index, onStep = () => { } }) {
     const base = `/repos/${repo}`, prefix = folder ? folder + '/' : '';
     const head = await api('GET', `${base}/git/ref/heads/${BRANCH}`);
     const commit = await api('GET', `${base}/git/commits/${head.object.sha}`);
@@ -149,6 +207,12 @@ const GitHub = (() => {
       todo.push([path, want[rel]]); remote.delete(path);
     }
     const gone = [...remote.keys()];   // files of this design that are no longer made: removed from the folder
+    if (index) {
+      const cur = tree.tree.find(e => e.path === INDEX && e.type === 'blob'), list = cur ? indexParse(await readBlob(repo, cur.sha)) : [];
+      const jk = Object.keys(want).find(k => /\.circuit\.json$/.test(k)), row = list.find(r => r.folder === folder) || (list.push({ folder }), list[list.length - 1]);
+      Object.assign(row, { name: index.name || name || folder, id: index.id || row.id || '', created: row.created || index.created || 0, edited: index.edited || row.edited || 0, parts: index.parts || 0, sha: jk ? await gitSha(want[jk]) : row.sha || '' });
+      const text = indexCsv(list); if (!cur || cur.sha !== await gitSha(text)) todo.push([INDEX, text]);
+    }
     const url = `https://github.com/${repo}/tree/${BRANCH}/${folder}`;
     if (!todo.length && !gone.length) return { changed: 0, folder, url };
     const entries = [];
@@ -194,5 +258,5 @@ const GitHub = (() => {
   async function check() { const login = (await api('GET', '/user')).login; try { localStorage.setItem('cp.github.login', login); } catch (e) { } return login; }
   const account = () => { try { return localStorage.getItem('cp.github.login') || ''; } catch (e) { return ''; } };
 
-  return { getToken, setToken, getIdToken, setIdToken, getRepo, setRepo, check, account, listRepos, createRepo, saveDesign, listDesigns, readBlob, gitSha, slug, oauthAvailable, signIn, finishSignIn, signOut };
+  return { INDEX, indexParse, indexCsv, snapshot, commitFiles, getToken, setToken, getIdToken, setIdToken, getRepo, setRepo, check, account, listRepos, createRepo, saveDesign, listDesigns, readBlob, gitSha, slug, oauthAvailable, signIn, finishSignIn, signOut };
 })();

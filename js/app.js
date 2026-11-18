@@ -1229,7 +1229,8 @@ const App = (() => {
     const folder = ghFolder(), name = Model.S.name || folder;
     const { base, files, skipped } = await buildAll({ light });
     const out = {}; for (const [n, d] of Object.entries(files)) out[n.slice(base.length + 1)] = d;
-    const r = await GitHub.saveDesign({ repo, folder, name, files: out, onStep });
+    const meta = (await (await fetch('/api/projects')).json().catch(() => [])).find(p => p.id === Model.S.id) || {};
+    const r = await GitHub.saveDesign({ repo, folder, name, files: out, onStep, index: { name, id: Model.S.id || '', created: +meta.created || 0, edited: +Model.S.edited || +meta.edited || Date.now() / 1000, parts: Model.S.components.length } });
     const dk = Object.keys(out).find(k => /\.circuit\.json$/.test(k));
     if (dk && Model.S.id) { const m = ghSynced(); m[folder] = { sha: await GitHub.gitSha(out[dk]), local: (await localHash(Model.S.id)) || '' }; ghSetSynced(m); }
     return Object.assign(r, { skipped, repo });
@@ -1284,33 +1285,84 @@ const App = (() => {
   }
   // Load all: every design of the repository comes to this PC (nothing is uploaded)
   const ghLoadAll = say => ghQueued(() => ghPullRaw({ all: true, say }));
-  // Sync: check, then move only what changed. Down: designs changed on GitHub. Up: designs on this PC that are already in
-  // the repository and changed here since the last sync, plus the open design. Changed on both sides: left alone, reported.
-  // Uploads are light (no images, PDFs or enclosure files: “Save design now” sends those).
+  // Sync: the repository's project index (CircuitPilot-projects.csv) against this PC. Every design is matched by its
+  // project id, else by name. Missing here or newer on GitHub: downloaded. Missing on GitHub or newer here: uploaded
+  // (the project file; “Save design now” adds Gerbers, images and PDFs). Uploads and the new index go up in one commit.
+  const nameKeyOf = n => (Projects.nameKey ? Projects.nameKey(n) : String(n || '').trim().toLowerCase());
   async function ghSyncRaw(say) {
-    const down = await ghPullRaw({ say });
-    const map = ghMap(), synced = ghSynced(), first = Model.S.id || '', up = { saved: 0, same: 0, failed: [], conflict: [...down.conflicts] };
-    const todo = [];
-    if (Projects.online) {
-      for (const [pid, folder] of Object.entries(map)) {
-        const rec = synced[folder]; if (!rec || down.conflicts.has(folder) || pid.startsWith('new:')) continue;
-        const h = await localHash(pid);
-        if (h !== null && h !== rec.local) todo.push(pid);
+    const repo = GitHub.getRepo(); if (!repo) throw new Error('Choose a repository first');
+    if (!Projects.online && !(window.CPStatic && CPStatic.mode === 'static')) throw new Error('Sync needs the project store of this app');
+    say('Reading the project list in ' + repo + '…');
+    const snap = await GitHub.snapshot(repo), jsonOf = folder => { for (const [p] of snap.files) if (p.startsWith(folder + '/') && /^[^/]+\/[^/]+\.circuit\.json$/.test(p)) return p; return null; };
+    let index = snap.files.has(GitHub.INDEX) ? GitHub.indexParse(await GitHub.readBlob(repo, snap.files.get(GitHub.INDEX))) : [];
+    index = index.filter(r => jsonOf(r.folder));   // rows whose design folder is gone
+    // design folders the index does not list (saved by an older version), or whose file changed since its row was
+    // written: their real name / id / edit time come from the file itself
+    const listed = new Map(index.map(r => [r.folder, r]));
+    for (const [p, sha] of snap.files) {
+      const m = /^([^/]+)\/[^/]+\.circuit\.json$/.exec(p); if (!m) continue;
+      const row = listed.get(m[1]); if (row && row.sha === sha && row.edited) continue;
+      say('Reading ' + m[1] + '…');
+      let d = {}; try { d = JSON.parse(await GitHub.readBlob(repo, sha)); } catch (e) { continue; }
+      const r = row || { folder: m[1], created: 0 }; Object.assign(r, { name: d.name || r.name || m[1], id: d.id || r.id || '', edited: +d.edited || r.edited || 0, parts: (d.components || []).length, sha });
+      if (!row) { index.push(r); listed.set(r.folder, r); }
+    }
+    const here = await (await fetch('/api/projects')).json(), map = ghMap(), synced = ghSynced(), open = Model.S.id || '';
+    // pair every design here with its row: same project id, else the same name (generic names never)
+    const used = new Set(), byId = new Map(index.filter(r => r.id).map(r => [r.id, r])), pairs = [];
+    for (const p of here) {
+      let r = byId.get(p.id); if (r && used.has(r)) r = null;
+      if (!r && map[p.id]) r = index.find(x => !used.has(x) && x.folder === map[p.id]) || null;
+      if (!r) { const k = nameKeyOf(p.name); if (k) r = index.find(x => !used.has(x) && nameKeyOf(x.name) === k) || null; }
+      if (r) used.add(r); pairs.push({ p, r });
+    }
+    const files = {}, rep = { up: [], down: [], same: 0, skipped: [] }, folders = new Set(index.map(r => r.folder));
+    const tOf = p => +(p.edited || p.updated) || 0, fileName = n => (Exports.slug ? Exports.slug(n) : 'design') + '.circuit.json';
+    const newFolder = n => { const b = GitHub.slug(n, 'design'); let f = b, i = 2; while (folders.has(f)) f = b + '-' + i++; folders.add(f); return f; };
+    let reopen = '';
+    for (const { p, r } of pairs) {
+      const empty = !p.parts && !p.pcb;
+      if (r && Math.abs(tOf(p) - (r.edited || 0)) <= 1) { rep.same++; map[p.id] = r.folder; continue; }
+      if (r && (r.edited || 0) > tOf(p)) {          // newer on GitHub: down
+        say('Downloading ' + r.folder + '…');
+        const d = JSON.parse(await GitHub.readBlob(repo, snap.files.get(jsonOf(r.folder)))); d.id = p.id;
+        await putProject(p.id, d); map[p.id] = r.folder; synced[r.folder] = { sha: snap.files.get(jsonOf(r.folder)), local: (await localHash(p.id)) || '' };
+        rep.down.push(d.name || r.folder); if (p.id === open) reopen = p.id; continue;
       }
+      if (!r && empty) { rep.skipped.push(p.name || 'Untitled'); continue; }   // empty designs are not uploaded
+      // newer here, or not on GitHub yet: up (the project file, as it is stored here)
+      const d = await (await fetch('/api/projects/' + encodeURIComponent(p.id))).json(), text = JSON.stringify(d, null, 1);
+      const folder = r ? r.folder : newFolder(p.name || 'design'), path = (r && jsonOf(r.folder)) || folder + '/' + fileName(p.name);
+      files[path] = text; map[p.id] = folder;
+      const row = r || (index.push({ folder, created: +p.created || 0 }), index[index.length - 1]);
+      Object.assign(row, { name: p.name || folder, id: p.id, created: row.created || +p.created || 0, edited: tOf(p), parts: p.parts || 0, sha: await GitHub.gitSha(text) });
+      synced[folder] = { sha: row.sha, local: (await localHash(p.id)) || '' };
+      rep.up.push(p.name || folder);
     }
-    if (first && Model.S.components.length && !todo.includes(first) && !down.conflicts.has(ghFolder())) todo.push(first);
-    for (let i = 0; i < todo.length; i++) {
-      const pid = todo[i];
-      try {
-        if (Model.S.id !== pid) await Projects.openId(pid);
-        const label = Model.S.name || pid;
-        if (!Model.S.components.length) continue;
-        const r = await ghSaveRaw({ light: true, onStep: t => say(`Upload ${i + 1}/${todo.length} ${label}: ${t}`) });
-        if (r.changed) up.saved++; else up.same++;
-      } catch (e) { up.failed.push((Model.S.name || pid) + ' (' + e.message + ')'); }
+    // on GitHub only: down (keeps its project id unless another design here uses it)
+    const ids = new Set(here.map(p => p.id));
+    for (const r of index.filter(x => !used.has(x) && !pairs.some(q => q.r === x))) {
+      if (Object.values(files).length && Object.keys(files).some(k => k.startsWith(r.folder + '/'))) continue;   // just made by this sync
+      if (here.some(p => map[p.id] === r.folder)) continue;
+      say('Downloading ' + r.folder + '…');
+      const d = JSON.parse(await GitHub.readBlob(repo, snap.files.get(jsonOf(r.folder))));
+      let pid = typeof d.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(d.id) && !ids.has(d.id) ? d.id : '';
+      if (pid) await putProject(pid, d);
+      else { delete d.id; const res = await (await fetch('/api/projects/', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(d) })).json(); pid = res.id; }
+      ids.add(pid); map[pid] = r.folder; synced[r.folder] = { sha: snap.files.get(jsonOf(r.folder)), local: (await localHash(pid)) || '' };
+      rep.down.push(d.name || r.folder);
     }
-    if (first && Model.S.id !== first) { try { await Projects.openId(first); } catch (e) { } }
-    return { down, up, partial: !Projects.online };
+    try { localStorage.setItem('cp.github.folders', JSON.stringify(map)); } catch (e) { }
+    ghSetSynced(synced);
+    // the uploads and the index in one commit (the index also when only rows were filled in from the files)
+    const csv = GitHub.indexCsv(index);
+    if (Object.keys(files).length || snap.files.get(GitHub.INDEX) !== await GitHub.gitSha(csv)) {
+      files[GitHub.INDEX] = csv;
+      say('Saving to GitHub…');
+      await GitHub.commitFiles({ repo, files, message: 'Sync: ' + rep.up.length + ' up, ' + rep.down.length + ' down (' + index.length + ' designs in the index)', onStep: say });
+    }
+    if (reopen && Projects.openId) await Projects.openId(reopen);
+    return Object.assign(rep, { total: index.length });
   }
   const ghSync = say => ghQueued(() => ghSyncRaw(say));
   function ghBusy(on) { for (const id of ['#ghLoadAll', '#ghSync', '#ghSaveAll', '#ghGo']) { const b = $(id); if (b) b.disabled = on; } if (on) $('#ghLink').innerHTML = ''; }
@@ -1330,14 +1382,13 @@ const App = (() => {
   async function ghSyncNow() {
     const st = $('#ghStatus'), say = t => { st.textContent = t; }; ghBusy(true);
     try {
-      const { down, up, partial } = await ghSync(say);
-      const parts = [`down: ${down.loaded} changed on GitHub, ${down.same} unchanged`, `up: ${up.saved} saved, ${up.same} already up to date`];
-      if (up.conflict.length) parts.push(`changed here AND on GitHub, left alone: ${up.conflict.join(', ')}`);
-      if (down.skipped.length) parts.push(`skipped: ${down.skipped.join(', ')}`);
-      if (up.failed.length) parts.push(`failed: ${up.failed.join('; ')}`);
-      if (partial) parts.push('only the open design was checked for upload (other designs need the app with server.py)');
-      st.textContent = (down.loaded || up.saved ? '' : 'Everything is in sync. ') + parts.join(' · ') + '.';
-      ghPaintIdle();
+      const r = await ghSync(say), parts = [r.total + ' designs in ' + GitHub.INDEX];
+      parts.push(r.down.length ? 'downloaded ' + r.down.length + ': ' + r.down.slice(0, 8).join(', ') + (r.down.length > 8 ? ' …' : '') : 'nothing to download');
+      parts.push(r.up.length ? 'uploaded ' + r.up.length + ': ' + r.up.slice(0, 8).join(', ') + (r.up.length > 8 ? ' …' : '') : 'nothing to upload');
+      if (r.same) parts.push(r.same + ' already the same');
+      if (r.skipped.length) parts.push('empty, not uploaded: ' + r.skipped.length);
+      st.textContent = parts.join(' · ') + '.';
+      ghPaintIdle(); if (Projects.show && !$('#projModal').classList.contains('hidden')) Projects.show();
     } catch (e) { st.textContent = e.message; }
     finally { ghBusy(false); }
   }

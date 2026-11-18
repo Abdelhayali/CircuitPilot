@@ -444,14 +444,14 @@
       <p class="small" style="margin:0 0 8px" id="ghWhere"></p>
       <div class="row-h" style="margin-bottom:8px">
         <button id="ghLoadAll" title="Download every design in the repository to this PC. Nothing is uploaded. A design you changed here since the last sync is kept, not overwritten.">⇩ Load all designs</button>
-        <button id="ghSync" title="Check what changed and move only that: designs changed on GitHub come down, designs changed on this PC go up. Designs changed on both sides are left alone and listed.">⇅ Sync (only what changed)</button>
+        <button id="ghSync" title="Compares the project list in the repository (CircuitPilot-projects.csv — opens in Excel: name, created, last modified) with this PC: designs missing here or newer on GitHub are downloaded, designs missing on GitHub or newer here are uploaded. Every PC that syncs ends up with the same designs, the last edited copy of each.">⇅ Sync all designs</button>
       </div>
       <div class="row-h">
         <label class="small"><input type="checkbox" id="ghAuto"> Auto-save after changes</label>
         <button id="ghSaveAll">Save all designs</button>
         <button id="ghGo" class="primary">Save design now</button>
       </div>
-      <p class="muted small" style="margin:6px 0 0">Auto-save sends the design, Gerbers, BOM and CPL, EasyEDA files and netlist a few seconds after each change. Images, PDFs and enclosure files come with “Save design now”. Only changed files are uploaded. “Save all designs” saves every design stored on this PC, each in its own folder. “Load all designs” downloads every design in the repository; “Sync” only moves what changed since the last sync, in both directions.</p>
+      <p class="muted small" style="margin:6px 0 0">Auto-save sends the design, Gerbers, BOM and CPL, EasyEDA files and netlist a few seconds after each change. Images, PDFs and enclosure files come with “Save design now”. Only changed files are uploaded. “Save all designs” saves every design stored on this PC, each in its own folder. “Load all designs” downloads every design in the repository; “Sync all designs” compares the repository's project list <code>CircuitPilot-projects.csv</code> (open it in Excel: name, created, last modified) with this PC and downloads / uploads whatever is missing or older, so every PC ends up with the same designs.</p>
     </div>
     <p id="ghStatus" class="small" style="margin:10px 0 0;min-height:1.2em"></p>
     <p id="ghLink" style="margin:6px 0 0"></p>
@@ -541,8 +541,8 @@
 <script src="js/cloud.js?v=202611180100"></script>
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
-<script src="js/github.js?v=202611162200"></script>
-<script src="js/app.js?v=202611180200"></script>
+<script src="js/github.js?v=202611190100"></script>
+<script src="js/app.js?v=202611190100"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

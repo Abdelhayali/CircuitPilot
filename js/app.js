@@ -1568,6 +1568,11 @@ const App = (() => {
       if (kind === 'json') download(fname('.circuit.json'), JSON.stringify(S, null, 1), 'application/json');
       if (kind === 'gerber') { gerberCheck(); return; }
       if (kind === 'svg') download(fname('-schematic.svg'), Sch.exportSVG(), 'image/svg+xml');
+      if (kind === 'easyedarules') {
+        download(fname('-RULES_EasyEDA-Pro.json'), EasyEDA.proRulesText(), 'application/json');
+        toast('EasyEDA Pro design rules saved (this board’s own rules). In EasyEDA Pro: Design → Design Rule → Import, choose the file, then run DRC.', 9000);
+        return;
+      }
       if (kind === 'easyeda' || kind === 'easyedaproj' || kind === 'easyedapcb') {
         if (!S.components.length) throw new Error('The schematic is empty');
         easyedaExport(kind === 'easyedaproj' ? 'project' : kind === 'easyedapcb' ? 'pcb' : 'sch');

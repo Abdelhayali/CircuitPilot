@@ -111,7 +111,7 @@ const Cloud = (() => {
     const r = await fetch(path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j;
   }
-  const props = (p, extra = {}) => Object.assign({ kind: 'project', pid: p.id, name: String(p.name || 'Untitled').slice(0, 100), updated: String(p.updated || 0), deleted: '0' }, extra);
+  const props = (p, extra = {}) => Object.assign({ kind: 'project', pid: p.id, name: String(p.name || 'Untitled').slice(0, 100), updated: String(p.updated || 0), edited: String(p.edited || p.updated || 0), deleted: '0' }, extra);
 
   // ---------- sync ----------
   function sync(all) { if (busy) return busy; busy = run(all).finally(() => { busy = null; }); return busy; }
@@ -125,6 +125,27 @@ const Cloud = (() => {
       const byPid = new Map(), L = new Map(mine.map(p => [p.id, p]));
       let libFile = null;
       for (const f of remote) { const a = f.appProperties || {}; if (a.kind === 'library') libFile = f; else if (a.kind === 'project' && a.pid) byPid.set(a.pid, f); }
+      // the same design under another id (same name: a copy from another PC or from GitHub): one design. The copy edited
+      // last wins (into the id this PC has), the other Drive copy is retired, so no duplicate comes down on any PC.
+      let merged = 0;
+      {
+        const nk = typeof Projects !== 'undefined' && Projects.nameKey ? Projects.nameKey : () => '', tOf = a => +(a.edited || a.updated) || 0;
+        const localBy = new Map(); for (const p of mine) { const k = nk(p.name); if (k && (!localBy.has(k) || tOf(p) > tOf(localBy.get(k)))) localBy.set(k, p); }
+        const remoteBy = new Map();
+        for (const [pid, f] of byPid) {
+          const a = f.appProperties || {}, k = nk(a.name); if (!k || a.deleted === '1' || L.has(pid)) continue;
+          const keep = localBy.get(k);
+          if (keep && keep.id !== pid) {
+            if (tOf(a) > tOf(keep) + 1) { const d = await download(f.id); d.id = keep.id; await local('PUT', '/api/projects/' + keep.id, d); down++; }
+            await setProps(f.id, Object.assign({}, a, { deleted: '1' })); byPid.delete(pid); delete st.map[pid]; merged++; continue;
+          }
+          const o = remoteBy.get(k);   // two Drive copies, neither here: only the last edited comes down
+          if (!o) { remoteBy.set(k, { pid, f }); continue; }
+          const [win, lose] = tOf(a) > tOf(o.f.appProperties || {}) ? [{ pid, f }, o] : [o, { pid, f }];
+          await setProps(lose.f.id, Object.assign({}, lose.f.appProperties, { deleted: '1' })); byPid.delete(lose.pid); delete st.map[lose.pid]; remoteBy.set(k, win); merged++;
+        }
+        if (merged) { const fresh = await local('GET', '/api/projects'); L.clear(); for (const p of fresh) L.set(p.id, p); }
+      }
       const ids = new Set([...L.keys(), ...byPid.keys()]);
       for (const id of ids) {
         const p = L.get(id), f = byPid.get(id), s = st.map[id], a = f ? f.appProperties || {} : {};
@@ -160,7 +181,7 @@ const Cloud = (() => {
         if (add.length) { await Projects.loadLibrary(); if (window.App && App.renderAll) App.renderAll(); }
       } catch (e) { if (/not connected|expired/.test(e.message)) throw e; console.warn('library sync', e); }
       st.last = Date.now(); keep();
-      setStatus('ok', `Synced ${new Date().toLocaleTimeString()}${up || down || del ? ` · ${up} up, ${down} down${del ? `, ${del} deleted` : ''}` : ''}${full && gone ? ` · ${gone} project${gone > 1 ? 's' : ''} deleted earlier stay deleted` : ''}`);
+      setStatus('ok', `Synced ${new Date().toLocaleTimeString()}${up || down || del ? ` · ${up} up, ${down} down${del ? `, ${del} deleted` : ''}` : ''}${merged ? ` · ${merged} repeated design${merged > 1 ? 's' : ''} merged` : ''}${full && gone ? ` · ${gone} project${gone > 1 ? 's' : ''} deleted earlier stay deleted` : ''}`);
       if (full) App.toast(`This PC and your Google Drive now hold the same projects: ${up} uploaded, ${down} downloaded${gone ? `, ${gone} deleted earlier left deleted` : ''}`, 8000);
       if (down || del) App.toast(`Google Drive: ${down ? down + ' project' + (down > 1 ? 's' : '') + ' updated from your other devices' : ''}${down && del ? ', ' : ''}${del ? del + ' deleted' : ''}`, 6000);
     } catch (e) { if (status !== 'reconnect') setStatus('error', e.message); }

@@ -20,7 +20,7 @@ const Model = (() => {
   }
   function mutate(fn, kind = 'change') {
     const before = snapshot();
-    try { const r = fn(); undoStack.push(before); if (undoStack.length > 200) undoStack.shift(); redoStack.length = 0; emit(kind); return r; }
+    try { const r = fn(); undoStack.push(before); if (undoStack.length > 200) undoStack.shift(); redoStack.length = 0; S.edited = +(Date.now() / 1000).toFixed(3); emit(kind); return r; }
     catch (e) { S = JSON.parse(before); throw e; }
   }
   function load(obj, keepHistory) {

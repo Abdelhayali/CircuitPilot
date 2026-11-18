@@ -90,7 +90,7 @@
     const [id, sub] = parts;
     if (method === 'GET' && !id) {
       const all = await dbAll('projects');
-      return all.sort((a, b) => b.updated - a.updated).map(p => { const d = p.data || {}; return { id: p.id, name: p.name, created: p.created, updated: p.updated, parts: (d.components || []).length, nets: Object.keys(d.nets || {}).length, pcb: !!(d.board && d.board.w) }; });
+      return all.sort((a, b) => b.updated - a.updated).map(p => { const d = p.data || {}; return { id: p.id, name: p.name, created: p.created, updated: p.updated, edited: typeof d.edited === 'number' ? d.edited : p.updated, parts: (d.components || []).length, nets: Object.keys(d.nets || {}).length, pcb: !!(d.board && d.board.w) }; });
     }
     if (method === 'GET') {
       const p = await dbGet('projects', id); if (!p) throw httpError(404, 'project not found');

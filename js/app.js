@@ -1242,13 +1242,23 @@ const App = (() => {
     say('Reading the designs in ' + repo + '…');
     const designs = await GitHub.listDesigns(repo), map = ghMap(), synced = ghSynced(), open = Model.S.id || '';
     const folderOf = {}; for (const [pid, f] of Object.entries(map)) folderOf[f] = pid;
-    const rep = { found: designs.length, loaded: 0, same: 0, kept: [], skipped: [] }, conflicts = new Set(); let reopen = '';
+    const rep = { found: designs.length, loaded: 0, same: 0, kept: [], skipped: [], matched: [] }, conflicts = new Set(); let reopen = '';
+    const here = await (await fetch('/api/projects')).json().catch(() => []), nk = Projects.nameKey;
     for (const d of designs) {
       const rec = synced[d.folder] || {}; let pid = folderOf[d.folder] || '';
       if (!all && pid && rec.sha === d.sha) { rep.same++; continue; }   // unchanged on GitHub since the last sync
       say(`Loading ${d.folder}…`);
       const text = await GitHub.readBlob(repo, d.sha), data = JSON.parse(text);
       if (!pid) {
+        // the same design already here under another id (same name, not tied to another GitHub folder): one design, the
+        // copy edited last wins — no duplicate is made
+        const same = nk(data.name) ? here.filter(p => nk(p.name) === nk(data.name) && !(map[p.id] && map[p.id] !== d.folder)).sort((a, b) => (+(b.edited || b.updated) || 0) - (+(a.edited || a.updated) || 0)) : [];
+        if (same.length) {
+          const p = same[0]; pid = p.id; map[pid] = d.folder; rep.matched.push(d.folder + ' → ' + (p.name || pid));
+          if ((+data.edited || 0) > (+(p.edited || p.updated) || 0) + 1) { await putProject(pid, Object.assign(data, { id: pid })); synced[d.folder] = { sha: d.sha, local: (await localHash(pid)) || '' }; rep.loaded++; if (pid === open) reopen = pid; }
+          else { synced[d.folder] = { sha: d.sha, local: '' }; rep.same++; }   // the copy here is newer: Sync sends it up
+          continue;
+        }
         // a design made on another PC: it keeps its id unless that id is already used here by another design
         pid = typeof data.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(data.id) ? data.id : '';
         if (!pid || (map[pid] && map[pid] !== d.folder) || (!map[pid] && await localHash(pid) !== null)) { rep.skipped.push(d.folder); continue; }
@@ -1311,6 +1321,7 @@ const App = (() => {
       const parts = [`${r.found} design${r.found === 1 ? '' : 's'} on GitHub`, `${r.loaded} loaded`, `${r.same} already the same here`];
       if (r.kept.length) parts.push(`kept here (changed on this PC since the last sync, use Sync or Save to send them): ${r.kept.join(', ')}`);
       if (r.skipped.length) parts.push(`skipped (its id is used by another design here): ${r.skipped.join(', ')}`);
+      if (r.matched.length) parts.push(`matched by name (no duplicate made, the last edited copy kept): ${r.matched.join(', ')}`);
       st.textContent = parts.join(' · ') + '. Open Projects to see every design.';
       ghPaintIdle();
     } catch (e) { st.textContent = e.message; }

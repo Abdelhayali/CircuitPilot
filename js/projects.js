@@ -94,20 +94,43 @@ const Projects = (() => {
 
   // ---------- dialog ----------
   const ago = t => { const s = Date.now() / 1000 - t; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + ' min ago' : s < 86400 ? Math.floor(s / 3600) + ' h ago' : new Date(t * 1000).toLocaleDateString(); };
+  // the same design under two ids (copies from another PC, GitHub or Google Drive): matched by name; generic names never
+  const nameKey = n => { const k = String(n || '').trim().toLowerCase().replace(/\s+/g, ' '); return !k || /^(untitled|new project|design|project)( \d+)?$/.test(k) ? '' : k; };
+  const editedOf = p => +(p.edited || p.updated) || 0;
+  const stamp = t => { const d = new Date(t * 1000); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
+  function dupGroups(ps) {
+    const g = new Map(); for (const p of ps) { const k = nameKey(p.name); if (!k) continue; if (!g.has(k)) g.set(k, []); g.get(k).push(p); }
+    return [...g.values()].filter(a => a.length > 1).map(a => a.sort((x, y) => editedOf(y) - editedOf(x)));
+  }
+  // keep the most recently edited copy of every repeated design, delete the others (desktop: they stay under ⟲ Deleted)
+  async function mergeDuplicates() {
+    const ps = await api('GET', '/api/projects'), groups = dupGroups(ps); if (!groups.length) { App.toast('No repeated designs'); return render(); }
+    const lines = groups.map(a => '• ' + (a[0].name || 'Untitled') + ': keep the one edited ' + stamp(editedOf(a[0])) + ', remove ' + (a.length - 1) + ' older (' + a.slice(1).map(p => stamp(editedOf(p))).join(', ') + ')');
+    if (!confirm('Merge repeated designs?\n\n' + lines.join('\n') + '\n\n' + (hasHistory ? 'Removed copies can be brought back from ⟲ Deleted projects.' : 'Removed copies cannot be brought back in the web version.'))) return;
+    let open = Model.S.id, removed = 0;
+    for (const a of groups) for (const p of a.slice(1)) { if (p.id === Model.S.id) { await saveNow(); open = a[0].id; } await api('DELETE', '/api/projects/' + p.id); removed++; }
+    if (open !== Model.S.id) await openQuiet(open);
+    App.toast(removed + ' older cop' + (removed === 1 ? 'y' : 'ies') + ' removed; the newest of each design is kept', 6000);
+    if (typeof Cloud !== 'undefined' && Cloud.email) Cloud.sync().catch(() => { });
+    render();
+  }
+  async function openQuiet(id) { const d = await api('GET', '/api/projects/' + id); Model.load(d); lastSaved = Model.snapshot(); serverUpdated = (await api('GET', '/api/projects/' + id + '/meta')).updated; remember(); Model.emit('meta'); }
   async function render() {
     const list = $('#projList');
     if (!online) { list.innerHTML = '<div class="muted">Project storage needs the app to run with <code>server.py</code>. You can still download / import project files.</div>'; return; }
     list.innerHTML = '<div class="muted">Loading…</div>';
     try {
       const ps = await api('GET', '/api/projects'), q = $('#projSearch').value.toLowerCase();
-      const rows = ps.filter(p => !q || (p.name || '').toLowerCase().includes(q));
+      const rows = ps.filter(p => !q || (p.name || '').toLowerCase().includes(q)).sort((a, b) => editedOf(b) - editedOf(a));
+      const dups = dupGroups(ps), dupOf = new Map(); for (const a of dups) a.forEach((p, i) => dupOf.set(p.id, i ? 'older' : 'newest'));
+      const dupNote = dups.length ? `<div class="row-h" style="margin-bottom:8px"><span class="small bad">${dups.length} design${dups.length > 1 ? 's are' : ' is'} here more than once (same name).</span><button data-a="merge" title="Keep the most recently edited copy of each, remove the older ones">Merge duplicates</button></div>` : '';
       const signed = typeof Cloud !== 'undefined' && Cloud.email;
       const note = signed ? `<div class="muted small" style="margin-bottom:8px">☁ Synced with the Google Drive of ${esc(Cloud.email)} — open CircuitPilot on any PC and sign in to get them.</div>`
         : !$('#cloudBtn') || $('#cloudBtn').parentElement.classList.contains('hidden') ? (window.CPStatic && CPStatic.mode === 'static' ? '<div class="muted small" style="margin-bottom:8px">Web version: projects are saved in this browser only. Use Export → Project file (.json) to back them up or move them to another device.</div>' : '')
         : `<div class="muted small" style="margin-bottom:8px">${window.CPStatic && CPStatic.mode === 'static' ? 'Web version: projects are saved in this browser. ' : ''}<a href="#" id="projCloud">☁ Sign in with Google</a> to keep every project in your Google Drive and open them on any PC.</div>`;
-      list.innerHTML = note + (rows.length ? rows.map(p => `<div class="proj${p.id === Model.S.id ? ' cur' : ''}" data-id="${esc(p.id)}">
-        <div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}${p.id === Model.S.id ? ' <span class="badge basic">open</span>' : ''}</div>
-        <div class="muted small">${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · ${ago(p.updated)}</div></div>
+      list.innerHTML = note + dupNote + (rows.length ? rows.map(p => `<div class="proj${p.id === Model.S.id ? ' cur' : ''}" data-id="${esc(p.id)}">
+        <div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}${p.id === Model.S.id ? ' <span class="badge basic">open</span>' : ''}${dupOf.get(p.id) === 'newest' ? ' <span class="badge basic" title="This name is here more than once: this copy was edited last">newest copy</span>' : dupOf.get(p.id) === 'older' ? ' <span class="badge" title="This name is here more than once: another copy was edited later">older copy</span>' : ''}</div>
+        <div class="muted small">${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · last edited <b title="${esc(new Date(editedOf(p) * 1000).toLocaleString())}">${stamp(editedOf(p))}</b> (${ago(editedOf(p))})</div></div>
         <div class="pact"><button data-a="open" class="primary">Open</button><button data-a="dup" title="Duplicate">⧉</button>${hasHistory ? '<button data-a="hist" title="Earlier versions (restore)">⟲</button>' : ''}<button data-a="ren" title="Rename">✎</button><button data-a="del" class="danger" title="Delete">🗑</button></div></div>`).join('')
         : '<div class="muted">No projects yet.</div>') + (hasHistory ? '<div class="proj"><div class="pinfo muted small">Every project keeps earlier versions (⟲). </div><div class="pact"><button data-a="deleted">Deleted projects…</button></div></div>' : '');
       if ($('#projCloud')) $('#projCloud').onclick = e => { e.preventDefault(); Cloud.signIn().then(render); };
@@ -236,6 +259,7 @@ const Projects = (() => {
       const b = e.target.closest('button[data-a]'), row = e.target.closest('.proj');
       if (b && b.dataset.a === 'back') return render();
       if (b && b.dataset.a === 'deleted') return showDeleted().catch(err => App.toast(err.message));
+      if (b && b.dataset.a === 'merge') return mergeDuplicates().catch(err => App.toast(err.message));
       if (!b || !row) return;
       const id = row.dataset.id, name = row.querySelector('.pname').firstChild.textContent;
       try {
@@ -256,5 +280,5 @@ const Projects = (() => {
       } catch (err) { App.toast(err.message); }
     };
   }
-  return { init, show, close, saveNow, saveAs, create, openId: open, pause: v => { paused = !!v; if (paused) clearTimeout(timer); }, get online() { return online; }, get myLib() { return myLib; }, loadLibrary, savePart, deletePart, markLoaded: () => { lastSaved = ''; } };
+  return { init, show, close, saveNow, saveAs, create, nameKey, openId: open, pause: v => { paused = !!v; if (paused) clearTimeout(timer); }, get online() { return online; }, get myLib() { return myLib; }, loadLibrary, savePart, deletePart, markLoaded: () => { lastSaved = ''; } };
 })();

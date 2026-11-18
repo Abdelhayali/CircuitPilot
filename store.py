@@ -61,10 +61,14 @@ def list_projects():
         try:
             d = json.loads(js)
             parts, nets, board = len(d.get("components", [])), len(d.get("nets", {})), bool((d.get("board") or {}).get("w"))
+            edited = d.get("edited") if isinstance(d.get("edited"), (int, float)) else updated
         except ValueError:
             parts = nets = 0
             board = False
-        out.append({"id": pid, "name": name, "created": created, "updated": updated, "parts": parts, "nets": nets, "pcb": board})
+            edited = updated
+        # edited: when the design itself was last changed (kept in the project, so a copy loaded from GitHub or Google
+        # Drive keeps it); updated: when this PC last stored it
+        out.append({"id": pid, "name": name, "created": created, "updated": updated, "edited": edited, "parts": parts, "nets": nets, "pcb": board})
     return out
 
 

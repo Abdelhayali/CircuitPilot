@@ -2954,16 +2954,18 @@ const Pcb = (() => {
   const EASYEDA_CL = 0.1524;
   function easyedaRuleCheck() {
     const S = Model.S, R = rules(); if (!placed().length || !S.board.w) return null;
-    if (Math.min(R.clearance, padCl(R), viaCl(R)) >= EASYEDA_CL - 1e-6) return { below: 0, rule: EASYEDA_CL, project: R.clearance };
+    // EasyEDA Pro's default spacing next to pads and vias is 6 mil; between two tracks it accepts tighter gaps (that is
+    // how the jlcpcb_free_min preset is made: 0.105 mm between tracks, 0.16 mm next to pads and vias)
+    if (Math.min(padCl(R), viaCl(R)) >= EASYEDA_CL - 1e-6) return { below: 0, rule: EASYEDA_CL, project: Math.min(padCl(R), viaCl(R)) };
     const keep = S.rules;
-    S.rules = Object.assign({}, keep, { clearance: Math.max(R.clearance, EASYEDA_CL), padClearance: Math.max(padCl(R), EASYEDA_CL), viaClearance: Math.max(viaCl(R), EASYEDA_CL) });
+    S.rules = Object.assign({}, keep, { padClearance: Math.max(padCl(R), EASYEDA_CL), viaClearance: Math.max(viaCl(R), EASYEDA_CL) });
     let d; try { d = drc(); } finally { S.rules = keep; }
     const v = d.violations.filter(x => x.type === 'clearance'), gaps = v.map(x => +((/Clearance ([\d.]+) mm/.exec(x.msg) || [])[1])).filter(x => isFinite(x));
-    return { below: v.length, rule: EASYEDA_CL, project: R.clearance, smallest: gaps.length ? Math.min(...gaps) : null };
+    return { below: v.length, rule: EASYEDA_CL, project: Math.min(padCl(R), viaCl(R)), smallest: gaps.length ? Math.min(...gaps) : null };
   }
   function easyedaRuleNote() {
     const c = easyedaRuleCheck(); if (!c || !c.below) return '';
-    return 'EasyEDA Pro will list spacing errors (' + c.below + ' spots here are closer than 0.152 mm; EasyEDA counts every track piece, so its number is larger): it checks its own default rule (0.152 mm / 6 mil), not this board\'s rules (' + c.project + ' mm' + (c.smallest ? ', closest gap ' + c.smallest.toFixed(3) + ' mm' : '') + ' — fine for JLCPCB, which makes 0.1 mm). ' +
+    return 'EasyEDA Pro will list spacing errors (' + c.below + ' spots here are closer than 0.152 mm to a pad or via; EasyEDA counts every track piece, so its number is larger): it checks its own default rule (0.152 mm / 6 mil), not this board\'s rules (' + c.project + ' mm next to pads and vias' + (c.smallest ? ', closest gap ' + c.smallest.toFixed(3) + ' mm' : '') + ' — fine for JLCPCB, which makes 0.1 mm). ' +
       'To clear them in EasyEDA Pro: Design → Design Rule → Spacing → Safe Spacing, set the Default rule to 0.1 mm (4 mil), then run DRC again. ' +
       'Or route the board with the jlcpcb_free_min preset (0.16 mm next to pads and vias), which EasyEDA Pro accepts as it is.';
   }

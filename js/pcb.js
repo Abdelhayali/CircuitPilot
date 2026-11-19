@@ -1336,6 +1336,9 @@ const Pcb = (() => {
   // JLCPCB capabilities (1–2 layers, 1 oz, checked 2026-10-23): 0.1 / 0.1 mm track / space, vias down to 0.15 mm hole /
   // 0.25 mm diameter (extra cost), diameter ≥ hole + 0.1, plated through-hole ring ≥ 0.18 mm, copper ≥ 0.2 mm from the edge
   const JLC_MIN = { minTraceWidth: 0.1, minClearance: 0.1, minViaDrill: 0.15, minViaDiameter: 0.25, minAnnularRing: 0.05, minPthRing: 0.18, minHoleToHole: 0.5, minEdgeClearance: 0.2, minHoleSize: 0.15, minHoleToTrack: 0.2, minPthToTrack: 0.28, minPadToPad: 0.15 };
+  // JLCPCB multilayer (4+ layers, 1 oz; jlcpcb.com/capabilities): 0.09 mm track / gap, plated-hole ring 0.15 mm, and on the inner
+  // layers 0.2 mm from via holes / 0.3 mm from plated holes to copper. Vias, hole-to-track, pad-to-pad and edge as on 2 layers.
+  const JLC_MIN_4 = Object.assign({}, JLC_MIN, { minTraceWidth: 0.09, minClearance: 0.09, minPthRing: 0.15, minInnerViaToCopper: 0.2, minInnerPthToCopper: 0.3 });
   // JLCPCB via pricing: no extra charge with hole ≥ 0.3 mm and diameter ≥ 0.4 mm; on boards with more than 2 layers a 0.2 mm
   // hole is also free when the diameter is ≥ 0.45 mm. Smaller vias cost extra. Diameter ≥ hole + 0.1 mm (0.15 preferred).
   const costsExtra = (v, layers = rules().layers) => !((v.drill >= 0.3 - 1e-9 && v.d >= 0.4 - 1e-9) || (layers > 2 && v.drill >= 0.2 - 1e-9 && v.d >= 0.45 - 1e-9));
@@ -1350,6 +1353,8 @@ const Pcb = (() => {
   const RULE_PRESETS = {
     jlcpcb_free_min: { label: 'JLCPCB 2-layer — small, no extra cost, clean in EasyEDA Pro DRC (0.2 mm tracks, 0.105 / 0.16 mm gaps, vias 0.45/0.3) — default', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.105, padClearance: 0.16, viaClearance: 0.16, pourClearance: 0.26, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_tight: { label: 'JLCPCB 2-layer — tightest at no extra cost (0.1 mm everywhere; EasyEDA Pro needs its rules lowered)', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.1, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.2, layers: 2, neckDown: true, ...JLC_MIN } },
+    jlcpcb_4layer: { label: 'JLCPCB 4-layer — top, GND / power planes inside, bottom; no extra cost (0.2 mm tracks, 0.105 / 0.16 mm gaps, vias 0.45/0.3; fab minimum 0.09 mm)', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.105, padClearance: 0.16, viaClearance: 0.16, pourClearance: 0.26, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.3, layers: 4, neckDown: true, ...JLC_MIN_4 } },
+    jlcpcb_4layer_tight: { label: 'JLCPCB 4-layer — tightest at no extra cost (0.09 mm gaps, 0.15 mm tracks, vias 0.45/0.3; EasyEDA Pro needs its rules lowered)', values: { traceWidth: 0.15, powerTraceWidth: 0.3, clearance: 0.09, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.2, layers: 4, neckDown: true, ...JLC_MIN_4 } },
     jlcpcb: { label: 'JLCPCB 2-layer — standard (0.25 mm tracks, vias 0.6/0.3)', values: { traceWidth: 0.25, powerTraceWidth: 0.5, clearance: 0.2, viaDiameter: 0.6, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_min: { label: 'JLCPCB 2-layer — 5/5 mil', values: { traceWidth: 0.127, powerTraceWidth: 0.3, clearance: 0.127, viaDiameter: 0.56, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_power: { label: 'JLCPCB 2-layer — power / robust', values: { traceWidth: 0.3, powerTraceWidth: 0.8, clearance: 0.25, viaDiameter: 0.8, viaDrill: 0.4, edgeClearance: 0.5, layers: 2, neckDown: true, ...JLC_MIN } },
@@ -1406,7 +1411,7 @@ const Pcb = (() => {
     for (const [n, v] of Object.entries(R.netWidths)) if (+v < R.minTraceWidth) w.push(`Net ${n} width ${v} < fab minimum ${R.minTraceWidth} mm`);
     return w;
   }
-  const NUM_KEYS = ['minPadToPad', 'traceWidth', 'powerTraceWidth', 'clearance', 'viaDiameter', 'viaDrill', 'edgeClearance', 'minTraceWidth', 'minClearance', 'minViaDrill', 'minViaDiameter', 'minAnnularRing', 'minPthRing', 'minHoleToHole', 'minEdgeClearance', 'minHoleSize', 'minHoleToTrack', 'minPthToTrack', 'padClearance', 'viaClearance', 'pourClearance', 'partGap'];
+  const NUM_KEYS = ['minInnerViaToCopper', 'minInnerPthToCopper', 'minPadToPad', 'traceWidth', 'powerTraceWidth', 'clearance', 'viaDiameter', 'viaDrill', 'edgeClearance', 'minTraceWidth', 'minClearance', 'minViaDrill', 'minViaDiameter', 'minAnnularRing', 'minPthRing', 'minHoleToHole', 'minEdgeClearance', 'minHoleSize', 'minHoleToTrack', 'minPthToTrack', 'padClearance', 'viaClearance', 'pourClearance', 'partGap'];
   // Merge a partial rule update into the project (preset first, then overrides).
   function setRules(u = {}) {
     let base = Model.S.rules || {};
@@ -3094,8 +3099,9 @@ const Pcb = (() => {
       const plane = (layer, net, func) => file(func, (A, b) => {
         b.push('G01*', 'G36*', X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*', 'G37*');
         b.push('%LPC*%', A(`C,${f6(2 * Math.max(R.edgeClearance, 0.3))}`) + '*', X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*');
-        for (const v of S.pcb.vias) if (!net || v.net !== net) { b.push(A(`C,${f6(Math.max(v.d + 2 * cl, (+v.drill || 0) + 2 * viaHoleGap(R)))}`) + '*'); b.push(X(v.x, v.y) + 'D03*'); }
-        for (const p of pads) if (p.drill && (!net || p.net !== net)) { b.push(A(`C,${f6(Math.max(Math.max(p.w, p.h) + 2 * cl, p.drill + 2 * pthHoleGap(R)))}`) + '*'); b.push(X(p.x, p.y) + 'D03*'); }
+        const vIn = Math.max(viaHoleGap(R), +R.minInnerViaToCopper || 0.2), pIn = Math.max(pthHoleGap(R), +R.minInnerPthToCopper || 0.3);
+        for (const v of S.pcb.vias) if (!net || v.net !== net) { b.push(A(`C,${f6(Math.max(v.d + 2 * cl, (+v.drill || 0) + 2 * vIn))}`) + '*'); b.push(X(v.x, v.y) + 'D03*'); }
+        for (const p of pads) if (p.drill && (!net || p.net !== net)) { b.push(A(`C,${f6(Math.max(Math.max(p.w, p.h) + 2 * cl, p.drill + 2 * pIn))}`) + '*'); b.push(X(p.x, p.y) + 'D03*'); }
         for (const h of S.pcb.holes || []) { b.push(A(`C,${f6(h.d + 2 * Math.max(cl, 0.3))}`) + '*'); b.push(X(h.x, h.y) + 'D03*'); }
         b.push('%LPD*%');
       });

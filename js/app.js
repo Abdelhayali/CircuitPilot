@@ -449,7 +449,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611191300');
+      worker = new Worker('js/route-worker.js?v=202611191500');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;
@@ -1838,6 +1838,19 @@ const App = (() => {
     $('#fileIn').onchange = async e => {
       const f = e.target.files[0]; if (!f) return;
       try {
+        // KiCad: a zipped project, or the .kicad_pcb (with its .kicad_sch sheets) picked together
+        const all = [...e.target.files];
+        let kc = null;
+        if (all.some(x => /\.kicad_(pcb|sch|pro)$/i.test(x.name))) { kc = {}; for (const x of all) if (/\.kicad_(pcb|sch|pro)$/i.test(x.name)) kc[x.name] = await x.text(); }
+        else if (/\.zip$/i.test(f.name)) { const z = await KiCadImport.filesFromZip(await f.arrayBuffer()); if (Object.keys(z).some(n => /\.kicad_pcb$/i.test(n))) kc = z; }
+        if (kc) {
+          toast('Reading the KiCad project…', 20000);
+          const nd = Model.blank(); nd.name = (Object.keys(kc).find(n => /\.kicad_pcb$/i.test(n)) || f.name).split('/').pop().replace(/\.(kicad_pcb|zip)$/i, ''); Model.load(nd);
+          const r = Model.mutate(() => KiCadImport.importProject(kc));
+          Projects.markLoaded(); await Projects.saveNow(); Projects.close(); showView('pcb'); Pcb.fit();
+          toast(`Imported KiCad project: ${r.components} parts (${r.footprints} footprints), ${r.nets} nets, ${r.sheets} sheet${r.sheets > 1 ? 's' : ''}, ${r.layers}-layer PCB ${r.board_mm[0]} × ${r.board_mm[1]} mm with ${r.tracks} tracks, ${r.vias} vias, ${r.pours} pours${r.notes.length ? ' — ' + r.notes.join('; ') : ''}`, 15000);
+          e.target.value = ''; return;
+        }
         if (EasyEDAPro.isPro(f.name)) {   // EasyEDA Pro project → new project with schematic sheets, parts, nets and the PCB
           toast('Reading the EasyEDA Pro project…', 20000);
           const P = await EasyEDAPro.read(await f.arrayBuffer());

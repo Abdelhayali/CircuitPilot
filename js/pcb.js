@@ -31,7 +31,7 @@ const Pcb = (() => {
     return fp.pads.map((p, i) => {
       const [x, y] = Lib.rot(bot ? -p.x : p.x, p.y, r), key = c.ref + '.' + p.num;
       const net = idx ? (idx[key] || (c.pinAlias && c.pinAlias[p.num] ? idx[c.ref + '.' + c.pinAlias[p.num]] : undefined)) : undefined;
-      return { ...p, ep: ep.has(p.num), x: c.pcb.x + x, y: c.pcb.y + y, w: sw ? p.h : p.w, h: sw ? p.w : p.h, key, uid: c.ref + '#' + i, ref: c.ref, layer: p.drill ? null : (bot ? 'B' : 'F'), net };
+      return { ...p, ep: ep.has(p.num), x: c.pcb.x + x, y: c.pcb.y + y, w: sw ? p.h : p.w, h: sw ? p.w : p.h, key, uid: c.ref + '#' + i, ref: c.ref, layer: p.drill ? null : (bot !== !!p.back ? 'B' : 'F'), net };
     });
   }
   function fpBox(c, pad = 0) {
@@ -222,6 +222,9 @@ const Pcb = (() => {
     return out.map(q => [+q[0].toFixed(4), +q[1].toFixed(4)]);
   }
   // pour outline: its polygon, or the board outline (whole) — optionally clipped ({x_max: 21.3} …): then it follows outline changes
+  const cuL = R => +R.layers === 1 ? ['F'] : +R.layers === 4 ? ['F', 'B', 'In1', 'In2'] : ['F', 'B'];
+  // pours of another net on the same layer with a higher priority (imported KiCad zones): this pour keeps its clearance from them
+  const higherPours = pr => (Model.S.pcb.pours || []).filter(o => o !== pr && o.layer === pr.layer && o.net !== pr.net && (+o.priority || 0) > (+pr.priority || 0));
   const pourPoly = pr => { const base = pr.whole || !pr.pts ? boardPoly() : pr.pts; return pr.clip ? clipPoly(base, pr.clip) : base; };
   // ---------- keep-out areas: no tracks / vias / copper pour (and optionally no parts) inside, on one or both layers ----------
   // { name, layer: 'F' | 'B' | 'both', pts: polygon (board mm), tracks, vias, pours, parts }
@@ -312,8 +315,10 @@ const Pcb = (() => {
   // Islands that touch no copper of the pour's net (dead copper) or are smaller than the rule pourMinArea are dropped:
   // label 0 like blocked cells. (The Gerber and the views draw the finer outlines of pourFill.)
   const pourMemo = new Map(); let pourCells = 0;
-  function pourRaster(pr, gStep = 0.2) {
-    const S0 = Model.S, key = JSON.stringify([pr, gStep, S0.board, S0.rules, S0.nets[pr.net], S0.pcb.traces, S0.pcb.vias, S0.pcb.holes, S0.pcb.keepouts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side])]);
+  // grid 0.2 mm; boards with gaps under 0.1 mm (fine-pitch imported designs) 0.05 mm, else thin pour necks vanish
+  function pourRaster(pr, gStep) {
+    if (!gStep) gStep = (+rules().clearance || 0.2) < 0.1 - 1e-9 ? 0.05 : 0.2;
+    const S0 = Model.S, key = JSON.stringify([pr, gStep, S0.board, S0.rules, S0.nets[pr.net], higherPours(pr), S0.pcb.traces, S0.pcb.vias, S0.pcb.holes, S0.pcb.keepouts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side])]);
     if (pourMemo.has(key)) return pourMemo.get(key);
     const r = pourRasterI(pr, gStep);
     // cache bounded by size too: fine rasters (EasyEDA fills at 0.05 / 0.1 mm) are big, several jobs share one machine
@@ -336,7 +341,7 @@ const Pcb = (() => {
       const b = bboxOf(sh), x0 = Math.max(0, Math.floor((b[0] - r) / gStep)), x1 = Math.min(W - 1, Math.ceil((b[2] + r) / gStep)), y0 = Math.max(0, Math.floor((b[1] - r) / gStep)), y1 = Math.min(H - 1, Math.ceil((b[3] + r) / gStep));
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const i = y * W + x; if (ok[i] && shapeDist({ k: 'circ', c: [x * gStep, y * gStep], r: 0 }, sh) < r) ok[i] = 0; }
     };
-    const L2 = R.layers === 1 ? ['F'] : ['F', 'B'];
+    const L2 = cuL(R);
     for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net !== pr.net && padCu(q, L2).includes(pr.layer)) { block(padShape(q), cl); if (q.drill && q.drill / 2 + pthHoleGap(R) > cl) block({ k: 'circ', c: [q.x, q.y], r: q.drill / 2 + pthHoleGap(R) - cl }, cl); }
     for (const t of S.pcb.traces) if (t.net !== pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) block({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, cl);
     for (const v of S.pcb.vias) if (v.net !== pr.net) block({ k: 'circ', c: [v.x, v.y], r: Math.max(v.d / 2, (+v.drill || 0) / 2 + viaHoleGap(R) - cl) }, cl);
@@ -345,6 +350,7 @@ const Pcb = (() => {
       const b = koBox(k), x0 = Math.max(0, Math.floor(b[0] / gStep) - 1), x1 = Math.min(W - 1, Math.ceil(b[2] / gStep) + 1), y0 = Math.max(0, Math.floor(b[1] / gStep) - 1), y1 = Math.min(H - 1, Math.ceil(b[3] / gStep) + 1);
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (koDist(k, x * gStep, y * gStep) < gStep * 0.5) ok[y * W + x] = 0;
     }
+    for (const o of higherPours(pr)) { const pl = pourPoly(o), keep = ok.slice(); ok.fill(0); fill(pl, 1); for (let i = 0; i < N; i++) ok[i] = keep[i] && !ok[i] ? 1 : 0; for (let i = 0; i < pl.length; i++) block({ k: 'seg', a: pl[i], b: pl[(i + 1) % pl.length], r: 0 }, cl); }
     // board edge clearance
     for (let i = 0; i < bpoly.length; i++) block({ k: 'seg', a: bpoly[i], b: bpoly[(i + 1) % bpoly.length], r: 0 }, R.edgeClearance + (+pr._margin || 0));
     // islands: 8-connected, so copper touching only at a corner counts as one piece (nothing is cleared between them)
@@ -377,7 +383,7 @@ const Pcb = (() => {
     const r = pourRaster(pr), idx = Model.pinIndex(), out = [];
     for (let k = 1; k <= r.islands; k++) out.push({ island: k, area_mm2: 0, pads: [], vias: 0 });
     for (let i = 0; i < r.label.length; i++) if (r.label[i]) out[r.label[i] - 1].area_mm2 += r.g * r.g;
-    for (const c of placed()) for (const p of padsOf(c, idx)) if (p.net === pr.net && padCu(p, ['F', 'B']).includes(pr.layer)) {
+    for (const c of placed()) for (const p of padsOf(c, idx)) if (p.net === pr.net && padCu(p, cuL(rules())).includes(pr.layer)) {
       const labs = new Set([[0, 0], [0.4, 0], [-0.4, 0], [0, 0.4], [0, -0.4]].map(([a, b]) => r.at(p.x + a * p.w, p.y + b * p.h)).filter(Boolean));
       for (const l of labs) out[l - 1].pads.push(p.key);
     }
@@ -474,14 +480,14 @@ const Pcb = (() => {
     const S = Model.S, R = rules(), cl = pourCl(R, pr), A = S.board.w * S.board.h;
     // Gerber: ≥ 0.05 mm (finer on small boards); 'view' (board / 3D view, redrawn while parts move): 0.1 – 0.2 mm by board size
     const g = gStep === 'view' ? (A <= 1000 ? 0.1 : A <= 3000 ? 0.15 : 0.2) : gStep || Math.max(0.05, Math.ceil(Math.sqrt(A / 2.5e6) * 100) / 100);
-    const key = JSON.stringify([pr, g, S.board, S.rules, S.nets[pr.net], S.pcb.traces, S.pcb.vias, S.pcb.holes, S.pcb.keepouts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side])]);
+    const key = JSON.stringify([pr, g, S.board, S.rules, S.nets[pr.net], higherPours(pr), S.pcb.traces, S.pcb.vias, S.pcb.holes, S.pcb.keepouts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side])]);
     if (fillMemo.has(key)) return fillMemo.get(key);
     const r = pourFillI(pr, g, cl, R);
     fillMemo.set(key, r); while (fillMemo.size > 8) fillMemo.delete(fillMemo.keys().next().value);
     return r;
   }
   function pourFillI(pr, g, cl, R) {
-    const S = Model.S, idx = Model.pinIndex(), L2 = R.layers === 1 ? ['F'] : ['F', 'B'];
+    const S = Model.S, idx = Model.pinIndex(), L2 = cuL(R);
     const { sqrt, abs, min, max, floor, ceil } = Math;   // local: global lookups are slow in the tool server's sandbox
     const dl = min(1.2 * g, 0.6 * cl), M = dl + 2 * g;   // δ, and how far the field is resolved
     // the grid covers the pour's own area (a panel has many small pours); sample (x, y) sits at ((x + X0) g, (y + Y0) g)
@@ -508,6 +514,7 @@ const Pcb = (() => {
     polyTerm(boardPoly(), R.edgeClearance, 1);
     polyTerm(pp, -dl, 1);   // the trace lands on the pour outline itself
     for (const k of pourKeepouts(pr.layer)) polyTerm(k.pts, 0, -1);
+    for (const o of higherPours(pr)) polyTerm(pourPoly(o), -cl, -1);
     for (const c of placed()) for (const q of padsOf(c, idx)) if (q.net !== pr.net && padCu(q, L2).includes(pr.layer)) { obstacle(padShape(q), cl); if (q.drill && q.drill / 2 + pthHoleGap(R) > cl) obstacle({ k: 'circ', c: [q.x, q.y], r: q.drill / 2 + pthHoleGap(R) - cl }, cl); }
     for (const t of S.pcb.traces) if (t.net !== pr.net && t.layer === pr.layer) for (let i = 1; i < t.pts.length; i++) obstacle({ k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, cl);
     for (const v of S.pcb.vias) if (v.net !== pr.net) obstacle({ k: 'circ', c: [v.x, v.y], r: Math.max(v.d / 2, (+v.drill || 0) / 2 + viaHoleGap(R) - cl) }, cl);
@@ -1338,7 +1345,7 @@ const Pcb = (() => {
   const JLC_MIN = { minTraceWidth: 0.1, minClearance: 0.1, minViaDrill: 0.15, minViaDiameter: 0.25, minAnnularRing: 0.05, minPthRing: 0.18, minHoleToHole: 0.5, minEdgeClearance: 0.2, minHoleSize: 0.15, minHoleToTrack: 0.2, minPthToTrack: 0.28, minPadToPad: 0.15 };
   // JLCPCB multilayer (4+ layers, 1 oz; jlcpcb.com/capabilities): 0.09 mm track / gap, plated-hole ring 0.15 mm, and on the inner
   // layers 0.2 mm from via holes / 0.3 mm from plated holes to copper. Vias, hole-to-track, pad-to-pad and edge as on 2 layers.
-  const JLC_MIN_4 = Object.assign({}, JLC_MIN, { minTraceWidth: 0.09, minClearance: 0.09, minPthRing: 0.15, minInnerViaToCopper: 0.2, minInnerPthToCopper: 0.3 });
+  const JLC_MIN_4 = Object.assign({}, JLC_MIN, { minTraceWidth: 0.0889, minClearance: 0.0889, minPthRing: 0.15, minInnerViaToCopper: 0.2, minInnerPthToCopper: 0.3 });
   // JLCPCB via pricing: no extra charge with hole ≥ 0.3 mm and diameter ≥ 0.4 mm; on boards with more than 2 layers a 0.2 mm
   // hole is also free when the diameter is ≥ 0.45 mm. Smaller vias cost extra. Diameter ≥ hole + 0.1 mm (0.15 preferred).
   const costsExtra = (v, layers = rules().layers) => !((v.drill >= 0.3 - 1e-9 && v.d >= 0.4 - 1e-9) || (layers > 2 && v.drill >= 0.2 - 1e-9 && v.d >= 0.45 - 1e-9));
@@ -2244,9 +2251,9 @@ const Pcb = (() => {
     }
     const pours = S.pcb.pours || [];
     for (let i = 0; i < pours.length; i++) for (let j = i + 1; j < pours.length; j++) {
-      const A = pours[i], B = pours[j]; if (A.layer !== B.layer || A.net === B.net) continue;
+      const A = pours[i], B = pours[j]; if (A.layer !== B.layer || A.net === B.net || (+A.priority || 0) !== (+B.priority || 0)) continue;
       const pa = pourPoly(A), pb = pourPoly(B);
-      if (pa.some(q => inPoly(q[0], q[1], pb)) || pb.some(q => inPoly(q[0], q[1], pa))) add('pour', `Copper pours ${A.net} and ${B.net} overlap on ${A.layer === 'F' ? 'TopLayer' : 'BottomLayer'} (short)`, pa[0][0], pa[0][1]);
+      if (pa.some(q => inPoly(q[0], q[1], pb)) || pb.some(q => inPoly(q[0], q[1], pa))) add('pour', `Copper pours ${A.net} and ${B.net} overlap on ${A.layer === 'F' ? 'TopLayer' : A.layer === 'B' ? 'BottomLayer' : A.layer} (short; give one a higher priority)`, pa[0][0], pa[0][1]);
     }
     for (const t of S.pcb.traces) {
       if (t.w < R.minTraceWidth - 1e-6) add('trace-width', `Trace on ${t.net} is ${t.w} mm (fab minimum ${R.minTraceWidth})`, t.pts[0][0], t.pts[0][1]);
@@ -3054,7 +3061,7 @@ const Pcb = (() => {
     const outline = boardPoly();
     const copper = (layer, func) => file(func, (A, b) => {
       // copper pours: dark region, then clear (LPC) other nets' copper + the board-edge band, then all copper on top
-      const pours = (S.pcb.pours || []).filter(pr => pr.layer === layer && S.nets[pr.net]);
+      const pours = (S.pcb.pours || []).filter(pr => pr.layer === layer && S.nets[pr.net]).sort((a, c) => (+a.priority || 0) - (+c.priority || 0));
       if (pours.length) {
         b.push('G01*');
         const region = pts => { b.push('G36*', X(...pts[0]) + 'D02*'); for (const q of pts.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...pts[0]) + 'D01*', 'G37*'); };
@@ -3105,8 +3112,8 @@ const Pcb = (() => {
         for (const h of S.pcb.holes || []) { b.push(A(`C,${f6(h.d + 2 * Math.max(cl, 0.3))}`) + '*'); b.push(X(h.x, h.y) + 'D03*'); }
         b.push('%LPD*%');
       });
-      files['board-In1_Cu.g2'] = plane('In1', pm.In1, 'Copper,L2,Inr,Plane');
-      files['board-In2_Cu.g3'] = plane('In2', pm.In2, 'Copper,L3,Inr,Plane');
+      files['board-In1_Cu.g2'] = pm.In1 ? plane('In1', pm.In1, 'Copper,L2,Inr,Plane') : copper('In1', 'Copper,L2,Inr,Signal');
+      files['board-In2_Cu.g3'] = pm.In2 ? plane('In2', pm.In2, 'Copper,L3,Inr,Plane') : copper('In2', 'Copper,L3,Inr,Signal');
     }
     // flex board: stiffener outlines as a mechanical layer, and the specs to give with the order
     const flex = S.pcb.flex && S.pcb.flex.on ? S.pcb.flex : null;

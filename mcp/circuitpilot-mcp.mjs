@@ -390,6 +390,7 @@ const EXTRA = [
   { name: 'get_bom', description: 'Bill of materials of the current project as CSV text (qty, refs, type, value, footprint, LCSC part).', input_schema: { type: 'object', properties: {} } },
   { name: 'add_to_report', description: 'Add the current project to a report file: kind "design" writes a summary entry (name, board, layers, parts, nets, routing, vias, DRC, datasheet title / description, project notes) — updated in place when the project is already there; kind "finding" adds a note (title, text, severity). JSON file {designs: [], findings: []} (default Documents/CircuitPilot exports/report.json), or Markdown when the path ends with .md.', input_schema: { type: 'object', properties: { path: { type: 'string' }, kind: { type: 'string', enum: ['design', 'finding'] }, title: { type: 'string' }, text: { type: 'string' }, severity: { type: 'string', enum: ['info', 'warning', 'error'] }, extra: { type: 'object', description: 'more fields for the entry' } } } },
   { name: 'import_folder', description: 'Add every project found in a folder and all its subfolders: CircuitPilot project files (.json / .circuit.json) and EasyEDA PCB files (.json, imported with tracks). Each becomes a new project; files that match a project already in CircuitPilot (same name and part count) are skipped unless skip_existing: false. dry_run: true only lists what would be imported. The first imported project becomes current.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: 'folder on this PC' }, recursive: { type: 'boolean', description: 'default true' }, dry_run: { type: 'boolean' }, skip_existing: { type: 'boolean', description: 'default true' } } } },
+  { name: 'import_kicad', description: 'Import a KiCad project (KiCad 6–9) as a new CircuitPilot project and make it current: path = its .zip, its folder, or the .kicad_pcb (the .kicad_sch sheets next to it are read too). Brings every part with its real footprint (pads, holes, pin names from the schematic symbols), the nets of the board, the board outline, tracks, vias, copper zones (with their priority) and keep-outs on up to 4 copper layers (In1 / In2 as signal layers), mounting holes, silkscreen texts and the schematic sheets. Parts and copper are locked in place. Returns counts and notes on what was approximated (custom-shaped pads as their bounding rectangle, slots as round holes, more than 4 copper layers).', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: '.zip, folder or .kicad_pcb on this PC' }, name: { type: 'string', description: 'project name (default: the board file name)' } } } },
   { name: 'export_parts', description: 'Write parts of My Library (default: all) to a JSON file, to use them in another CircuitPilot database or on another PC (import_parts).', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, path: { type: 'string', description: 'file path (default Documents/CircuitPilot exports/my-library.json)' } } } },
   { name: 'import_parts', description: 'Add the parts of a JSON file from export_parts (or one part object) to My Library. Existing parts with the same key are kept unless overwrite: true.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, overwrite: { type: 'boolean' } } } },
   { name: 'job_status', description: 'Result of a background job (long tools — generate_pcb, route_pcb, reroute, optimize_pcb, place_footprints, place_in_free_area, update_pcb_from_schematic, auto_layout, stitch_pour, connect_pads_to_pour, arrange_silk_labels, export_project — hand out a job_id when they take longer than ~40 s). Waits up to wait_s (default 50, max 55) for it to finish. Without job_id: lists the jobs.', input_schema: { type: 'object', properties: { job_id: { type: 'string' }, wait_s: { type: 'number' } } } },
@@ -403,7 +404,7 @@ const EXTRA = [
 ];
 // every tool takes `project`: the call works on that project (it becomes the current one) — no guessing after a restart
 const PROJECT_ARG = { type: 'string', description: 'Project id (or exact name) this call works on; it becomes the current project. Pass it in every call.' };
-const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job', 'export_parts', 'import_parts', 'import_folder']);
+const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job', 'export_parts', 'import_parts', 'import_folder', 'import_kicad']);
 const TOOLS = [...EXTRA, ...Engine.TOOLS.filter(t => !EXTRA.some(x => x.name === t.name)).map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema }))]
   .map(t => NO_PROJECT_ARG.has(t.name) ? t : Object.assign({}, t, { input_schema: Object.assign({}, t.input_schema, { properties: Object.assign({ project: PROJECT_ARG }, t.input_schema.properties || {}) }) }));
 // tools that need no project at all
@@ -484,6 +485,38 @@ async function callTool(name, input = {}) {
       }
       if (imported.length) { setCurrent(imported[0].id); await showProject(imported[0].id); }
       return { folder: root, json_files: files.length, imported, already_there: found.filter(x => !todo.includes(x)).map(x => x.file), failed: failed.length ? failed : undefined, skipped: skipped.slice(0, 50), current: imported.length ? imported[0].id : undefined };
+    }
+    case 'import_kicad': {
+      const p = path.resolve(String(input.path || '')); if (!fs.existsSync(p)) throw new Error('No file or folder ' + p);
+      const files = {}, want = n => /\.kicad_(pcb|sch|pro)$/i.test(n);
+      if (fs.statSync(p).isDirectory()) {
+        const walk = (dir, depth) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const q = path.join(dir, e.name); if (e.isDirectory()) { if (depth < 4 && !/^(\.git|node_modules|.*-backups)$/i.test(e.name)) walk(q, depth + 1); } else if (want(e.name)) files[path.relative(p, q).replace(/\\/g, '/')] = fs.readFileSync(q, 'utf8'); } };
+        walk(p, 0);
+      } else if (/\.zip$/i.test(p)) {
+        // zip: central directory → stored / deflated entries
+        const zlib = await import('node:zlib'), b = fs.readFileSync(p); let e = -1;
+        for (let i = b.length - 22; i >= Math.max(0, b.length - 66000); i--) if (b.readUInt32LE(i) === 0x06054b50) { e = i; break; }
+        if (e < 0) throw new Error('not a zip file');
+        let q = b.readUInt32LE(e + 16); const n = b.readUInt16LE(e + 10);
+        for (let k = 0; k < n && b.readUInt32LE(q) === 0x02014b50; k++) {
+          const method = b.readUInt16LE(q + 10), cs = b.readUInt32LE(q + 20), nl = b.readUInt16LE(q + 28), xl = b.readUInt16LE(q + 30), cl = b.readUInt16LE(q + 32), off = b.readUInt32LE(q + 42);
+          const name = b.toString('utf8', q + 46, q + 46 + nl); q += 46 + nl + xl + cl;
+          if (!want(name) || /-backups\//i.test(name)) continue;
+          const st = off + 30 + b.readUInt16LE(off + 26) + b.readUInt16LE(off + 28), raw = b.subarray(st, st + cs);
+          files[name] = (method === 8 ? zlib.inflateRawSync(raw) : raw).toString('utf8');
+        }
+      } else if (/\.kicad_pcb$/i.test(p)) {
+        const dir = path.dirname(p); files[path.basename(p)] = fs.readFileSync(p, 'utf8');
+        for (const f of fs.readdirSync(dir)) if (/\.kicad_(sch|pro)$/i.test(f)) files[f] = fs.readFileSync(path.join(dir, f), 'utf8');
+      } else throw new Error('give the KiCad project .zip, its folder or its .kicad_pcb');
+      const pcbs = Object.keys(files).filter(n => /\.kicad_pcb$/i.test(n));
+      if (!pcbs.length) throw new Error('no .kicad_pcb found in ' + p);
+      if (pcbs.length > 1) for (const n of pcbs.slice(1)) delete files[n];   // the first board (the others are listed in the result)
+      const nd = Model.blank(); nd.name = input.name || pcbs[0].split('/').pop().replace(/\.kicad_pcb$/i, ''); Model.load(nd);
+      const r = ctx.KiCadImport.importProject(files); if (input.name) Model.S.name = input.name;
+      const data = JSON.parse(Model.snapshot()); delete data.id;
+      const saved = await api('PUT', '/api/projects/', data); setCurrent(saved.id); await showProject(saved.id);
+      return Object.assign({ project: saved.id }, r, pcbs.length > 1 ? { other_boards_not_imported: pcbs.slice(1) } : {}, { next: 'run_drc to see what the fab rules flag; view_design {view: "pcb"} to look at it' });
     }
     case 'export_parts': {
       const lib = await api('GET', '/api/library'), want = Array.isArray(input.keys) && input.keys.length ? new Set(input.keys) : null;

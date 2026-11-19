@@ -10,8 +10,8 @@ const PcbView = (() => {
     { id: 'BS', name: 'BottomSilkLayer', color: '#66CC33' },
     { id: 'FM', name: 'TopSolderMaskLayer', color: '#800080', off: true },
     { id: 'BM', name: 'BottomSolderMaskLayer', color: '#AA00FF', off: true },
-    { id: 'In1', name: 'Inner1 (plane)', color: '#C9822B', inner: true },
-    { id: 'In2', name: 'Inner2 (plane)', color: '#2BA6A0', inner: true },
+    { id: 'In1', name: 'Inner1', color: '#C9822B', inner: true },
+    { id: 'In2', name: 'Inner2', color: '#2BA6A0', inner: true },
     { id: 'MU', name: 'Multi-Layer', color: '#C0C0C0' },
     { id: 'HO', name: 'HoleLayer', color: '#222222' },
     { id: 'OL', name: 'BoardOutline', color: '#FF00FF' },
@@ -48,7 +48,7 @@ const PcbView = (() => {
     Model.S.pcb.traces.forEach((t, i) => { if (v.net && t.net && t.net !== v.net) return; for (const k of [0, t.pts.length - 1]) if (Math.hypot(t.pts[k][0] - v.x, t.pts[k][1] - v.y) < 1e-3) out.push([i, k]); });
     return out;
   }
-  const LNAME = { F: 'TopLayer', B: 'BottomLayer', FS: 'TopSilkLayer', BS: 'BottomSilkLayer', FM: 'TopSolderMaskLayer', BM: 'BottomSolderMaskLayer' };
+  const LNAME = { F: 'TopLayer', B: 'BottomLayer', In1: 'Inner1', In2: 'Inner2', FS: 'TopSilkLayer', BS: 'BottomSilkLayer', FM: 'TopSolderMaskLayer', BM: 'BottomSolderMaskLayer' };
 
   let svg, world, grid, vp, overlay, boxEl, cache = { pads: [] };
   const $ = s => document.querySelector(s);
@@ -682,8 +682,11 @@ const PcbView = (() => {
   const padEl = (p, fill, extra = '', grow = 0) => p.shape === 'round'
     ? `<circle data-o="${esc(p.ref)}" cx="${p.x}" cy="${p.y}" r="${p.w / 2 + grow}" fill="${fill}" ${extra}/>`
     : `<rect data-o="${esc(p.ref)}" x="${p.x - p.w / 2 - grow}" y="${p.y - p.h / 2 - grow}" width="${p.w + 2 * grow}" height="${p.h + 2 * grow}" rx="${p.shape === 'oval' ? Math.min(p.w, p.h) / 2 + grow : 0}" fill="${fill}" ${extra}/>`;
+  let shownLayers = null;
   function render() {
     if (!world) return;
+    // the layer list follows the copper layer count (a 4-layer board opened or imported shows Inner1 / Inner2)
+    if (overlay && shownLayers !== Pcb.rules().layers) { shownLayers = Pcb.rules().layers; renderLayers(); }
     const S = Model.S, cs = Pcb.placed();
     cache.pads = allPads();
     if (!cs.length || !S.board.w) { world.innerHTML = '<text x="0" y="0" text-anchor="middle" fill="#888" style="font-size:2.4px">No PCB yet — click “Generate PCB”, or ask the Copilot to make the board</text>'; renderLiveLayer(); return; }
@@ -693,7 +696,9 @@ const PcbView = (() => {
     for (const c of cs) { if (!partVisible(c)) continue; const b = Pcb.fpBox(c); out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); }
     const R0 = Pcb.rules(), bpoly = Pcb.boardPoly(), bpath = 'M' + bpoly.map(q => q.join(' ')).join('L') + 'Z';
     out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath>${['KOT', 'KOB'].map(id => `<pattern id="hatch${id}" width="0.8" height="0.8" patternUnits="userSpaceOnUse" patternTransform="rotate(${id === 'KOT' ? 45 : -45})"><line x1="0" y1="0" x2="0" y2="0.8" stroke="${col(id)}" stroke-width="0.12"/></pattern>`).join('')}</defs>`);
-    const order = ui.active === 'F' ? ['B', 'F'] : ['F', 'B'];
+    // 4 layers: inner layers without a plane net are signal layers (imported KiCad boards): drawn under the outer ones
+    const pm0 = R0.layers === 4 ? Pcb.planeMap() : {}, inner = R0.layers === 4 ? ['In2', 'In1'].filter(L => !pm0[L]) : [];
+    const order = inner.concat(ui.active === 'F' ? ['B', 'F'] : ['F', 'B']);
     for (const L of order) {
       if (!vis(L)) continue;
       const op = ui.dim && L !== ui.active ? 0.45 : 0.9, c = col(L);

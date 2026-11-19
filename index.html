@@ -53,7 +53,7 @@
   <button id="btnTheme" title="Theme"></button>
   <a id="btnGuide" class="guidebtn" href="https://pcbgo.site/docs/CircuitPilot-Tutorial.pdf" target="_blank" rel="noopener" title="Tutorial and user guide (PDF): getting started, every tool, Claude Desktop, the Windows app">📖 Guide</a>
   <button id="btnSettings">⚙ Settings</button>
-  <input type="file" id="fileIn" accept=".json,.epro,.epro2,.zip" hidden>
+  <input type="file" id="fileIn" accept=".json,.epro,.epro2,.zip,.kicad_pcb,.kicad_sch,.kicad_pro" multiple hidden>
 </header>
 
 <main>
@@ -288,7 +288,7 @@
 <div id="projModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>Projects</h2><button id="projClose">✕</button></div>
-    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><select id="projSort" title="Order of the list"><option value="edited-desc">Last modified ↓ (newest first)</option><option value="edited-asc">Last modified ↑ (oldest first)</option><option value="created-desc">Created ↓ (newest first)</option><option value="created-asc">Created ↑ (oldest first)</option><option value="name-asc">Name A → Z</option><option value="name-desc">Name Z → A</option></select><button id="projNew" class="primary">＋ New project</button><button id="projImportAll" title="Every project (.json) in a folder and its subfolders">Import folder…</button><button id="projImport" title="A CircuitPilot project (.json), an EasyEDA Pro project (.epro / .epro2: File → Save As / Export → Project) with schematic and PCB, or an EasyEDA Standard PCB (File → Export → EasyEDA Source)">Import (.json, EasyEDA Pro / Std)</button></div>
+    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><select id="projSort" title="Order of the list"><option value="edited-desc">Last modified ↓ (newest first)</option><option value="edited-asc">Last modified ↑ (oldest first)</option><option value="created-desc">Created ↓ (newest first)</option><option value="created-asc">Created ↑ (oldest first)</option><option value="name-asc">Name A → Z</option><option value="name-desc">Name Z → A</option></select><button id="projNew" class="primary">＋ New project</button><button id="projImportAll" title="Every project (.json) in a folder and its subfolders">Import folder…</button><button id="projImport" title="A CircuitPilot project (.json), an EasyEDA Pro project (.epro / .epro2: File → Save As / Export → Project) with schematic and PCB, an EasyEDA Standard PCB (File → Export → EasyEDA Source), or a KiCad project (its .zip, or the .kicad_pcb with its .kicad_sch sheets selected together)">Import (.json, EasyEDA, KiCad)</button></div>
     <div id="projList"></div>
   </div>
 </div>
@@ -519,9 +519,9 @@
 <script src="js/model.js?v=202611180100"></script>
 <script src="js/schematic.js?v=202611170600"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611191300"></script>
+<script src="js/pcb.js?v=202611191500"></script>
 <script src="js/cnc.js?v=202611071200"></script>
-<script src="js/pcbview.js?v=202611191200"></script>
+<script src="js/pcbview.js?v=202611191510"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
 <script src="js/shape3d.js?v=202611170400"></script>
 <script src="js/easyeda.js?v=202611191100"></script>
@@ -529,6 +529,7 @@
 <script src="js/openlib.js?v=202610301800"></script>
 <script src="js/kicad.js?v=202610301800"></script>
 <script src="js/easyedapro.js?v=202610301800"></script>
+<script src="js/kicadimport.js?v=202611191520"></script>
 <script src="js/encview.js?v=202611170400"></script>
 <script src="js/encdesign.js?v=202610301800"></script>
 <script src="js/docview.js?v=202610301800"></script>
@@ -545,7 +546,7 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
 <script src="js/github.js?v=202611190100"></script>
-<script src="js/app.js?v=202611191300"></script>
+<script src="js/app.js?v=202611191500"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

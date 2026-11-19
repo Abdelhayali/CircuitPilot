@@ -1366,6 +1366,19 @@ const Pcb = (() => {
   // drill-hole minimums for copper of another net (JLCPCB: via hole 0.2 mm, plated through-hole 0.28 mm) — tracks keep them,
   // copper pours too: a pour that only keeps the copper clearance from a via ring comes about 0.18 mm from its hole
   const viaHoleGap = R => +R.minHoleToTrack || 0, pthHoleGap = R => +R.minPthToTrack || 0;
+  // ---------- 4 layers: top (signals), In1 + In2 (planes), bottom (signals) ----------
+  // Each inner layer is one solid copper plane of one net (default In1 = GND, In2 = the power net with the most pins), with
+  // a clearance ring around every hole of another net. Vias and plated pads of the plane's net connect to it.
+  function planeMap(R = rules()) {
+    if (+R.layers !== 4) return {};
+    const S = Model.S, nets = Object.keys(S.nets || {}), cnt = n => (S.nets[n] || []).length;
+    const gnd = nets.filter(n => Model.isGround(n)).sort((a, b) => cnt(b) - cnt(a))[0] || null;
+    const pwr = nets.filter(n => Model.isPower(n) && !Model.isGround(n)).sort((a, b) => cnt(b) - cnt(a))[0] || gnd;
+    const P = Object.assign({ In1: gnd, In2: pwr }, R.planes || {});
+    for (const k of ['In1', 'In2']) if (P[k] && !S.nets[P[k]]) P[k] = k === 'In1' ? gnd : pwr;
+    return P;
+  }
+  const planeNets = (R = rules()) => new Set(Object.values(planeMap(R)).filter(Boolean));
   const padCl = R => Math.max(R.clearance, +R.padClearance || 0), viaCl = R => Math.max(R.clearance, +R.viaClearance || 0);
   const pourCl = (R, pr) => (pr && pr.clearance) || Math.max(R.clearance, +R.pourClearance || 0);
   const viaGap = (R, d = R.viaDiameter, drill = R.viaDrill) => Math.max(viaCl(R), (+R.minHoleToTrack || 0) - (d - drill) / 2);
@@ -1404,7 +1417,12 @@ const Pcb = (() => {
     }
     const next = Object.assign({}, base);
     for (const k of NUM_KEYS) if (u[k] != null && u[k] !== '') { const v = +u[k]; if (!(v >= 0 && v < 20) || (v === 0 && !/Clearance$|ToTrack$|^partGap$/.test(k))) throw new Error(`${k} must be a positive number in mm`); next[k] = v; }
-    if (u.layers != null) { if (![1, 2].includes(+u.layers)) throw new Error('layers must be 1 or 2'); next.layers = +u.layers; }
+    if (u.layers != null) { if (![1, 2, 4].includes(+u.layers)) throw new Error('layers must be 1, 2 or 4'); next.layers = +u.layers; }
+    for (const [k, key] of [['In1', 'planeIn1'], ['In2', 'planeIn2']]) {
+      const v = u.planes && u.planes[k] != null ? u.planes[k] : u[key]; if (v == null) continue;
+      const n = String(v).trim(); if (n && !(Model.S.nets || {})[n]) throw new Error('No net "' + n + '" for the inner plane ' + k);
+      next.planes = Object.assign({}, next.planes || {}, { [k]: n || null });
+    }
     if (u.neckDown != null) next.neckDown = !!u.neckDown;
     if (u.powerWider != null) next.powerWider = !!u.powerWider;
     // allowing via-in-pad switches the strict rule off, and the other way round
@@ -1452,9 +1470,24 @@ const Pcb = (() => {
 
   // Route with vias kept off SMD pins. Nets that cannot be finished that way are retried on their own,
   // allowing a via on their own pin as a last resort (reported, and flagged by DRC as a warning).
+  // 4 layers: every pad group of a plane net that does not reach its plane yet gets the closest legal via (with a short track)
+  function planeFanout(o = {}) {
+    const R = rules(), out = [];
+    for (const net of planeNets(R)) {
+      const c = connectivity()[net]; if (!c) continue;
+      const on = new Set(c.onPlane || []), todo = c.pads.filter(p => !p.drill && !on.has(p.key)), failed = [];
+      let made = 0;
+      for (const p of todo) { try { viaNear({ near: p.key, net, max_distance: o.max_distance }, R); made++; } catch (e) { failed.push(p.key + ': ' + e.message.split(' — ')[0]); } }
+      out.push({ net, vias: made, failed });
+    }
+    return out;
+  }
   function route(opt = {}) {
     const t0 = Date.now(), S = Model.S;
+    // 4 layers: the plane pads' vias first, then the signals around them; pads still cut off get a wider search after
+    const fan = rules().layers === 4 && !opt.onlyNets ? planeFanout() : null;
     let r = routeOnce(opt);
+    if (fan) { const again = planeFanout({ max_distance: 5 }); r.planes = fan.map((x, i) => Object.assign({}, x, { vias: x.vias + ((again[i] || {}).vias || 0), failed: (again[i] || {}).failed || [] })); }
     // Copper pours: pads joined through a pour before routing can be cut off once tracks split the pour into
     // islands. Re-check the poured nets and connect the pieces (tracks, or vias down to the other layer's pour).
     // Also a safety net for every net: the exact geometry decides what is connected, so anything the grid router
@@ -1589,7 +1622,7 @@ const Pcb = (() => {
       if (c) for (const grp of c.groups) { const ids = new Set(grp.map(q => q.uid)); islands.push(pads.filter(q => ids.has(q.uid))); }
       else pads.forEach(q => islands.push([q]));
       return { net: n, id: netId[n], pads, islands: islands.filter(i => i.length), hpwl: (x1 - x0) + (y1 - y0), w: netWidth(R, n) };
-    }).filter(j => j.pads.length >= 2 && (!opt.onlyNets || opt.onlyNets.includes(j.net)));
+    }).filter(j => j.pads.length >= 2 && (!opt.onlyNets || opt.onlyNets.includes(j.net)) && (opt.onlyNets || !planeNets().has(j.net)));
     // pour pass: the pour copper tied to the main group is part of the start tree, so a cut-off pad only has to
     // reach the nearest live pour (a short stub, or a via down to the other layer's pour)
     if (opt.onlyNets) for (const j of jobs) {
@@ -1669,7 +1702,9 @@ const Pcb = (() => {
       for (const c of t.cells) { const x = c % W, y = (c / W) | 0; diskAdd(MT, t.l * N, x, y, r1, sgn); diskAdd(MV, 0, x, y, r2, sgn); }
     }
     function viaAdd(MT, MV, v, w, sgn) {
-      const rt = w / 2 + v.d / 2 + (v.hole ? Math.max(R.clearance, +R.minHoleToTrack || 0) : viaGap(R, v.d, v.drill || R.viaDrill)) + safe, rv = Math.max(v.d / 2 + vr + viaCl(R), (v.hole ? v.d : R.viaDrill) / 2 + R.viaDrill / 2 + R.minHoleToHole);
+      // + a little extra: a 45° track between grid points can pass a few µm closer than the cell centres say, and next to a
+      // via the hole rule (0.2 mm from the drill) leaves no slack
+      const rt = w / 2 + v.d / 2 + (v.hole ? Math.max(R.clearance, +R.minHoleToTrack || 0) : viaGap(R, v.d, v.drill || R.viaDrill)) + safe + Math.max(0.015, g * 0.15), rv = Math.max(v.d / 2 + vr + viaCl(R), (v.hole ? v.d : R.viaDrill) / 2 + R.viaDrill / 2 + R.minHoleToHole);
       for (let l = 0; l < L; l++) diskAdd(MT, l * N, v.x, v.y, rt, sgn);
       diskAdd(MV, 0, v.x, v.y, rv, sgn);
     }
@@ -2372,7 +2407,7 @@ const Pcb = (() => {
     const S = Model.S;
     const key = JSON.stringify([S.pcb, S.board, S.nets, S.rules, S.components.map(c => [c.ref, c.pcb, c.footprint, c.lcsc])]);
     if (connMemo.key === key) return connMemo.val;
-    const idx = Model.pinIndex(), L2 = (rules().layers === 1) ? ['F'] : ['F', 'B'];
+    const R0 = rules(), idx = Model.pinIndex(), L2 = R0.layers === 1 ? ['F'] : R0.layers === 4 ? ['F', 'B', 'In1', 'In2'] : ['F', 'B'];
     const nodes = [];
     for (const c of placed()) for (const p of padsOf(c, idx)) if (p.net) nodes.push({ k: 'pad', p, net: p.net, layers: padCu(p, L2), shapes: [padShape(p)] });
     S.pcb.traces.forEach((t, i) => { if (t.net) nodes.push({ k: 'trace', i, net: t.net, layers: [t.layer], shapes: t.pts.slice(1).map((q, j) => ({ k: 'seg', a: t.pts[j], b: q, r: t.w / 2 })) }); });
@@ -2389,6 +2424,12 @@ const Pcb = (() => {
       pourNodes.push({ pr, ras, first });
     });
     const par = nodes.map((_, i) => i), find = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; };
+    // inner planes: one sheet of copper per plane, joined to every via / plated pad of its net
+    const planeAt = {};
+    for (const [layer, net] of Object.entries(planeMap(R0))) {
+      if (!net) continue; const pi = nodes.length; nodes.push({ k: 'plane', net, layers: [layer], shapes: [] }); par.push(pi); (planeAt[net] = planeAt[net] || []).push(pi);
+      nodes.forEach((n, i) => { if (i !== pi && n.net === net && n.layers.includes(layer)) { const a = find(i), b = find(pi); if (a !== b) par[a] = b; } });
+    }
     const samples = sh => {
       const out = [];
       if (sh.k === 'circ') out.push(sh.c);
@@ -2414,11 +2455,12 @@ const Pcb = (() => {
     }
     const out = {};
     for (const [net, ids] of Object.entries(byNet)) {
-      const pads = ids.filter(i => nodes[i].k === 'pad').map(i => nodes[i].p); if (pads.length < 2) continue;
+      const pads = ids.filter(i => nodes[i].k === 'pad').map(i => nodes[i].p); if (pads.length < 2 && !planeAt[net]) continue;
       const groups = {};
       ids.forEach(i => { if (nodes[i].k === 'pad') (groups[find(i)] = groups[find(i)] || []).push(nodes[i].p); });
       const g = Object.values(groups);
       out[net] = { pads, groups: g, complete: g.length === 1 };
+      if (planeAt[net]) { const roots = new Set(planeAt[net].map(find)); out[net].onPlane = ids.filter(i => nodes[i].k === 'pad' && roots.has(find(i))).map(i => nodes[i].p.key); }
     }
     connMemo = { key, val: out };
     return out;
@@ -2630,7 +2672,7 @@ const Pcb = (() => {
   function jlcPcbParam(o = {}) {
     const S = Model.S, R = rules(), flex = S.pcb.flex && S.pcb.flex.on, finish = o.finish != null ? +o.finish : 1;
     return {
-      layer: R.layers === 1 ? 1 : 2, width: +(+S.board.w).toFixed(2), length: +(+S.board.h).toFixed(2), qty: +(o.qty || 5),
+      layer: R.layers === 1 ? 1 : R.layers === 4 ? 4 : 2, width: +(+S.board.w).toFixed(2), length: +(+S.board.h).toFixed(2), qty: +(o.qty || 5),
       thickness: flex ? +(S.pcb.flex.thickness || 0.12) : +(o.thickness || 1.6), pcbColor: o.color != null ? +o.color : 0, surfaceFinish: finish, copperWeight: 1,
       goldFinger: 0, materialDetails: 0, panelFlag: 0, panelByJLCPCB_X: 0, panelByJLCPCB_Y: 0, differentDesign: 1, flyingProbeTest: 1,
       castellatedHoles: 0, orderDetailsRemark: String(o.remark || '').slice(0, 200), cascadeStructure: 0, impedanceFlag: 'no', isAddCustomerCode: 'yes',
@@ -2715,7 +2757,7 @@ const Pcb = (() => {
     const S = Model.S, R = rules(), net = o.net || 'GND';
     if (R.layers === 1) throw new Error('The board has 1 copper layer — no vias');
     if (!S.nets[net]) throw new Error(`No net "${net}"`);
-    if (!(S.pcb.pours || []).some(p => p.net === net)) throw new Error(`Net ${net} has no copper pour — add_copper_pour {net: "${net}", layer: "both"} first (or route it: route_pcb)`);
+    if (!(S.pcb.pours || []).some(p => p.net === net) && !planeNets(R).has(net)) throw new Error(`Net ${net} has no copper pour — add_copper_pour {net: "${net}", layer: "both"} first (or route it: route_pcb)`);
     const c0 = connectivity()[net];
     if (!c0 || c0.complete) return { net, net_complete: true, groups_fixed: 0, note: `${net} is already connected — nothing to do` };
     const before = new Set(drc().violations.map(v => v.msg)), report = [], keys = g => g.map(p => p.key).join();
@@ -3036,7 +3078,7 @@ const Pcb = (() => {
     };
     const files = {
       'board-F_Cu.gtl': copper('F', 'Copper,L1,Top'),
-      'board-B_Cu.gbl': copper('B', 'Copper,L2,Bot'),
+      'board-B_Cu.gbl': copper('B', R.layers === 4 ? 'Copper,L4,Bot' : 'Copper,L2,Bot'),
       'board-F_Mask.gts': mask('F', 'Soldermask,Top'),
       'board-B_Mask.gbs': mask('B', 'Soldermask,Bot'),
       'board-F_Paste.gtp': paste('F', 'Paste,Top'),
@@ -3045,6 +3087,21 @@ const Pcb = (() => {
       'board-B_Silkscreen.gbo': file('Legend,Bot', silk('B')),
       'board-Edge_Cuts.gm1': file('Profile,NP', (A, b) => { b.push(A('C,0.100000') + '*'); b.push(X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*'); }),
     };
+    // 4 layers: In1 / In2 planes — the board area (edge clearance kept), cleared around other nets' holes (vias: ring + clearance,
+    // at least the via-hole minimum; plated pads: pad + clearance, at least the plated-hole minimum; mounting holes 0.3 mm)
+    if (R.layers === 4) {
+      const pm = planeMap(R), cl = Math.max(R.clearance, +R.pourClearance || 0, 0.2);
+      const plane = (layer, net, func) => file(func, (A, b) => {
+        b.push('G01*', 'G36*', X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*', 'G37*');
+        b.push('%LPC*%', A(`C,${f6(2 * Math.max(R.edgeClearance, 0.3))}`) + '*', X(...outline[0]) + 'D02*'); for (const q of outline.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...outline[0]) + 'D01*');
+        for (const v of S.pcb.vias) if (!net || v.net !== net) { b.push(A(`C,${f6(Math.max(v.d + 2 * cl, (+v.drill || 0) + 2 * viaHoleGap(R)))}`) + '*'); b.push(X(v.x, v.y) + 'D03*'); }
+        for (const p of pads) if (p.drill && (!net || p.net !== net)) { b.push(A(`C,${f6(Math.max(Math.max(p.w, p.h) + 2 * cl, p.drill + 2 * pthHoleGap(R)))}`) + '*'); b.push(X(p.x, p.y) + 'D03*'); }
+        for (const h of S.pcb.holes || []) { b.push(A(`C,${f6(h.d + 2 * Math.max(cl, 0.3))}`) + '*'); b.push(X(h.x, h.y) + 'D03*'); }
+        b.push('%LPD*%');
+      });
+      files['board-In1_Cu.g2'] = plane('In1', pm.In1, 'Copper,L2,Inr,Plane');
+      files['board-In2_Cu.g3'] = plane('In2', pm.In2, 'Copper,L3,Inr,Plane');
+    }
     // flex board: stiffener outlines as a mechanical layer, and the specs to give with the order
     const flex = S.pcb.flex && S.pcb.flex.on ? S.pcb.flex : null;
     if (flex && (flex.stiffeners || []).length) files['board-Stiffener.gm2'] = file('Other,Stiffener', (A, b) => { b.push(A('C,0.100000') + '*'); for (const st of flex.stiffeners) { b.push(X(...st.pts[0]) + 'D02*'); for (const q of st.pts.slice(1)) b.push(X(...q) + 'D01*'); b.push(X(...st.pts[0]) + 'D01*'); } });
@@ -3371,7 +3428,7 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { easyedaRuleCheck, easyedaRuleNote, addLine, updateLine, removeLine, LINE_LAYERS, pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { planeMap, planeFanout, easyedaRuleCheck, easyedaRuleNote, addLine, updateLine, removeLine, LINE_LAYERS, pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

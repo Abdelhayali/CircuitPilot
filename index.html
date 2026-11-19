@@ -352,7 +352,9 @@
       <label>Via diameter<input data-r="viaDiameter" type="number" step="0.01" min="0.1"><span>mm</span></label>
       <label>Via drill<input data-r="viaDrill" type="number" step="0.01" min="0.1"><span>mm</span></label>
       <label>Copper to board edge<input data-r="edgeClearance" type="number" step="0.05" min="0"><span>mm</span></label>
-      <label>Copper layers<select data-r="layers"><option value="2">2 (top + bottom, vias)</option><option value="1">1 (top only)</option></select></label>
+      <label>Copper layers<select data-r="layers"><option value="2">2 (top + bottom, vias)</option><option value="4">4 (top, inner planes In1 + In2, bottom)</option><option value="1">1 (top only)</option></select></label>
+      <label title="4 layers: the net of the solid copper plane on inner layer 1">Inner plane In1 net<input data-r="planeIn1" data-kind="text" placeholder="GND"></label>
+      <label title="4 layers: the net of the solid copper plane on inner layer 2">Inner plane In2 net<input data-r="planeIn2" data-kind="text" placeholder="+3V3"></label>
       <label>Track corners<select data-r="trackStyle"><option value="45">45° corners (straight runs, shortest)</option><option value="90">90° corners only (horizontal / vertical)</option></select></label>
       <label class="chk"><input data-r="neckDown" type="checkbox"> Neck down when the full width does not fit</label>
       <label>Autorouter effort (max time)<input data-r="routeTime" type="number" step="5" min="5" max="1800"><span>s</span></label>
@@ -517,9 +519,9 @@
 <script src="js/model.js?v=202611180100"></script>
 <script src="js/schematic.js?v=202611170600"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611190700"></script>
+<script src="js/pcb.js?v=202611191200"></script>
 <script src="js/cnc.js?v=202611071200"></script>
-<script src="js/pcbview.js?v=202611180200"></script>
+<script src="js/pcbview.js?v=202611191200"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
 <script src="js/shape3d.js?v=202611170400"></script>
 <script src="js/easyeda.js?v=202611191100"></script>
@@ -533,7 +535,7 @@
 <script src="js/pcb3d.js?v=202611111200"></script>
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
-<script src="js/engine.js?v=202611190700"></script>
+<script src="js/engine.js?v=202611191200"></script>
 <script src="js/ai.js?v=202611162200"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
@@ -543,7 +545,7 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202610301800"></script>
 <script src="js/github.js?v=202611190100"></script>
-<script src="js/app.js?v=202611191100"></script>
+<script src="js/app.js?v=202611191200"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

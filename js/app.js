@@ -283,6 +283,7 @@ const App = (() => {
       edited.length && `footprint edited here, EasyEDA uses the part's own footprint: ${edited.join(', ')}`].filter(Boolean);
     if (mode === 'project' && !pcb) notes.unshift('no PCB yet, so only the schematic is in the zip');
     if (pcb && Pcb.easyedaRuleNote) { const rn = Pcb.easyedaRuleNote(); if (rn) notes.push('⚠ ' + rn); }
+    if (pcb && Pcb.rules().layers === 4) { const pm = Pcb.planeMap(); notes.push('4 layers: the inner planes (In1 ' + (pm.In1 || '-') + ', In2 ' + (pm.In2 || '-') + ') are not in the EasyEDA file — in EasyEDA Pro set 4 copper layers (Layer Manager) and make In1 / In2 planes of these nets; the Gerbers from CircuitPilot have them'); }
     toast(`EasyEDA ${mode === 'project' ? 'project (schematic' + (pcb ? ' + PCB)' : ')') : 'schematic'} saved${pcbTag} — ${comps.length - noCode.length - failed.filter(r => comps.some(c => c.ref === r)).length}/${comps.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Pro: File → Import → EasyEDA (Standard) and choose the file · Standard: File → Open → EasyEDA Source${pcb && (Model.S.pcb.pours || []).length ? ' · The copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B)' : ''}${pcb ? ` · EasyEDA Pro checks with its own rules: set the clearance to ${Pcb.rules().clearance} mm (Design → Design Rule) or it reports gaps under 6 mil as errors` : ''}${pcb ? pourWarn() : ''}`, 20000);
   }
 
@@ -448,7 +449,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611191100');
+      worker = new Worker('js/route-worker.js?v=202611191200');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;
@@ -663,6 +664,7 @@ const App = (() => {
   let rDraft = null;
   function openRules() {
     rDraft = JSON.parse(JSON.stringify(Pcb.rules()));
+    { const pm = Pcb.planeMap(Object.assign({}, rDraft, { layers: 4 })); rDraft.planeIn1 = pm.In1 || ''; rDraft.planeIn2 = pm.In2 || ''; }
     $('#rPreset').innerHTML = Object.entries(Pcb.RULE_PRESETS).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
     fillRules(); $('#rulesModal').classList.remove('hidden');
   }
@@ -674,7 +676,7 @@ const App = (() => {
     const w = Pcb.ruleWarnings(rDraft); $('#rWarn').innerHTML = w.map(x => '⚠ ' + esc(x)).join('<br>');
   }
   function readRules() {
-    $$('#rulesModal [data-r]').forEach(el => { const k = el.dataset.r; if (el.type === 'checkbox') rDraft[k] = el.checked; else if (el.value !== '') rDraft[k] = el.tagName === 'SELECT' && isNaN(+el.value) ? el.value : +el.value; });
+    $$('#rulesModal [data-r]').forEach(el => { const k = el.dataset.r; if (el.type === 'checkbox') rDraft[k] = el.checked; else if (el.dataset.kind === 'text') rDraft[k] = el.value.trim(); else if (el.value !== '') rDraft[k] = el.tagName === 'SELECT' && isNaN(+el.value) ? el.value : +el.value; });
   }
   async function saveRules(route) {
     readRules();

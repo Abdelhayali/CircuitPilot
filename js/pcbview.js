@@ -10,6 +10,8 @@ const PcbView = (() => {
     { id: 'BS', name: 'BottomSilkLayer', color: '#66CC33' },
     { id: 'FM', name: 'TopSolderMaskLayer', color: '#800080', off: true },
     { id: 'BM', name: 'BottomSolderMaskLayer', color: '#AA00FF', off: true },
+    { id: 'In1', name: 'Inner1 (plane)', color: '#C9822B', inner: true },
+    { id: 'In2', name: 'Inner2 (plane)', color: '#2BA6A0', inner: true },
     { id: 'MU', name: 'Multi-Layer', color: '#C0C0C0' },
     { id: 'HO', name: 'HoleLayer', color: '#222222' },
     { id: 'OL', name: 'BoardOutline', color: '#FF00FF' },
@@ -97,7 +99,7 @@ const PcbView = (() => {
   }
   function renderLayers() {
     const actL = ui.tool === 'line' ? lineLayer() : ui.active;
-    $('#layerRows').innerHTML = LAYERS.map(l => `<div class="lrow${actL === l.id ? ' act' : ''}${ui.layers[l.id].on ? '' : ' off'}" data-l="${l.id}" title="${l.copper ? 'Click to make active (T / B)' : ''}">
+    $('#layerRows').innerHTML = LAYERS.filter(l => !l.inner || Pcb.rules().layers === 4).map(l => `<div class="lrow${actL === l.id ? ' act' : ''}${ui.layers[l.id].on ? '' : ' off'}" data-l="${l.id}" title="${l.copper ? 'Click to make active (T / B)' : ''}">
       <span class="lact">${actL === l.id ? '✎' : ''}</span>
       <label class="lsw" style="background:${ui.layers[l.id].color}"><input type="color" value="${ui.layers[l.id].color}"></label>
       <span class="lname">${l.name}</span><span class="leye" title="Show / hide">${ui.layers[l.id].on ? '👁' : '—'}</span></div>`).join('');
@@ -751,6 +753,14 @@ const PcbView = (() => {
         lblHits.push(`<rect ${l.kind === 'part' ? `data-o="${esc(l.ref)}" ` : ''}class="lblhit${on ? ' on' : ''}${l.overPads ? ' bad' : ''}" data-k="lbl" ${data} x="${r[0]}" y="${r[1]}" width="${r[2] - r[0]}" height="${r[3] - r[1]}"><title>${esc(l.kind === 'part' ? l.ref + ' label' : l.kind === 'board' ? 'Board name' : 'Text')}${l.overPads ? ' — covers pads, move it' : ''} · drag to move · R rotates · + / − size</title></rect>`);
         // resize handle on the selected text: drag it away from / towards the centre
         if (on) { const hs = Math.max(0.35, 7 / vp.s); lblHits.push(`<rect class="lblsize" data-k="lsize" ${data} x="${r[2] - hs / 2}" y="${r[1] - hs / 2}" width="${hs}" height="${hs}"><title>Drag to resize</title></rect>`); }
+      }
+    }
+    // 4 layers: the inner planes — the board area in the layer colour, dark rings where other nets' holes pass through
+    if (Pcb.rules().layers === 4) {
+      const pm = Pcb.planeMap();
+      for (const L of ['In1', 'In2']) if (vis(L) && pm[L]) {
+        out.push(`<path d="${bpath}" fill="${col(L)}" fill-opacity="0.16" stroke="${col(L)}" stroke-width="0.08" stroke-dasharray="0.6 0.4" pointer-events="none"><title>${L === 'In1' ? 'Inner 1' : 'Inner 2'}: ${esc(pm[L])} plane</title></path>`);
+        for (const v of S.pcb.vias) if (v.net !== pm[L]) out.push(`<circle cx="${v.x}" cy="${v.y}" r="${Math.max(v.d / 2 + 0.2, v.drill / 2 + 0.2)}" fill="#000" fill-opacity="0.35" pointer-events="none"/>`);
       }
     }
     if (vis('OL')) out.push(`<path d="${bpath}" fill="none" stroke="${col('OL')}" stroke-width="0.15" pointer-events="none"/>`);

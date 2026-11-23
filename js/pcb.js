@@ -2868,7 +2868,7 @@ const Pcb = (() => {
   // the 2D view redraws often: keep the result until something that affects the labels changes
   const silkCache = {};
   function silkLabels(side) {
-    const S = Model.S, key = JSON.stringify([S.board.w, S.board.h, S.name, S.pcb.boardLabel, S.pcb.texts, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side, c.pcb.silk])]);
+    const S = Model.S, key = JSON.stringify([S.board.w, S.board.h, S.name, S.pcb.boardLabel, S.pcb.texts, fabLabelText(), S.pcb.fabLabel, rules().layers, placed().map(c => [c.ref, c.footprint, c.pcb.x, c.pcb.y, c.pcb.rot, c.pcb.side, c.pcb.silk])]);
     if (silkCache[side] && silkCache[side].key === key) return silkCache[side].out;
     const out = silkLabelsRaw(side);
     silkCache[side] = { key, out };
@@ -2926,6 +2926,20 @@ const Pcb = (() => {
         add({ kind: 'board', text: name, x, y, h, w: Math.max(SILK_W, h * 0.13), anchor, mirror: false, auto: true, rot: BL.rot });
       }
     }
+    // the board code + revision (default: bottom side, small, in a free corner)
+    const FL = S.pcb.fabLabel || {}, code = fabLabelText(), fside = FL.side || (rules().layers === 1 ? 'F' : 'B');
+    if (code && !FL.hide && side === fside) {
+      const h = +FL.h || 1.0, w = Math.max(SILK_W, h * 0.13);
+      if (FL.x != null) add({ kind: 'fabid', text: code, x: +FL.x, y: +FL.y + h / 2, h, w, anchor: 'middle', mirror: side === 'B', auto: false, rot: FL.rot });
+      else {
+        // corners first, then a 0.5 mm scan of the board; the label must sit inside the real outline (0.5 mm in)
+        const tw = textWidth(code, h), poly = boardPoly(), corners = [[1.2, H - 1.2, 'start'], [W - 1.2, H - 1.2, 'end'], [1.2, 1.2 + h, 'start'], [W - 1.2, 1.2 + h, 'end'], [W / 2, H - 1.2, 'middle'], [W / 2, 1.2 + h, 'middle']];
+        for (let yy = H - 0.8; yy >= h + 0.8; yy -= 0.5) for (let xx = 0.8; xx + tw <= W - 0.8; xx += 0.5) corners.push([xx, yy, 'start']);
+        const inside = r => [[r[0] - 0.4, r[1] - 0.4], [r[2] + 0.4, r[1] - 0.4], [r[2] + 0.4, r[3] + 0.4], [r[0] - 0.4, r[3] + 0.4], [(r[0] + r[2]) / 2, r[1] - 0.4], [(r[0] + r[2]) / 2, r[3] + 0.4]].every(q => inPoly(q[0], q[1], poly));
+        const [x, y, anchor] = corners.find(([x, y, a]) => { const r = labelRect(x, y, tw, h, a); return inside(r) && !hit(r, -1); }) || corners.find(([x, y, a]) => { const r = labelRect(x, y, tw, h, a); return inside(r) && !onPads(r); }) || corners[0];
+        add({ kind: 'fabid', text: code, x, y, h, w, anchor, mirror: side === 'B', auto: true, rot: FL.rot });
+      }
+    }
     return out.map(l => {
       let lines = strokeText(l.text, l.x, l.y, l.h, l.anchor, l.mirror);
       if (l.rot) { const cx = (l.rect0[0] + l.rect0[2]) / 2, cy = (l.rect0[1] + l.rect0[3]) / 2; lines = lines.map(pl => pl.map(([x, y]) => rotPt(x, y, cx, cy, l.rot).map(v => Math.round(v * 1e4) / 1e4))); }
@@ -2954,6 +2968,14 @@ const Pcb = (() => {
   }
   function setSilkLabel(ref, o = {}) {
     const S = Model.S;
+    if (/^(code|fabid|#code)$/i.test(ref)) {
+      const L = Object.assign({}, S.pcb.fabLabel || {});
+      if (o.size != null) L.h = Math.max(0.6, Math.min(5, +o.size)); if (o.hidden != null) { if (o.hidden) L.hide = true; else delete L.hide; }
+      if (o.side) { L.side = /^b/i.test(o.side) ? 'B' : 'F'; delete L.x; delete L.y; }
+      if (o.rotation != null) { if (normRot(o.rotation)) L.rot = normRot(o.rotation); else delete L.rot; }
+      if (o.auto) { delete L.x; delete L.y; } else if (o.x != null && o.y != null) { L.x = +(+o.x).toFixed(3); L.y = +(+o.y).toFixed(3); }
+      S.pcb.fabLabel = L; return L;
+    }
     if (/^(board|#board)$/i.test(ref)) {
       const L = Object.assign({}, S.pcb.boardLabel || {});
       if (o.text != null) L.text = String(o.text); if (o.size != null) L.h = Math.max(0.6, Math.min(10, +o.size)); if (o.hidden != null) L.hide = !!o.hidden;
@@ -3441,7 +3463,64 @@ const Pcb = (() => {
     return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
   }
 
-  return { planeMap, planeFanout, easyedaRuleCheck, easyedaRuleNote, addLine, updateLine, removeLine, LINE_LAYERS, pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  // ---------- board code + revision, printed on the silkscreen ----------
+  // Every project gets a code (CP-K7Q2M); with several PCBs each PCB adds its own number (CP-K7Q2M-2). The revision
+  // (R1, R2 …) goes up when Gerbers leave for a fab and the design changed since the last ones; each revision keeps a copy of
+  // the design, so a board in the hand can be traced to the schematic it was made from (Projects → search the code).
+  const CODE_CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  function ensureFabId() {
+    const S = Model.S; if (!S.fab) S.fab = { revs: [] }; if (!S.fab.revs) S.fab.revs = [];
+    if (!S.fab.id) { let c = 'CP-'; for (let i = 0; i < 5; i++) c += CODE_CH[Math.floor(Math.random() * CODE_CH.length)]; S.fab.id = c; }
+    return S.fab.id;
+  }
+  // the PCB's own number in the code: stays the same when other PCBs are added or deleted (the first PCB is 1)
+  function fabNo(assign) {
+    const S = Model.S; if (pcbCount() < 2) return 1;
+    const P = S.pcbs[activePcb()]; if (P.fabNo) return P.fabNo;
+    if (!assign) return activePcb() === 0 ? 1 : null;
+    const used = S.pcbs.map((p, i) => p.fabNo || (i === 0 ? 1 : 0)); P.fabNo = activePcb() === 0 ? 1 : Math.max(1, ...used) + 1; return P.fabNo;
+  }
+  const fabCodeOf = (id, no) => id + (no > 1 || pcbCount() > 1 ? '-' + no : '');
+  function fabCode() { const S = Model.S; if (!S.fab || !S.fab.id) return null; const no = fabNo(false); return no ? fabCodeOf(S.fab.id, no) : S.fab.id + '-?'; }
+  function fabLabelText() { const c = fabCode(); return c ? c + ' R' + (Model.S.pcb.fabRev || 1) : null; }
+  // what makes this PCB: its parts, their nets, the copper, the outline (not the code label itself)
+  function designHash() {
+    const S = Model.S, cs = S.components.filter(c => onActivePcb(c)), refs = new Set(cs.map(c => c.ref));
+    const nets = Object.entries(S.nets || {}).map(([n, k]) => [n, k.filter(x => refs.has(x.split('.')[0])).sort()]).filter(e => e[1].length).sort((a, b) => a[0] < b[0] ? -1 : 1);
+    const pcb = Object.assign({}, S.pcb); delete pcb.fabRev; delete pcb.fabLabel; delete pcb.routed;
+    const txt = JSON.stringify([S.board, cs.map(c => [c.ref, c.value, c.lcsc, c.footprint, c.pcb]).sort((a, b) => a[0] < b[0] ? -1 : 1), nets, pcb, S.rules && S.rules.layers]);
+    let h1 = 0x811c9dc5, h2 = 5381; for (let i = 0; i < txt.length; i++) { const c = txt.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = (Math.imul(h2, 33) + c) | 0; }
+    return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
+  }
+  // call inside Model.mutate, right before the Gerbers are made for a fab: the revision they carry
+  function fabRelease(o = {}) {
+    const S0 = Model.S;
+    // an "as made" copy of an older revision: the same design is that revision again; once changed it is a new board
+    if (S0.fab && S0.fab.asMade) {
+      const A = S0.fab.asMade, code = fabCodeOf(S0.fab.id, A.pcb || 1);
+      if (designHash() === A.hash) { S0.pcb.fabRev = A.rev; return { code, rev: A.rev, label: code + ' R' + A.rev, new: false, as_made_copy: true }; }
+      delete S0.fab; delete S0.pcb.fabRev;
+    }
+    const S = Model.S, id = ensureFabId(), no = fabNo(true), h = designHash();
+    const mine = S.fab.revs.filter(r => (r.pcb || 1) === no), last = mine[mine.length - 1];
+    if (last && last.hash === h) { S.pcb.fabRev = last.rev; return { code: fabCodeOf(id, no), rev: last.rev, label: fabCodeOf(id, no) + ' R' + last.rev, new: false, at: last.at }; }
+    const rev = (last ? last.rev : 0) + 1; S.pcb.fabRev = rev;
+    const copy = Object.assign({}, S); delete copy.fab;   // the design as it is made (the code label shows this revision)
+    S.fab.revs.push({ pcb: no, rev, at: Math.floor(Date.now() / 1000), hash: h, name: S.name || '', parts: S.components.filter(c => onActivePcb(c)).length, via: o.via || 'export', snap: JSON.stringify(copy) });
+    return { code: fabCodeOf(id, no), rev, label: fabCodeOf(id, no) + ' R' + rev, new: true, previous: last ? last.rev : null };
+  }
+  // the code's revisions: [{ pcb, rev, at, name, parts, via, current }] (current: the design still is this revision)
+  function fabRevisions() {
+    const S = Model.S; if (!S.fab || !S.fab.revs) return [];
+    let h = null; const no = fabNo(false);
+    return S.fab.revs.map(r => { const cur = (r.pcb || 1) === no && r === S.fab.revs.filter(q => (q.pcb || 1) === no).pop() ? ((h = h || designHash()) === r.hash) : false; return { code: fabCodeOf(S.fab.id, r.pcb || 1), pcb: r.pcb || 1, rev: r.rev, at: r.at, name: r.name, parts: r.parts, via: r.via, current: cur }; });
+  }
+  // "CP-K7Q2M-2 R3", "cp-k7q2m r3", "K7Q2M" → { id, pcb, rev }
+  function parseFabCode(q) {
+    const m = /^(?:CP-?)?([A-HJ-NP-Z2-9]{5})(?:-(\d+))?(?:\s*[-_ ]?\s*R(?:EV)?\s*(\d+))?$/i.exec(String(q || '').trim());
+    return m ? { id: 'CP-' + m[1].toUpperCase(), pcb: m[2] ? +m[2] : null, rev: m[3] ? +m[3] : null } : null;
+  }
+  return { ensureFabId, fabCode, fabLabelText, fabRelease, fabRevisions, parseFabCode, designHash, planeMap, planeFanout, easyedaRuleCheck, easyedaRuleNote, addLine, updateLine, removeLine, LINE_LAYERS, pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

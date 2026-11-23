@@ -449,7 +449,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611191500');
+      worker = new Worker('js/route-worker.js?v=202611231400');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;
@@ -635,9 +635,11 @@ const App = (() => {
 
   // ---------- Gerber export: DRC first, then download or fix ----------
   function gerberDownload() {
-    download(fname('-gerbers.zip'), makeZip(Pcb.gerbers()));
+    // the revision these Gerbers carry (printed on the board with the board code; a new one when the design changed)
+    let fr = null; try { Model.mutate(() => { fr = Pcb.fabRelease({ via: 'Gerber export' }); }); } catch (e) { }
+    download(fname((fr ? '-' + fr.label.replace(/\s+/g, '_') : '') + '-gerbers.zip'), makeZip(Pcb.gerbers()));
     $('#gerberModal').classList.add('hidden');
-    toast('Gerbers, drill, paste & silkscreen exported — upload the zip to your PCB fab. ' + Pcb.viaSummary(), 12000);
+    toast('Gerbers, drill, paste & silkscreen exported — upload the zip to your PCB fab. ' + (fr ? `Printed on the board: ${fr.label}${fr.new ? (fr.previous ? ' (new revision — the design changed since R' + fr.previous + ')' : ' (first revision)') : ' (same design as before)'}. ` : '') + Pcb.viaSummary(), 14000);
     if (orderAfter) orderFinish();
   }
   function gerberCheck() {

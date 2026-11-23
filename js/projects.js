@@ -67,17 +67,33 @@ const Projects = (() => {
     await saveNow(); App.showView('sch'); Sch.select(null); Sch.fit();
     App.toast('Created project “' + d.name + '”'); close();
   }
+  // the design exactly as a board revision was made: the project itself when it has not changed since, else a copy
+  // ("name — CP-K7Q2M R2 (as made)") from the copy kept with that revision
+  async function openRevision(id, pcb, rev) {
+    const d = await api('GET', '/api/projects/' + id), revs = (d.fab && d.fab.revs) || [], r = revs.find(x => (x.pcb || 1) === pcb && x.rev === rev);
+    if (!r || !r.snap) { App.toast('That revision has no saved copy'); return; }
+    const mine = revs.filter(x => (x.pcb || 1) === pcb), code = d.fab.id + (pcb > 1 || revs.some(x => (x.pcb || 1) > 1) ? '-' + pcb : '');
+    if (r === mine[mine.length - 1]) {
+      await open(id);
+      if (Pcb.fabRevisions().some(x => x.pcb === pcb && x.rev === rev && x.current)) { App.toast(`${code} R${rev} is the design as it is now`, 8000); return; }
+    }
+    const snap = JSON.parse(r.snap); delete snap.id; snap.fab = { id: d.fab.id, asMade: { pcb, rev, hash: r.hash }, revs: [] }; snap.name = (d.name || 'Untitled') + ' — ' + code + ' R' + rev + ' (as made)';
+    snap.notes = Object.assign({ text: '', values: {} }, snap.notes || {});
+    snap.notes.text = `Copy of ${d.name || 'the project'} as board ${code} R${rev} was made (${new Date(r.at * 1000).toLocaleString()}, ${r.via || 'export'}). Edit the original project, not this copy.` + (snap.notes.text ? '\n\n' + snap.notes.text : '');
+    const made = await api('PUT', '/api/projects/', snap); await open(made.id);
+    App.toast(`Opened ${code} R${rev} as it was made — a separate copy of the design`, 9000);
+  }
   async function duplicate(id) {
     const d = await api('GET', '/api/projects/' + id);
-    delete d.id; d.name = (d.name || 'Untitled') + ' (copy)';
+    delete d.id; delete d.fab; d.name = (d.name || 'Untitled') + ' (copy)';   // a copy is a new board: its own code
     await api('PUT', '/api/projects/', d); render();
   }
   // Save as: store the current design (with its unsaved edits) as a new project and continue in it
   async function saveAs(name) {
     await saveNow();
-    const d = JSON.parse(Model.snapshot()); delete d.id; d.name = name;
+    const d = JSON.parse(Model.snapshot()); delete d.id; delete d.fab; d.name = name;
     const r = await api('PUT', '/api/projects/', d);
-    Model.mutate(() => { Model.S.id = r.id; Model.S.name = name; });
+    Model.mutate(() => { Model.S.id = r.id; Model.S.name = name; delete Model.S.fab; });
     serverUpdated = r.updated; lastSaved = Model.snapshot(); Model.emit('meta'); setStatus('saved');
     App.toast('Saved as “' + name + '”'); return true;
   }
@@ -110,8 +126,9 @@ const Projects = (() => {
   const editedOf = p => Math.max(+(p.edited || p.updated) || 0, (IT[p.id] && IT[p.id].edited) || 0);
   const createdOf = p => (IT[p.id] && IT[p.id].created) || +p.created || 0;
   const stamp = t => { const d = new Date(t * 1000); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
+  // as-made copies of a board revision are never duplicates
   function dupGroups(ps) {
-    const g = new Map(); for (const p of ps) { const k = nameKey(p.name); if (!k) continue; if (!g.has(k)) g.set(k, []); g.get(k).push(p); }
+    const g = new Map(); for (const p of ps) { if (p.asmade) continue; const k = nameKey(p.name); if (!k) continue; if (!g.has(k)) g.set(k, []); g.get(k).push(p); }
     return [...g.values()].filter(a => a.length > 1).map(a => a.sort((x, y) => editedOf(y) - editedOf(x)));
   }
   // keep the most recently edited copy of every repeated design, delete the others (desktop: they stay under ⟲ Deleted)
@@ -137,7 +154,18 @@ const Projects = (() => {
       const sort = $('#projSort') ? $('#projSort').value : 'edited-desc', created = createdOf, nm = p => String(p.name || 'Untitled');
       const order = { 'edited-desc': (a, b) => editedOf(b) - editedOf(a), 'edited-asc': (a, b) => editedOf(a) - editedOf(b), 'created-desc': (a, b) => created(b) - created(a), 'created-asc': (a, b) => created(a) - created(b),
         'name-asc': (a, b) => nm(a).localeCompare(nm(b), undefined, { numeric: true, sensitivity: 'base' }), 'name-desc': (a, b) => nm(b).localeCompare(nm(a), undefined, { numeric: true, sensitivity: 'base' }) }[sort] || ((a, b) => editedOf(b) - editedOf(a));
-      const rows = ps.filter(p => !q || (p.name || '').toLowerCase().includes(q)).sort(order);
+      // a board code (CP-K7Q2M-2 R3, as printed on the PCB) finds its project and the revision the board was made from
+      const fc = q && Pcb.parseFabCode(q), codeOf = (p, no) => p.code + (no > 1 || (p.revs || []).some(r => r[0] > 1) ? '-' + no : '');
+      const hitCode = p => fc && p.code === fc.id;
+      if (fc) ps.sort((a, b) => (a.asmade ? 1 : 0) - (b.asmade ? 1 : 0));
+      const rows = ps.filter(p => !q || (p.name || '').toLowerCase().includes(q) || (p.code || '').toLowerCase().includes(q) || hitCode(p)).sort(order);
+      const revNote = p => {
+        if (!hitCode(p)) return '';
+        if (p.asmade) return `<div class="small">As-made copy of board <b>${esc(codeOf(p, p.asmade[0]))} R${p.asmade[1]}</b></div>`;
+        const no = fc.pcb || 1, mine = (p.revs || []).filter(r => r[0] === no), want = fc.rev ? mine.filter(r => r[1] === fc.rev) : mine;
+        if (!mine.length) return `<div class="small">Board code <b>${esc(codeOf(p, no))}</b> — no Gerbers were made for this PCB yet.</div>`;
+        return `<div class="small">Board code <b>${esc(codeOf(p, no))}</b>: ${want.length ? want.map(r => `<button data-a="rev" data-pcb="${r[0]}" data-rev="${r[1]}" title="Open the design as it was when R${r[1]} was made">Open R${r[1]}</button> <span class="muted">made ${esc(stamp(r[2]))}</span>`).join(' · ') : `no R${fc.rev} (made: ${mine.map(r => 'R' + r[1]).join(', ')})`}</div>`;
+      };
       const dups = dupGroups(ps), dupOf = new Map(); for (const a of dups) a.forEach((p, i) => dupOf.set(p.id, i ? 'older' : 'newest'));
       const dupNote = dups.length ? `<div class="row-h" style="margin-bottom:8px"><span class="small bad">${dups.length} design${dups.length > 1 ? 's are' : ' is'} here more than once (same name).</span><button data-a="merge" title="Keep the most recently edited copy of each, remove the older ones">Merge duplicates</button></div>` : '';
       const signed = typeof Cloud !== 'undefined' && Cloud.email;
@@ -146,7 +174,7 @@ const Projects = (() => {
         : `<div class="muted small" style="margin-bottom:8px">${window.CPStatic && CPStatic.mode === 'static' ? 'Web version: projects are saved in this browser. ' : ''}<a href="#" id="projCloud">☁ Sign in with Google</a> to keep every project in your Google Drive and open them on any PC.</div>`;
       list.innerHTML = note + dupNote + (rows.length ? rows.map(p => `<div class="proj${p.id === Model.S.id ? ' cur' : ''}" data-id="${esc(p.id)}">
         <div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}${p.id === Model.S.id ? ' <span class="badge basic">open</span>' : ''}${dupOf.get(p.id) === 'newest' ? ' <span class="badge basic" title="This name is here more than once: this copy was edited last">newest copy</span>' : dupOf.get(p.id) === 'older' ? ' <span class="badge" title="This name is here more than once: another copy was edited later">older copy</span>' : ''}</div>
-        <div class="muted small">${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · last edited <b title="${esc(new Date(editedOf(p) * 1000).toLocaleString())}">${stamp(editedOf(p))}</b> (${ago(editedOf(p))})${createdOf(p) ? ` · created ${stamp(createdOf(p))}` : ''}${IT[p.id] ? ` <span class="muted" title="Dates from the project list ${esc(IT[p.id].src.join(' and '))} (the same on every PC that syncs)">⇅</span>` : ''}</div></div>
+        ${revNote(p)}<div class="muted small">${p.code ? `<span title="Board code printed on the PCB (search it to find this design)">${esc(p.code)}</span> · ` : ''}${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · last edited <b title="${esc(new Date(editedOf(p) * 1000).toLocaleString())}">${stamp(editedOf(p))}</b> (${ago(editedOf(p))})${createdOf(p) ? ` · created ${stamp(createdOf(p))}` : ''}${IT[p.id] ? ` <span class="muted" title="Dates from the project list ${esc(IT[p.id].src.join(' and '))} (the same on every PC that syncs)">⇅</span>` : ''}</div></div>
         <div class="pact"><button data-a="open" class="primary">Open</button><button data-a="dup" title="Duplicate">⧉</button>${hasHistory ? '<button data-a="hist" title="Earlier versions (restore)">⟲</button>' : ''}<button data-a="ren" title="Rename">✎</button><button data-a="del" class="danger" title="Delete">🗑</button></div></div>`).join('')
         : '<div class="muted">No projects yet.</div>') + (hasHistory ? '<div class="proj"><div class="pinfo muted small">Every project keeps earlier versions (⟲). </div><div class="pact"><button data-a="deleted">Deleted projects…</button></div></div>' : '');
       if ($('#projCloud')) $('#projCloud').onclick = e => { e.preventDefault(); Cloud.signIn().then(render); };
@@ -282,6 +310,7 @@ const Projects = (() => {
       try {
         if (b.dataset.a === 'open') await open(id);
         if (b.dataset.a === 'dup') await duplicate(id);
+        if (b.dataset.a === 'rev') await openRevision(id, +b.dataset.pcb, +b.dataset.rev);
         if (b.dataset.a === 'ren') { const n = prompt('Rename project', name); if (n && n.trim()) await rename(id, n.trim()); }
         if (b.dataset.a === 'del' && confirm(`Delete project “${name}”?${hasHistory ? ' (It can be brought back later from ⟲ Deleted projects.)' : ' This cannot be undone.'}`)) await remove(id);
         if (b.dataset.a === 'hist') await showHistory(id, name);

@@ -390,6 +390,7 @@ const EXTRA = [
   { name: 'get_bom', description: 'Bill of materials of the current project as CSV text (qty, refs, type, value, footprint, LCSC part).', input_schema: { type: 'object', properties: {} } },
   { name: 'add_to_report', description: 'Add the current project to a report file: kind "design" writes a summary entry (name, board, layers, parts, nets, routing, vias, DRC, datasheet title / description, project notes) — updated in place when the project is already there; kind "finding" adds a note (title, text, severity). JSON file {designs: [], findings: []} (default Documents/CircuitPilot exports/report.json), or Markdown when the path ends with .md.', input_schema: { type: 'object', properties: { path: { type: 'string' }, kind: { type: 'string', enum: ['design', 'finding'] }, title: { type: 'string' }, text: { type: 'string' }, severity: { type: 'string', enum: ['info', 'warning', 'error'] }, extra: { type: 'object', description: 'more fields for the entry' } } } },
   { name: 'import_folder', description: 'Add every project found in a folder and all its subfolders: CircuitPilot project files (.json / .circuit.json) and EasyEDA PCB files (.json, imported with tracks). Each becomes a new project; files that match a project already in CircuitPilot (same name and part count) are skipped unless skip_existing: false. dry_run: true only lists what would be imported. The first imported project becomes current.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: 'folder on this PC' }, recursive: { type: 'boolean', description: 'default true' }, dry_run: { type: 'boolean' }, skip_existing: { type: 'boolean', description: 'default true' } } } },
+  { name: 'find_board_code', description: 'Find the design a manufactured board was made from: code = the board code printed on its silkscreen (e.g. "CP-K7Q2M R3", "CP-K7Q2M-2 R1", or just "K7Q2M"). Returns the project, the PCB and every revision made (date, how it was sent). open: true opens that revision: the project itself when it has not changed since, else a separate copy of the design as it was made.', input_schema: { type: 'object', required: ['code'], properties: { code: { type: 'string' }, open: { type: 'boolean' } } } },
   { name: 'import_kicad', description: 'Import a KiCad project (KiCad 6–9) as a new CircuitPilot project and make it current: path = its .zip, its folder, or the .kicad_pcb (the .kicad_sch sheets next to it are read too). Brings every part with its real footprint (pads, holes, pin names from the schematic symbols), the nets of the board, the board outline, tracks, vias, copper zones (with their priority) and keep-outs on up to 4 copper layers (In1 / In2 as signal layers), mounting holes, silkscreen texts and the schematic sheets. Parts and copper are locked in place. Returns counts and notes on what was approximated (custom-shaped pads as their bounding rectangle, slots as round holes, more than 4 copper layers).', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: '.zip, folder or .kicad_pcb on this PC' }, name: { type: 'string', description: 'project name (default: the board file name)' } } } },
   { name: 'export_parts', description: 'Write parts of My Library (default: all) to a JSON file, to use them in another CircuitPilot database or on another PC (import_parts).', input_schema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } }, path: { type: 'string', description: 'file path (default Documents/CircuitPilot exports/my-library.json)' } } } },
   { name: 'import_parts', description: 'Add the parts of a JSON file from export_parts (or one part object) to My Library. Existing parts with the same key are kept unless overwrite: true.', input_schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' }, overwrite: { type: 'boolean' } } } },
@@ -404,7 +405,7 @@ const EXTRA = [
 ];
 // every tool takes `project`: the call works on that project (it becomes the current one) — no guessing after a restart
 const PROJECT_ARG = { type: 'string', description: 'Project id (or exact name) this call works on; it becomes the current project. Pass it in every call.' };
-const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job', 'export_parts', 'import_parts', 'import_folder', 'import_kicad']);
+const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job', 'export_parts', 'import_parts', 'import_folder', 'import_kicad', 'find_board_code']);
 const TOOLS = [...EXTRA, ...Engine.TOOLS.filter(t => !EXTRA.some(x => x.name === t.name)).map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema }))]
   .map(t => NO_PROJECT_ARG.has(t.name) ? t : Object.assign({}, t, { input_schema: Object.assign({}, t.input_schema, { properties: Object.assign({ project: PROJECT_ARG }, t.input_schema.properties || {}) }) }));
 // tools that need no project at all
@@ -486,6 +487,25 @@ async function callTool(name, input = {}) {
       if (imported.length) { setCurrent(imported[0].id); await showProject(imported[0].id); }
       return { folder: root, json_files: files.length, imported, already_there: found.filter(x => !todo.includes(x)).map(x => x.file), failed: failed.length ? failed : undefined, skipped: skipped.slice(0, 50), current: imported.length ? imported[0].id : undefined };
     }
+    case 'find_board_code': {
+      const fc = Pcb.parseFabCode(input.code); if (!fc) throw new Error('not a board code — it looks like CP-K7Q2M R3 (CP-, 5 letters / digits, optional -PCB number, optional R + revision)');
+      const ps = (await api('GET', '/api/projects')).filter(p => p.code === fc.id && !p.asmade);   // the original, not its as-made copies
+      if (!ps.length) return { code: fc.id, found: false, hint: 'No project on this PC has this code (it may be in another CircuitPilot database, GitHub or Google Drive: load / sync them first)' };
+      const p = ps[0], d = await api('GET', '/api/projects/' + p.id), revs = (d.fab && d.fab.revs) || [], no = fc.pcb || 1;
+      const multi = revs.some(r => (r.pcb || 1) > 1) || (d.pcbs || []).length > 1, codeOf = n => fc.id + (multi || n > 1 ? '-' + n : '');
+      const mine = revs.filter(r => (r.pcb || 1) === no), want = fc.rev ? mine.find(r => r.rev === fc.rev) : mine[mine.length - 1];
+      const out = { code: codeOf(no), found: true, project: p.id, name: p.name, pcb: no, pcb_name: ((d.pcbs || [])[no - 1] || {}).name, revisions: mine.map(r => ({ rev: r.rev, made: new Date(r.at * 1000).toISOString(), via: r.via, parts: r.parts })), other_pcbs: [...new Set(revs.map(r => r.pcb || 1))].filter(n => n !== no).map(codeOf) };
+      if (fc.rev && !want) out.note = 'This PCB has no R' + fc.rev;
+      if (!input.open || !want) return out;
+      if (want === mine[mine.length - 1]) {
+        setCurrent(p.id); await showProject(p.id); Model.load(d);
+        if (no > 1 || multi) { try { Pcb.selectPcb(no); } catch { } }
+        if (Pcb.fabRevisions().some(r => r.pcb === no && r.rev === want.rev && r.current)) return Object.assign(out, { opened: p.id, as_made: 'the project as it is now is this revision' });
+      }
+      const snap = JSON.parse(want.snap); delete snap.id; snap.fab = { id: d.fab.id, asMade: { pcb: no, rev: want.rev, hash: want.hash }, revs: [] }; snap.name = (p.name || 'Untitled') + ' — ' + codeOf(no) + ' R' + want.rev + ' (as made)';
+      const made = await api('PUT', '/api/projects/', snap); setCurrent(made.id); await showProject(made.id);
+      return Object.assign(out, { opened: made.id, as_made: 'a separate copy of the design as R' + want.rev + ' was made (the project changed since)' });
+    }
     case 'import_kicad': {
       const p = path.resolve(String(input.path || '')); if (!fs.existsSync(p)) throw new Error('No file or folder ' + p);
       const files = {}, want = n => /\.kicad_(pcb|sch|pro)$/i.test(n);
@@ -548,7 +568,7 @@ async function callTool(name, input = {}) {
     }
     case 'copy_project': {
       const id = await ensureProject(), d = await api('GET', '/api/projects/' + id);
-      delete d.id; d.name = input.name || (d.name || 'Untitled') + ' (copy)';
+      delete d.id; delete d.fab; d.name = input.name || (d.name || 'Untitled') + ' (copy)';   // a copy is a new board: its own code
       const r = await api('PUT', '/api/projects/', d);
       if (input.open !== false) { setCurrent(r.id); await showProject(r.id); }
       return { copied: d.name, id: r.id, from: id, current: input.open !== false ? r.id : id };
@@ -611,6 +631,7 @@ async function callTool(name, input = {}) {
     case 'export_gerbers': return withProject(async () => {
       const d = Pcb.drc();
       if (d.errors && !input.force) return { exported: false, drc: d.summary, errors: d.violations.filter(v => v.severity === 'error').slice(0, 20).map(v => v.msg), hint: 'Fix these (route_pcb, optimize_pcb, place_footprint) or call again with force: true' };
+      let fr = null; Model.mutate(() => { fr = Pcb.fabRelease({ via: 'export_gerbers' }); });
       const files = Pcb.gerbers(), dir = path.resolve(String(input.out_dir || ''));
       fs.mkdirSync(dir, { recursive: true });
       for (const [n, txt] of Object.entries(files)) { const f = path.join(dir, n); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, txt); }
@@ -618,7 +639,7 @@ async function callTool(name, input = {}) {
       fs.writeFileSync(path.join(dir, 'ORDER-NOTES.txt'), `${Model.S.name || 'Board'}: ${Model.S.board.w} x ${Model.S.board.h} mm, ${Pcb.rules().layers} layers\n${vias}\nDRC: ${d.summary}\n`);
       const zipPath = path.join(dir, (Model.S.name || 'board').replace(/[^\w.-]+/g, '_') + '-gerbers.zip');
       fs.writeFileSync(zipPath, Buffer.from(await ctx.makeZip(files).arrayBuffer()));
-      return { exported: true, drc: d.summary, vias, warnings: d.violations.filter(v => v.severity !== 'error').slice(0, 10).map(v => v.msg), folder: dir, files: Object.keys(files), zip: zipPath };
+      return { exported: true, board_code: fr.label, new_revision: fr.new, drc: d.summary, vias, warnings: d.violations.filter(v => v.severity !== 'error').slice(0, 10).map(v => v.msg), folder: dir, files: Object.keys(files), zip: zipPath };
     });
     case 'export_cnc_gcode': return withProject(async () => {
       const d = Pcb.drc(), { files, info } = Cnc.job(input), dir = path.resolve(String(input.out_dir || ''));

@@ -426,7 +426,7 @@ const PcbView = (() => {
     if (el && el.dataset.k === 'lbl' && !(el.dataset.lk === 'part' && Model.comp(el.dataset.lref) && !partVisible(Model.comp(el.dataset.lref)))) {
       const lk = el.dataset.lk, cx = +el.dataset.cx, cy = +el.dataset.cy;
       if (lk === 'part') { const c = Model.comp(el.dataset.lref); ui.item = null; ui.multi = new Set([c.ref]); ui.sel = c.ref; ui.labelOf = c.ref; ui.hlNet = null; ui.onSelect(c.ref); }
-      else { ui.sel = null; ui.multi = new Set(); ui.hlNet = null; ui.item = lk === 'board' ? { k: 'blbl' } : { k: 'txt', i: +el.dataset.i }; ui.onSelect(null); }
+      else { ui.sel = null; ui.multi = new Set(); ui.hlNet = null; ui.item = lk === 'board' ? { k: 'blbl' } : lk === 'fabid' ? { k: 'flbl' } : { k: 'txt', i: +el.dataset.i }; ui.onSelect(null); }
       drag = { kind: 'label', lk, ref: el.dataset.lref, i: +el.dataset.i, ox: pt.x - cx, oy: pt.y - cy, moved: false }; render(); return;
     }
     let ref = el && (el.dataset.ref || el.dataset.pref);
@@ -457,7 +457,7 @@ const PcbView = (() => {
     return null;
   }
   const labelSelected = l => { const s = selectedLabel(); return !!s && s.lk === l.kind && (l.kind === 'part' ? s.ref === l.ref : l.kind === 'text' ? s.i === l.i : true); };
-  function setLabel(t, o) { if (t.lk === 'part') Pcb.setSilkLabel(t.ref, o); else if (t.lk === 'board') Pcb.setSilkLabel('board', o); else Pcb.updateText(t.i, o); }
+  function setLabel(t, o) { if (t.lk === 'part') Pcb.setSilkLabel(t.ref, o); else if (t.lk === 'board') Pcb.setSilkLabel('board', o); else if (t.lk === 'fabid') Pcb.setSilkLabel('code', o); else Pcb.updateText(t.i, o); }
   // the selected net at a glance: the whole route glows, its vias and pads get rings, the parts on it are outlined,
   // and a tag shows the net name, pads / parts and the routed length
   function netInfo(net) {
@@ -532,7 +532,7 @@ const PcbView = (() => {
       } else if (drag.kind === 'label') {
         const nx = +snapG(pt.x - drag.ox).toFixed(3), ny = +snapG(pt.y - drag.oy).toFixed(3);
         if (!drag.moved) { Model.begin(); drag.moved = true; }
-        if (drag.lk === 'part') Pcb.setSilkLabel(drag.ref, { x: nx, y: ny }); else if (drag.lk === 'board') Pcb.setSilkLabel('board', { x: nx, y: ny }); else Pcb.updateText(drag.i, { x: nx, y: ny });
+        if (drag.lk === 'part') Pcb.setSilkLabel(drag.ref, { x: nx, y: ny }); else if (drag.lk === 'board') Pcb.setSilkLabel('board', { x: nx, y: ny }); else if (drag.lk === 'fabid') Pcb.setSilkLabel('code', { x: nx, y: ny }); else Pcb.updateText(drag.i, { x: nx, y: ny });
         Model.emit('move');
       } else if (drag.kind === 'via') {
         const v = Model.S.pcb.vias[drag.i], nx = +snapG(pt.x - drag.ox).toFixed(4), ny = +snapG(pt.y - drag.oy).toFixed(4);
@@ -668,6 +668,7 @@ const PcbView = (() => {
       else if (it.k === 'txt') Pcb.removeText(it.i);
       else if (it.k === 'ln') Pcb.removeLine(it.i);
       else if (it.k === 'blbl') Pcb.setSilkLabel('board', { hidden: true });
+      else if (it.k === 'flbl') Pcb.setSilkLabel('code', { hidden: true });
       else if (it.k === 'T') S.pcb.traces.splice(it.i, 1);
       else if (it.k === 't') {
         const t = S.pcb.traces[it.i], a = t.pts.slice(0, it.s), b = t.pts.slice(it.s);
@@ -688,6 +689,7 @@ const PcbView = (() => {
     // the layer list follows the copper layer count (a 4-layer board opened or imported shows Inner1 / Inner2)
     if (overlay && shownLayers !== Pcb.rules().layers) { shownLayers = Pcb.rules().layers; renderLayers(); }
     const S = Model.S, cs = Pcb.placed();
+    if (cs.length && !(S.fab && S.fab.id)) setTimeout(() => { if (Pcb.placed().length && !(Model.S.fab && Model.S.fab.id)) Model.mutate(() => Pcb.ensureFabId()); }, 0);
     cache.pads = allPads();
     if (!cs.length || !S.board.w) { world.innerHTML = '<text x="0" y="0" text-anchor="middle" fill="#888" style="font-size:2.4px">No PCB yet — click “Generate PCB”, or ask the Copilot to make the board</text>'; renderLiveLayer(); return; }
     const out = [], hl = ui.hlNet;
@@ -940,6 +942,23 @@ const PcbView = (() => {
       $('#pbAuto').onclick = () => upd({ auto: true }); $('#pbR').onchange = e => upd({ rotation: +e.target.value || 0 });
       return true;
     }
+    if (it.k === 'flbl') {
+      const L = S.pcb.fabLabel || {}, revs = Pcb.fabRevisions().filter(r => r.code === Pcb.fabCode()), last = revs[revs.length - 1];
+      const changed = last && !last.current;
+      el.innerHTML = `<div class="ph">Board code + revision</div>
+        <div><b>${esc(Pcb.fabLabelText() || '')}</b></div>
+        <div class="muted small">${last ? `R${last.rev} was sent ${new Date(last.at * 1000).toLocaleString()} (${esc(last.via || 'export')})${changed ? ` — the design changed since: the next Gerber export / order prints <b>R${last.rev + 1}</b>` : ' — the design is still R' + last.rev}` : 'No Gerbers made yet: the first export / order is R1.'}</div>
+        <label>Side<select id="pfS"><option value="B" ${(L.side || (Pcb.rules().layers === 1 ? 'F' : 'B')) === 'B' ? 'selected' : ''}>Bottom</option><option value="F" ${L.side === 'F' || (!L.side && Pcb.rules().layers === 1) ? 'selected' : ''}>Top</option></select></label>
+        <label>Size (mm)<input id="pfH" type="number" step="0.1" min="0.6" value="${L.h || ''}" placeholder="1.0"></label>
+        <label>Rotation (°)<input id="pfR" type="number" step="15" value="${L.rot || 0}"></label>
+        <label class="chk"><input type="checkbox" id="pfHide" ${L.hide ? 'checked' : ''}> Hide</label>
+        <div class="row"><button id="pfAuto">Automatic position</button></div>
+        <div class="muted small">Search this code in Projects to find the design and the revision a board was made from. ${revs.length ? 'Revisions: ' + revs.map(r => 'R' + r.rev).join(', ') + '.' : ''}</div>`;
+      const upd = o => Model.mutate(() => Pcb.setSilkLabel('code', o));
+      $('#pfS').onchange = e => upd({ side: e.target.value }); $('#pfH').onchange = e => upd({ size: +e.target.value || 1.0 }); $('#pfHide').onchange = e => upd({ hidden: e.target.checked });
+      $('#pfAuto').onclick = () => upd({ auto: true }); $('#pfR').onchange = e => upd({ rotation: +e.target.value || 0 });
+      return true;
+    }
     if (it.k === 'h') {
       const h = S.pcb.holes && S.pcb.holes[it.i]; if (!h) return false;
       el.innerHTML = `<div class="ph">Mounting hole</div>
@@ -1046,7 +1065,7 @@ const PcbView = (() => {
   function validate() {
     const S = Model.S;
     const it = ui.item, gone = it && (it.k === 'v' ? !S.pcb.vias[it.i] : it.k === 'pour' ? !(S.pcb.pours || [])[it.i] : it.k === 'ko' ? !(S.pcb.keepouts || [])[it.i] : it.k === 'koa' ? !Pcb.epKeepouts().some(q => q.epRef === it.ref) : it.k === 'h' ? !(S.pcb.holes || [])[it.i]
-      : it.k === 'txt' ? !(S.pcb.texts || [])[it.i] : it.k === 'ln' ? !(S.pcb.lines || [])[it.i] : it.k === 'blbl' ? false : !S.pcb.traces[it.i]);   // t / T: tracks
+      : it.k === 'txt' ? !(S.pcb.texts || [])[it.i] : it.k === 'ln' ? !(S.pcb.lines || [])[it.i] : it.k === 'blbl' || it.k === 'flbl' ? false : !S.pcb.traces[it.i]);   // t / T: tracks
     if (gone) ui.item = null;
     if (ui.sel && !Model.comp(ui.sel)) ui.sel = null;
     for (const r of [...ui.multi]) if (!Model.comp(r)) ui.multi.delete(r);

@@ -28,6 +28,7 @@ const JlcOrder = (() => {
 
   const fresh = () => ({ fileKey: null, opts: { qty: 5, color: 0, finish: 1, thickness: 1.6, achieveDate: null, ship: null, remark: '' }, quote: null, addr: {} });
   async function uploadGerbers() {
+    try { Model.mutate(() => { const fr = Pcb.fabRelease({ via: 'JLCPCB order' }); if (fr.new) App.toast('Printed on the board: ' + fr.label + (fr.previous ? ' (new revision)' : ''), 8000); }); } catch (e) { }
     const blob = makeZip(Pcb.gerbers()), name = (Model.S.name || 'board').replace(/[^\w.-]+/g, '_').slice(0, 60) + '-gerbers.zip';
     const up = await call('pcb/upload?name=' + encodeURIComponent(name), blob, true);
     if (up.code !== 200 || !up.data) throw new Error(`JLCPCB did not accept the Gerbers (${up.code}: ${up.message || 'no file key'})`);

@@ -26,6 +26,7 @@
     <div class="dd"><button>Export ▾</button>
       <div class="ddm">
         <button data-exp="json" title="The whole design in one CircuitPilot file: schematic, every PCB, enclosure script, firmware, notes and its last-edit time. Open it again on any PC with Projects → Import; it is also how to move a design between the desktop app and pcbgo.site."><b>CircuitPilot project file (.circuit.json)</b></button>
+        <button data-exp="alljson" title="Every project in CircuitPilot, one .circuit.json file each, in one zip. Import the zip again with Projects → Import (you choose which ones)."><b>All projects (.zip of .json)</b></button>
         <button data-exp="all" title="Every file of this project in one zip: project, Gerbers, JLCPCB BOM + pick-and-place, BOM, netlist, enclosure STL, EasyEDA files, PDFs, images">Everything (.zip)</button>
         <button data-exp="gerber">Gerber + drill (.zip)</button>
         <button data-exp="github" title="Save this design to your GitHub account: one folder per design in a repository you choose">Save to GitHub…</button>
@@ -292,7 +293,7 @@
 <div id="projModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>Projects</h2><button id="projClose">✕</button></div>
-    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><select id="projSort" title="Order of the list"><option value="edited-desc">Last modified ↓ (newest first)</option><option value="edited-asc">Last modified ↑ (oldest first)</option><option value="created-desc">Created ↓ (newest first)</option><option value="created-asc">Created ↑ (oldest first)</option><option value="name-asc">Name A → Z</option><option value="name-desc">Name Z → A</option></select><button id="projNew" class="primary">＋ New project</button><button id="projImportAll" title="Every project (.json) in a folder and its subfolders">Import folder…</button><button id="projImport" title="A CircuitPilot project (.json), an EasyEDA Pro project (.epro / .epro2: File → Save As / Export → Project) with schematic and PCB, an EasyEDA Standard PCB (File → Export → EasyEDA Source), or a KiCad project (its .zip, or the .kicad_pcb with its .kicad_sch sheets selected together)">Import (.json, EasyEDA, KiCad)</button></div>
+    <div class="row"><input id="projSearch" placeholder="Search projects…" style="flex:1"><select id="projSort" title="Order of the list"><option value="edited-desc">Last modified ↓ (newest first)</option><option value="edited-asc">Last modified ↑ (oldest first)</option><option value="created-desc">Created ↓ (newest first)</option><option value="created-asc">Created ↑ (oldest first)</option><option value="name-asc">Name A → Z</option><option value="name-desc">Name Z → A</option></select><button id="projNew" class="primary">＋ New project</button><button id="projImportAll" title="Every project (.json) in a folder and its subfolders">Import folder…</button><button id="projImport" title="A CircuitPilot project (.json), an EasyEDA Pro project (.epro / .epro2: File → Save As / Export → Project) with schematic and PCB, an EasyEDA Standard PCB (File → Export → EasyEDA Source), or a KiCad project (its .zip, or the .kicad_pcb with its .kicad_sch sheets selected together), or a .zip of projects (Export → All projects)">Import (.json, .zip, EasyEDA, KiCad)</button></div>
     <div id="projList"></div>
   </div>
 </div>
@@ -523,7 +524,7 @@
 <script src="js/model.js?v=202611180100"></script>
 <script src="js/schematic.js?v=202611170600"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611231430"></script>
+<script src="js/pcb.js?v=202611231900"></script>
 <script src="js/cnc.js?v=202611071200"></script>
 <script src="js/pcbview.js?v=202611231400"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
@@ -544,14 +545,14 @@
 <script src="js/ai.js?v=202611162200"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
-<script src="js/folder.js?v=202610301800"></script>
+<script src="js/folder.js?v=202611231900"></script>
 <script src="js/projects.js?v=202611231820"></script>
 <script src="js/cloud.js?v=202611231820"></script>
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611190100"></script>
-<script src="js/welcome.js?v=202611231810"></script>
-<script src="js/app.js?v=202611231830"></script>
+<script src="js/welcome.js?v=202611231900"></script>
+<script src="js/app.js?v=202611231900"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

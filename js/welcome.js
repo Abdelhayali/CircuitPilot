@@ -11,7 +11,8 @@ const Welcome = (() => {
     { v: '2026.11.23', date: '2026-11-23', items: [
       'Board code + revision printed on every PCB (e.g. CP-K7Q2M R2): search it in Projects to find the schematic a board was made from',
       'Welcome tour, this What\'s new list and 💬 Feedback straight to the developer',
-      'Enclosure: Closed ↔ Apart slider (lid lifts, then the board comes out) and Spin (on by default)'] },
+      'Enclosure: Closed ↔ Apart slider (lid lifts, then the board comes out) and Spin (on by default)',
+      'Export → All projects (.zip of .json) backs up every design at once; Projects → Import takes that zip back (you tick which ones)'] },
     { v: '2026.11.19', date: '2026-11-19', items: [
       'Import KiCad projects (KiCad 6–9): parts with real footprints, nets, tracks, zones, up to 4 copper layers',
       '4-layer boards: inner GND / power planes or signal layers, JLCPCB 4-layer rules',

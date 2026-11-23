@@ -118,11 +118,22 @@ const Folder = (() => {
     const skipDir = /(^|\/)(node_modules|\.git|__pycache__|dist|build)\//i;
     const json = files.filter(f => /\.json$/i.test(f.name) && !skipDir.test(f.webkitRelativePath || f.name) && f.size < 30e6);
     if (!json.length) { App.toast('No .json files in that folder or its subfolders', 6000); return; }
+    await importEntries(json[0].webkitRelativePath ? json[0].webkitRelativePath.split('/')[0] : 'folder', json.map(f => ({ rel: f.webkitRelativePath || f.name, name: f.name, text: () => f.text() })), 'in that folder');
+  }
+  // a zip of projects (Export → All projects, or any zip of .circuit.json / EasyEDA .json files, in folders or not)
+  async function importZip(buf, zipName) {
+    const z = await EasyEDAPro._internal.unzip(buf);
+    const names = z.names.filter(n => /\.json$/i.test(n) && !/(^|\/)(__MACOSX|node_modules|\.git)\//i.test(n));
+    if (!names.length) { App.toast('No .json project files in ' + zipName, 7000); return; }
+    await importEntries(zipName, names.map(n => ({ rel: n, name: n.split('/').pop(), text: () => z.text(n) })), 'in ' + zipName);
+  }
+  // shared by the folder and zip imports: read each .json, list the projects with a checkbox, add the ticked ones
+  async function importEntries(source, json, where) {
     App.toast(`Reading ${json.length} .json file${json.length > 1 ? 's' : ''}…`, 20000);
     let existing = []; try { existing = await (await fetch('/api/projects')).json(); } catch (e) { }
     const found = [], skipped = [];
     for (const f of json) {
-      const rel = f.webkitRelativePath || f.name;
+      const rel = f.rel;
       let d; try { d = JSON.parse(await f.text()); } catch (e) { skipped.push(rel + ' (not valid JSON)'); continue; }
       const c = classify(d);
       if (!c) { skipped.push(rel + ' (not a project)'); continue; }
@@ -131,8 +142,8 @@ const Folder = (() => {
       const dup = existing.some(p => (p.name || '') === name && (c.kind !== 'circuitpilot' || p.parts === c.parts));   // EasyEDA: same name
       found.push({ rel, d, c, name, dup });
     }
-    if (!found.length) { App.toast('No CircuitPilot projects or EasyEDA PCBs found' + (skipped.length ? ` (${skipped.length} other .json files skipped)` : ''), 7000); return; }
-    const sel = await chooseMany(json[0].webkitRelativePath ? json[0].webkitRelativePath.split('/')[0] : 'folder', found, skipped); if (!sel || !sel.length) return;
+    if (!found.length) { App.toast('No CircuitPilot projects or EasyEDA PCBs found ' + where + (skipped.length ? ` (${skipped.length} other .json files skipped)` : ''), 7000); return; }
+    const sel = await chooseMany(source, found, skipped); if (!sel || !sel.length) return;
     await Projects.saveNow();
     const before = Model.snapshot(), ids = [], errs = [];
     Projects.pause(true);
@@ -157,7 +168,7 @@ const Folder = (() => {
     return new Promise(res => {
       const m = document.createElement('div'); m.className = 'modal';
       m.innerHTML = `<div class="dlg wide"><div class="row-h"><h2>Projects in ${esc(folder)}</h2><button data-x>✕</button></div>
-        <div class="muted small">${items.length} found in the folder and its subfolders. Ticked ones are added to your projects (each as a new project).</div>
+        <div class="muted small">${items.length} found. Ticked ones are added to your projects (each as a new project).</div>
         <div class="row"><button data-all>Select all</button><button data-none>Select none</button></div>
         <div class="fdlist" style="max-height:50vh;overflow:auto">${items.map((it, i) => `<label class="chk" style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-i="${i}" ${it.dup ? '' : 'checked'}>
           <span><b>${esc(it.name)}</b> <span class="muted small">${esc(it.rel)} · ${esc(it.c.label)}${it.c.parts != null ? ' · ' + it.c.parts + ' parts' : ''}${it.dup ? ' · already in CircuitPilot' : ''}</span></span></label>`).join('')}</div>
@@ -196,5 +207,5 @@ const Folder = (() => {
   }
   // Save button / Ctrl+S: a user action, so permission can be asked again here
   const onSave = () => link ? write(true).catch(e => { App.toast('Could not save to the folder: ' + e.message, 6000); return false; }) : Promise.resolve(false);
-  return { init, onSave, saveTo, openFrom, importFolder, classify, stop, get linked() { return link ? link.dir.name + '/' + link.file : null; }, supported };
+  return { init, onSave, saveTo, openFrom, importFolder, importZip, classify, stop, get linked() { return link ? link.dir.name + '/' + link.file : null; }, supported };
 })();

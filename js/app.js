@@ -1569,10 +1569,31 @@ const App = (() => {
     catch (e) { GitHub.setToken(''); st.textContent = e.message; }
   }
 
+  // every project in one zip: <name>.circuit.json each (import it again with Projects → Import)
+  async function exportAllProjects() {
+    try { await Projects.saveNow(); } catch (e) { }
+    let ps; try { const r = await fetch('/api/projects'); if (!r.ok) throw new Error(r.statusText); ps = await r.json(); } catch (e) { ps = null; }
+    if (!Array.isArray(ps)) { exportAs('json'); toast('No project store here — downloaded the open project only'); return; }
+    if (!ps.length) { toast('No projects to export'); return; }
+    toast(`Collecting ${ps.length} project${ps.length > 1 ? 's' : ''}…`, 20000);
+    const files = {}, used = new Set(), errs = [];
+    for (const p of ps) {
+      try {
+        const r = await fetch('/api/projects/' + p.id); if (!r.ok) throw new Error(r.statusText); const d = await r.json();
+        const b = String(d.name || p.name || 'Untitled').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 80) || 'Untitled';
+        let n = b, k = 2; while (used.has(n.toLowerCase())) n = b + ' (' + k++ + ')'; used.add(n.toLowerCase());
+        files[n + '.circuit.json'] = JSON.stringify(d, null, 1);
+      } catch (e) { errs.push((p.name || p.id) + ': ' + e.message); }
+    }
+    const day = new Date().toISOString().slice(0, 10), n = Object.keys(files).length;
+    download('CircuitPilot-all-projects-' + day + '.zip', makeZip(files), 'application/zip');
+    toast(`Downloaded ${n} project${n > 1 ? 's' : ''} (one .circuit.json each) in one zip — import it on any PC with Projects → Import${errs.length ? ' · failed: ' + errs.join('; ') : ''}`, 10000);
+  }
   function exportAs(kind) {
     const S = Model.S;
     try {
       if (kind === 'json') download(fname('.circuit.json'), JSON.stringify(S, null, 1), 'application/json');
+      if (kind === 'alljson') { exportAllProjects().catch(e => toast('Export failed: ' + e.message, 8000)); return; }
       if (kind === 'gerber') { gerberCheck(); return; }
       if (kind === 'svg') download(fname('-schematic.svg'), Sch.exportSVG(), 'image/svg+xml');
       if (kind === 'easyedarules') {
@@ -1846,7 +1867,14 @@ const App = (() => {
         const all = [...e.target.files];
         let kc = null;
         if (all.some(x => /\.kicad_(pcb|sch|pro)$/i.test(x.name))) { kc = {}; for (const x of all) if (/\.kicad_(pcb|sch|pro)$/i.test(x.name)) kc[x.name] = await x.text(); }
-        else if (/\.zip$/i.test(f.name)) { const z = await KiCadImport.filesFromZip(await f.arrayBuffer()); if (Object.keys(z).some(n => /\.kicad_pcb$/i.test(n))) kc = z; }
+        else if (/\.zip$/i.test(f.name)) {
+          const buf = await f.arrayBuffer(), z = await KiCadImport.filesFromZip(buf);
+          if (Object.keys(z).some(n => /\.kicad_pcb$/i.test(n))) kc = z;
+          else {   // a zip of CircuitPilot projects (Export → All projects) or EasyEDA .json files; otherwise an EasyEDA Pro project (below)
+            const names = (await EasyEDAPro._internal.unzip(buf)).names;
+            if (names.some(n => /\.json$/i.test(n)) && !names.some(n => /\.(epru|esch|epcb|esym|efoo)$|(^|\/)project\.json$/i.test(n))) { e.target.value = ''; Projects.close(); await Folder.importZip(buf, f.name); return; }
+          }
+        }
         if (kc) {
           toast('Reading the KiCad project…', 20000);
           const nd = Model.blank(); nd.name = (Object.keys(kc).find(n => /\.kicad_pcb$/i.test(n)) || f.name).split('/').pop().replace(/\.(kicad_pcb|zip)$/i, ''); Model.load(nd);

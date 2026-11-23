@@ -2,7 +2,7 @@
 // Enclosure tab: parameters, 3D preview (three.js from cdnjs), STL / OpenSCAD export.
 const EncView = (() => {
   const $ = s => document.querySelector(s);
-  const ui = { t: 0, spin: false, dragging: false, explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
+  const ui = { t: 0, spin: true, dragging: false, explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
   const WORKER = 'js/shape-worker.js?v=202611170400';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
@@ -45,6 +45,7 @@ const EncView = (() => {
     $('#encExpT').oninput = e => { stopTween(); ui.t = +e.target.value / 100; ui.explode = false; syncExplode(); place(); };
     $('#encExplode').onclick = () => tweenTo(explodeT() > 0.5 ? 0 : 1);
     $('#encSpin').onclick = () => { ui.spin = !ui.spin; $('#encSpin').classList.toggle('on', ui.spin); if (ui.spin) spinLoop(); };
+    $('#encSpin').classList.toggle('on', ui.spin); if (ui.spin) spinLoop();   // spins by default
     $('#encLid').onclick = () => { ui.lid = !ui.lid; $('#encLid').classList.toggle('on', ui.lid); place(); };
     $('#encPcb').onclick = () => { ui.pcb = !ui.pcb; $('#encPcb').classList.toggle('on', ui.pcb); place(); };
     $('#encXray').onclick = () => { ui.xray = !ui.xray; $('#encXray').classList.toggle('on', ui.xray); place(); };

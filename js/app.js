@@ -1983,13 +1983,16 @@ const App = (() => {
     // once per GitHub account: a welcome that offers both choices
     // every visitor sees it once per browser (a guest), and once more after each GitHub sign-in
     function maybeAnnounce() {
+      if (window.Welcome && Welcome.busy()) { Welcome.after(maybeAnnounce); return; }   // after the welcome / tour
       const signed = !!GitHub.getIdToken(), who = signed ? (GitHub.account() || 'github') : 'guest';
       try { if (localStorage.getItem('cp.announced') === who) return; localStorage.setItem('cp.announced', who); } catch (e) { }
       $('#ghModal').classList.add('hidden');
       if (signed) chooseOpen('Welcome! You are signed in with GitHub', 'You can now use CircuitPilot\'s free AI with a limit per person, or your own API key. Choose one; you can change it any time with 🔑 AI keys.');
       else chooseOpen('Welcome to CircuitPilot', 'Use CircuitPilot\'s free AI with a limit per person (sign in with GitHub, no key needed), or your own API key. You can change it any time with 🔑 AI keys.');
     }
-    setTimeout(maybeAnnounce, 1500); setTimeout(maybeAnnounce, 4000);
+    // first visit: the welcome (3D demo, what's new, tour), then the AI chooser
+    if (window.Welcome) { Welcome.init(); setTimeout(() => Welcome.start(maybeAnnounce), 1200); } else setTimeout(maybeAnnounce, 1500);
+    setTimeout(maybeAnnounce, 4000);
     // record the signed-in user for the shared AI admin page (one quiet check per page load)
     if (GitHub.getIdToken()) fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getIdToken() } }).catch(() => { });
     $('#asClose').onclick = () => $('#chooseModal').classList.add('hidden');
@@ -2000,7 +2003,8 @@ const App = (() => {
     AI.onWeb().then(w => $$('.as-safe').forEach(el => el.hidden = !w));
     $('#chat').addEventListener('click', e => { if (e.target.closest('[data-connect]')) openSetup(); });
     $('#chat').addEventListener('click', e => { const i = e.target.closest('img.shot'); if (i) i.classList.toggle('big'); });
-    if (!AI.modelReady()) setTimeout(() => { if (!AI.modelReady()) openSetup(); }, 600);
+    // no model yet: the AI chooser — after the welcome / tour on a first visit
+    if (!AI.modelReady()) setTimeout(() => { const go = () => { if (!AI.modelReady() && $('#chooseModal').classList.contains('hidden')) openSetup(); }; if (window.Welcome && Welcome.busy()) Welcome.after(go); else go(); }, 1500);
 
     document.addEventListener('keydown', e => {
       if (!$('#edModal').classList.contains('hidden')) { if (PartEditor.key(e)) e.preventDefault(); return; }

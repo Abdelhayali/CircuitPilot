@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611231200">
+<link rel="stylesheet" href="styles.css?v=202611231510">
 </head>
 <body>
 <header id="top">
@@ -52,6 +52,8 @@
   <button id="ghBtn" class="cloudbtn ghbtn" title="Save your designs to GitHub: one folder per design in a repository you choose">⌥ GitHub</button>
   <button id="btnTheme" title="Theme"></button>
   <a id="btnGuide" class="guidebtn" href="https://pcbgo.site/docs/CircuitPilot-Tutorial.pdf" target="_blank" rel="noopener" title="Tutorial and user guide (PDF): getting started, every tool, Claude Desktop, the Windows app">📖 Guide</a>
+  <button id="btnNews" title="What's new in each version, and the welcome tour">✨ What's new</button>
+  <button id="btnFeedback" title="Send ideas, bugs or questions to the CircuitPilot developer">💬 Feedback</button>
   <button id="btnSettings">⚙ Settings</button>
   <input type="file" id="fileIn" accept=".json,.epro,.epro2,.zip,.kicad_pcb,.kicad_sch,.kicad_pro" multiple hidden>
 </header>
@@ -532,7 +534,7 @@
 <script src="js/kicad.js?v=202610301800"></script>
 <script src="js/easyedapro.js?v=202610301800"></script>
 <script src="js/kicadimport.js?v=202611191520"></script>
-<script src="js/encview.js?v=202611231200"></script>
+<script src="js/encview.js?v=202611231500"></script>
 <script src="js/encdesign.js?v=202610301800"></script>
 <script src="js/docview.js?v=202610301800"></script>
 <script src="js/pcb3d.js?v=202611111200"></script>
@@ -548,7 +550,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611190100"></script>
-<script src="js/app.js?v=202611231400"></script>
+<script src="js/welcome.js?v=202611231530"></script>
+<script src="js/app.js?v=202611231510"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

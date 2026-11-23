@@ -8,6 +8,7 @@
 //   GET  /pool/status               signed-in user: requests used today and the limit
 //   GET  /pool/v1/models            the one model name the app uses
 //   POST /pool/v1/chat/completions  OpenAI-compatible chat, failover between accounts
+//   POST /pool/feedback              a user's feedback (kind, text, optional e-mail): kept for the admin, 20 per address a day
 //   GET  /admin, /admin/api/*       admin page and API (the ADMIN_LOGIN GitHub account only)
 // Bindings: POOL (KV namespace), ADMIN_LOGIN (secret: the GitHub login that administers the pool).
 
@@ -131,6 +132,7 @@ async function admin(req, url, env) {
   if (p === '/admin' || p === '/admin/') return new Response(PAGE, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' } });
   if (!isAdmin(await login(req), env)) return json({ error: 'Only the admin GitHub account can use this. Paste that account\'s token.' }, 403);
   const pool = await load(env), d = day(), now = Date.now();
+  if (p === '/admin/api/feedback' && req.method === 'GET') return json(await feedbackList(env));
   if (p === '/admin/api/state' && req.method === 'GET') {
     const entries = [];
     for (const e of pool.entries) entries.push({ id: e.id, label: e.label, provider: e.provider, base: e.base, model: e.model, enabled: !!e.enabled, keyTail: String(e.key || '').slice(-4), cooling: (e.cooldown_until || 0) > now ? e.cooldown_until : 0, last_error: e.last_error || '', usedToday: await num(env, `c:${e.id}:${d}`), context: e.context || null, context_eff: e.context || pool.settings.context || CTX_DEFAULT, context_auto: !!e.context_auto, rpm: e.rpm == null ? null : e.rpm, minuteUsed: await num(env, `m:${e.id}:${Math.floor(now / 60000)}`) });
@@ -191,6 +193,7 @@ async function admin(req, url, env) {
     await env.POOL.delete(`u:${who}:${d}`);
     return json({ ok: true });
   }
+  if (p === '/admin/api/feedback/delete') { const k = String(body.key || ''); if (!k.startsWith('fb:')) return json({ error: 'No such feedback' }, 404); await env.POOL.delete(k); return json({ ok: true }); }
   if (p === '/admin/api/delete') { pool.entries = pool.entries.filter(e => e.id !== String(body.id || '')); await save(env, pool); return json({ ok: true }); }
   if (p === '/admin/api/move') {
     const i = pool.entries.findIndex(e => e.id === String(body.id || '')), j = i + (body.dir < 0 ? -1 : 1);
@@ -257,7 +260,30 @@ export async function poolRoute(req, url, env) {
     return json({ object: 'list', data: [{ id: CIRCUIT_MODEL, object: 'model', owned_by: 'circuitpilot', context_length }] });
   }
   if (p === '/pool/v1/chat/completions' && req.method === 'POST') return chat(req, env);
+  if (p === '/pool/feedback' && req.method === 'POST') return feedback(req, env);
   return null;
+}
+
+// ---------- feedback from the app: stored in KV (fb:<time>:<random>), read and deleted on the admin page ----------
+const clip = (v, n) => String(v == null ? '' : v).slice(0, n);
+async function feedback(req, env) {
+  const b = await req.json().catch(() => null);
+  if (!b || !String(b.text || '').trim()) return json({ error: 'Write something first' }, 400);
+  const ip = req.headers.get('cf-connecting-ip') || 'unknown', rk = 'fbrl:' + day() + ':' + ip, n = await num(env, rk);
+  if (n >= 20) return json({ error: 'Thank you — that is enough feedback from here for today. Please try again tomorrow.' }, 429);
+  await env.POOL.put(rk, String(n + 1), { expirationTtl: 2 * 86400 });
+  let who = null; try { who = await login(req); } catch (e) { }
+  const item = { at: Date.now(), kind: clip(b.kind, 20) || 'idea', text: clip(b.text, 5000), email: clip(b.email, 120), github: who, version: clip(b.version, 40), page: clip(b.page, 200), ua: clip(req.headers.get('user-agent'), 200), project: clip(b.project, 120), view: clip(b.view, 20), country: clip(req.cf && req.cf.country, 4) };
+  const key = 'fb:' + String(item.at).padStart(14, '0') + ':' + Math.random().toString(36).slice(2, 8);
+  await env.POOL.put(key, JSON.stringify(item));
+  return json({ ok: true });
+}
+async function feedbackList(env) {
+  const out = []; let cursor;
+  do { const l = await env.POOL.list({ prefix: 'fb:', cursor, limit: 1000 }); for (const k of l.keys) out.push(k.name); cursor = l.list_complete ? null : l.cursor; } while (cursor && out.length < 2000);
+  const keys = out.sort().reverse().slice(0, 300), items = [];
+  for (const k of keys) { const v = await env.POOL.get(k, 'json'); if (v) items.push(Object.assign({ key: k }, v)); }
+  return { items, total: out.length };
 }
 
 const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -289,6 +315,9 @@ input,select{padding:5px;font:inherit;max-width:100%} button{padding:5px 9px;fon
 <div class="box"><p class="muted" id="ustats"></p>
 <div class="row"><button id="resetAll">Reset everyone's count for today</button><span id="umsg" class="muted"></span></div>
 <table><thead><tr><th>GitHub login</th><th>First seen</th><th>Last seen</th><th>Total requests</th><th>Today</th><th></th></tr></thead><tbody id="urows"></tbody></table></div>
+<h2>Feedback from users</h2>
+<div class="box"><div class="row"><button id="fbLoad">Load feedback</button><span id="fbmsg" class="muted"></span></div>
+<table><thead><tr><th>When</th><th>Kind</th><th>Feedback</th><th>From</th><th>App</th><th></th></tr></thead><tbody id="fbrows"></tbody></table></div>
 <h2>Limits</h2>
 <div class="box row">Requests per user per day <input id="dl" type="number" min="1" max="10000" style="width:90px"> Max output tokens per request <input id="mt" type="number" min="256" max="32000" style="width:90px"> Requests per minute per account <input id="rpm" type="number" min="1" max="600" style="width:90px"> Default context window (tokens) <input id="cx" type="number" min="1024" max="2000000" style="width:120px"><button id="saveSet">Save limits</button><span id="smsg" class="muted"></span></div>
 </div>
@@ -335,6 +364,20 @@ function paint() {
   $('total').textContent = 'Requests today: ' + state.usedToday + ' (day ' + state.day + ' UTC)';
   $('dl').value = state.settings.dailyLimit; $('mt').value = state.settings.maxTokens; $('rpm').value = state.settings.rpm; $('cx').value = state.settings.context;
 }
+function loadFeedback() {
+  $('fbmsg').textContent = 'Loading…';
+  api('/admin/api/feedback').then(function (r) {
+    $('fbmsg').textContent = r.total + ' message' + (r.total === 1 ? '' : 's') + (r.total > r.items.length ? ' (newest ' + r.items.length + ' shown)' : '');
+    $('fbrows').innerHTML = r.items.map(function (f) {
+      return '<tr><td>' + esc(when(f.at)) + '</td><td>' + esc(f.kind) + '</td><td style="white-space:pre-wrap;max-width:520px">' + esc(f.text) + (f.project ? '<br><span class="muted">project: ' + esc(f.project) + (f.view ? ' · ' + esc(f.view) + ' view' : '') + '</span>' : '') + '</td><td>' + (f.email ? '<a href="mailto:' + esc(f.email) + '">' + esc(f.email) + '</a><br>' : '') + (f.github ? 'GitHub ' + esc(f.github) + '<br>' : '') + '<span class="muted">' + esc(f.country || '') + '</span></td><td class="muted">' + esc(f.version) + '<br>' + esc(f.page) + '<br>' + esc(f.ua) + '</td><td><button data-fb="' + esc(f.key) + '">Delete</button></td></tr>';
+    }).join('') || '<tr><td colspan="6" class="muted">No feedback yet.</td></tr>';
+  }).catch(function (e) { $('fbmsg').textContent = String(e.message || e); });
+}
+document.addEventListener('click', function (e) {
+  var b = e.target.closest && e.target.closest('button'); if (!b) return;
+  if (b.id === 'fbLoad') loadFeedback();
+  else if (b.dataset.fb && confirm('Delete this feedback?')) api('/admin/api/feedback/delete', { key: b.dataset.fb }).then(loadFeedback);
+});
 function refresh(msgId, text, bad) { if (msgId) say(msgId, text, bad); return api('/admin/api/state').then(function (s) { state = s; paint(); }); }
 $('login').onclick = load;
 var ctxMap = {};

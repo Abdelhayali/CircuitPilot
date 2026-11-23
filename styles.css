@@ -184,6 +184,29 @@ details.tool pre.res { color: var(--tool-res); } details.tool.err pre.res { colo
 #btnSend.stop { background: var(--bad); }
 
 /* modal & toast */
+/* welcome: 3D demo + get started / what's new; guided tour; feedback */
+.dlg.wel-dlg { display: flex; gap: 16px; width: min(1040px, 96vw); max-height: 92vh; padding: 14px; }
+.wel-3d { flex: 1.25; min-width: 0; display: flex; flex-direction: column; background: var(--view3d, #12161c); border-radius: 10px; padding: 8px; }
+.wel-stage { flex: 1; min-height: 340px; position: relative; cursor: grab; }
+.wel-stage canvas { display: block; width: 100% !important; height: 100% !important; }
+.wel-load { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.wel-ctl { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 6px 0 2px; color: #ccd; }
+.wel-ctl small { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; opacity: .8; }
+.wel-ctl input { width: 55%; }
+.wel-cap { text-align: center; color: #aab !important; }
+.wel-side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.wel-tabs { align-self: flex-start; margin-bottom: 8px; }
+.wel-body { flex: 1; overflow: auto; min-height: 120px; padding-right: 4px; }
+.wel-steps { padding-left: 20px; margin: 4px 0; } .wel-steps li { margin: 6px 0; }
+.wel-ver { border-left: 3px solid var(--line); padding: 2px 0 2px 10px; margin: 0 0 10px; } .wel-ver.cur { border-left-color: var(--accent, #4f8fd9); }
+.wel-ver ul { margin: 4px 0 0; padding-left: 18px; } .wel-ver li { margin: 2px 0; font-size: 13px; }
+.wel-act { margin-top: 10px; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 760px) { .wel-dlg { flex-direction: column; overflow: auto; } .wel-stage { min-height: 240px; } }
+.tour { position: fixed; inset: 0; z-index: 80; }
+.tour-hole { position: fixed; border-radius: 8px; box-shadow: 0 0 0 9999px #0009; outline: 2px solid var(--accent, #4f8fd9); transition: all .25s; pointer-events: none; }
+.tour-card { position: fixed; background: var(--panel, #fff); color: var(--text); border-radius: 10px; padding: 12px 14px; box-shadow: 0 8px 30px #0006; transition: top .25s, left .25s; }
+.tour-card p { margin: 6px 0 10px; }
+.dlg.fb-dlg { width: min(520px, 94vw); }
 #modal, .modal { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 50; }
 .comp-dlg { width: min(900px, 94vw); }
 .comp-list { max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }

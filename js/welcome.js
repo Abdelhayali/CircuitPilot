@@ -72,7 +72,7 @@ const Welcome = (() => {
           <li><b>Enclosure</b>: a 3D case around the board, from a template or the AI</li>
           <li><b>Order</b> the board at JLCPCB and the case at JLC3DP — or export Gerbers, EasyEDA, KiCad-style files</li>
           <li><b>Save</b>: projects stay in this browser; sign in with Google or GitHub to have them on every PC</li></ol>
-         <p class="muted small">You can open this again any time with ✨ What's new, and the full guide with 📖 Guide.</p>`;
+         <p class="muted small">You can open this again any time with 🎬 Demo &amp; what's new, and the full guide with 📖 Guide.</p>`;
   }
   function open(t = 'start', title) {
     if (!el) build();
@@ -87,11 +87,15 @@ const Welcome = (() => {
   }
   const runAfter = () => { const f = afterClose; afterClose = []; for (const fn of f) try { fn(); } catch (e) { } };
   const busy = () => !!(el && !el.classList.contains('hidden')) || !!tourEl;
-  // first visit: the welcome; a newer version than this browser has seen: What's new; then `after` (the AI chooser)
+  // the web version (pcbgo.site) opens the welcome on every visit; the desktop app on the first visit. A newer version than
+  // this browser has seen opens on What's new. Then `after` (the AI chooser)
+  const web = () => document.body.classList.contains('static-web') || /(^|\.)pcbgo\.site$/i.test(location.hostname);
   function start(after) {
     if (after) afterClose.push(after);
     if (busy()) return;
-    if (!store.get('cp.welcome')) open('start');
+    const fresh = store.get('cp.seenVersion') !== VERSION;
+    if (web()) open(fresh && store.get('cp.welcome') ? 'new' : 'start');
+    else if (!store.get('cp.welcome')) open('start');
     else if (store.get('cp.seenVersion') !== VERSION) open('new');
     else runAfter();
   }
@@ -179,7 +183,7 @@ const Welcome = (() => {
     { sel: '.tab[data-view="enc"]', title: 'A case around it', text: 'The Enclosure view builds a 3D-printable case around the board — templates or the AI — with an explode slider and STL / STEP files for JLC3DP.' },
     { sel: '#btnSave', view: 'sch', title: 'Saving', text: 'Projects are saved as you work (Ctrl+S to save now). They live in this browser unless you sign in.' },
     { sel: '#cloudBtn', title: 'Your projects on every PC', text: 'Sign in with Google to keep projects in your own Google Drive, or use ⌥ GitHub to keep each design in a repository.' },
-    { sel: '#btnFeedback', title: 'Tell us what to improve', text: 'Ideas, bugs or questions go straight to the developer. ✨ What\'s new shows this tour again and every update.' },
+    { sel: '#btnFeedback', title: 'Tell us what to improve', text: 'Ideas, bugs or questions go straight to the developer. 🎬 Demo & what\'s new opens the welcome, this tour and every update again.' },
   ];
   let tourEl = null, tourI = 0, tourView = null;
   const visibleEl = sel => { for (const s of [].concat(sel)) { const e = $(s); if (e && e.getClientRects().length && e.offsetParent !== null) return e; } return null; };
@@ -273,7 +277,7 @@ const Welcome = (() => {
 
   function init() {
     const fb = $('#btnFeedback'); if (fb) fb.onclick = feedback;
-    const nw = $('#btnNews'); if (nw) nw.onclick = () => open('new');
+    const nw = $('#btnNews'); if (nw) nw.onclick = () => open('start');
   }
   return { init, start, open, close, tour, feedback, busy, after: fn => { afterClose.push(fn); }, VERSION, CHANGELOG };
 })();

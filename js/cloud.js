@@ -284,5 +284,6 @@ const Cloud = (() => {
     document.addEventListener('pointerdown', once, true);
     setInterval(() => { if (token && !busy && !document.hidden) sync(); }, 120000);   // pick up other PCs' edits
   }
-  return { init, signIn, signOut, sync, saved, get email() { return st.email; }, get status() { return status; } };
+  return { init, signIn, signOut, sync, saved, get email() { return clientId() ? st.email : ''; },   // Google sign-in switched off (no client ID): not signed in
+    get enabled() { return !!clientId(); }, get status() { return status; } };
 })();

@@ -1,5 +1,5 @@
 'use strict';
-// First visit: a welcome with a live 3D demo (the wristband enclosure turning and coming apart, board inside), what's new
+// First visit: a welcome with a live 3D demo (the chest ECG node enclosure turning and coming apart, board inside), what's new
 // in each version, a guided tour of the app (skippable), and a feedback form that reaches the developer.
 const Welcome = (() => {
   const $ = s => document.querySelector(s);
@@ -44,8 +44,8 @@ const Welcome = (() => {
     el = document.createElement('div'); el.id = 'welModal'; el.className = 'modal hidden';
     el.innerHTML = `<div class="dlg wel-dlg">
       <div class="wel-3d"><div class="wel-stage" id="welStage"><div class="wel-load muted small">Loading the 3D model…</div></div>
-        <div class="wel-ctl"><small>Closed</small><input type="range" id="welT" min="0" max="100" value="0" title="Drag to take the wristband apart"><small>Apart</small></div>
-        <div class="wel-cap muted small">A wristband made in CircuitPilot: schematic → PCB → enclosure, all from one project. Drag to turn it.</div></div>
+        <div class="wel-ctl"><small>Closed</small><input type="range" id="welT" min="0" max="100" value="0" title="Drag to take the ECG node apart"><small>Apart</small></div>
+        <div class="wel-cap muted small">A chest ECG node made in CircuitPilot (XIAO nRF52840, ECG front end, gold skin electrodes): schematic → PCB → enclosure, all in one project. Drag to turn it.</div></div>
       <div class="wel-side">
         <div class="row-h"><h2 id="welTitle">Welcome to CircuitPilot</h2><button id="welClose" title="Close">✕</button></div>
         <p class="small" style="margin:4px 0 8px">Describe a circuit and the AI copilot picks real parts, draws the schematic, lays out and routes the PCB, designs the enclosure and orders it from JLCPCB — you can edit everything by hand.</p>
@@ -96,12 +96,12 @@ const Welcome = (() => {
     else runAfter();
   }
 
-  // ---------- 3D demo: the wristband turning, coming apart and closing again ----------
+  // ---------- 3D demo: the chest ECG node turning, coming apart and closing again ----------
   async function startDemo() {
     if (demo) { demo.run = true; demo.loop(); return; }
     const stage = $('#welStage');
     try {
-      const T = await loadThree(), data = await (await fetch('data/demo-wristband.json?v=' + VERSION)).json();
+      const T = await loadThree(), data = await (await fetch('data/demo-ecg.json?v=' + VERSION)).json();
       if (!el || el.classList.contains('hidden')) return;
       stage.innerHTML = '';
       const r = new T.WebGLRenderer({ antialias: true, alpha: true }); r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); stage.appendChild(r.domElement);
@@ -117,7 +117,7 @@ const Welcome = (() => {
         let col; try { col = new T.Color(p.color || (p.kind === 'print' ? '#5b6370' : '#888')); } catch (e) { col = new T.Color('#888'); }
         const m = new T.Mesh(g, new T.MeshStandardMaterial({ color: col, roughness: p.color === 'gold' || p.color === 'silver' ? 0.35 : 0.65, metalness: p.color === 'gold' || p.color === 'silver' ? 0.6 : 0.05, side: T.DoubleSide }));
         m.userData = p; root.add(m); all.push(m);
-        if (p.explode) lids.push(m); else if (/^board/i.test(p.name) || p.kind === 'board') boards.push(m);
+        if (p.explode) lids.push(m); else if (/^board|battery|header/i.test(p.name) || p.kind === 'board') boards.push(m);   // rides out with the board
       }
       // the PCB: board slab with its holes and a box per part (as the Enclosure view draws it)
       const P = data.pcb, pg = new T.Group();
@@ -133,7 +133,7 @@ const Welcome = (() => {
       // camera on the model's bounding box
       const box = new T.Box3().setFromObject(root), c = box.getCenter(new T.Vector3()), size = box.getSize(new T.Vector3()).length();
       const o = { th: -0.9, ph: 1.05, r: size * 1.55 };
-      const fit = () => { const w = stage.clientWidth || 400, h = stage.clientHeight || 300; r.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); o.r = size * 2.1 / Math.min(1, cam.aspect); };
+      const fit = () => { const w = stage.clientWidth || 400, h = stage.clientHeight || 300; r.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); o.r = size * 2.4 / Math.min(1, cam.aspect); };
       fit(); new ResizeObserver(fit).observe(stage);
       // drag to turn
       let drag = null; r.domElement.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; demo.manual = performance.now(); r.domElement.setPointerCapture(e.pointerId); });
@@ -152,8 +152,8 @@ const Welcome = (() => {
         // on its own: closed 2 s → opens over 2.5 s → apart 2 s → closes over 2.5 s
         if (idle) { clock = (clock + dt) % 9; const k = clock < 2 ? 0 : clock < 4.5 ? (clock - 2) / 2.5 : clock < 6.5 ? 1 : 1 - (clock - 6.5) / 2.5; demo.t = k; const s = $('#welT'); if (s) s.value = Math.round(k * 100); }
         const tl = ease(demo.t / 0.6), tb = ease((demo.t - 0.35) / 0.65);
-        for (const m of boards) m.position.z = m.userData.z0 + 12 * tb;
-        for (const m of lids) { const e = m.userData.explode; m.position.set(e[0] * tl * 1.6, e[1] * tl * 1.6, e[2] * tl * 1.6 + 12 * tb + 6 * tl); }
+        for (const m of boards) m.position.z = m.userData.z0 + 10 * tb;
+        for (const m of lids) { const e = m.userData.explode, up = e[2] > 0; m.position.set(e[0] * tl, e[1] * tl, e[2] * tl + (up ? 10 * tb + 4 * tl : 0)); }   // lids up over the board, skin-side parts (adhesive) down
         cam.position.set(c.x + o.r * Math.sin(o.ph) * Math.cos(o.th), c.y + o.r * Math.sin(o.ph) * Math.sin(o.th), c.z + 8 + o.r * Math.cos(o.ph));
         cam.lookAt(c.x, c.y, c.z + 9); r.render(scene, cam);
       };

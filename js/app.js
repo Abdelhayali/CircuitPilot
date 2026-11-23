@@ -1831,7 +1831,9 @@ const App = (() => {
       const ok = await Projects.saveNow(), fd = await toFolder;
       toast(ok ? 'Project saved' + (fd ? ' · also in ' + Folder.linked : '') : 'Save failed — see the status next to the name');
     };
-    $('#btnSaveAs').onclick = async () => {
+    $('#btnDownloadJson').onclick = () => { exportAs('json'); toast('Project file downloaded (.json) — open it on any PC with Projects → Import'); };
+    // Save as (Ctrl+Shift+S): a copy under a new name, continuing in it
+    const saveAsCopy = async () => {
       if (!Projects.online) { exportAs('json'); return; }
       const n = prompt('Save project as', (Model.S.name || 'Untitled') + ' (copy)'); if (n === null) return;
       try { await Projects.saveAs(n.trim() || 'Untitled'); } catch (e) { toast('Save as failed: ' + e.message); }
@@ -2016,7 +2018,7 @@ const App = (() => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? Model.redo() : Model.undo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); Model.redo(); return; }
       if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'f') { e.preventDefault(); LibPanel.open(); return; }   // Shift+F: library, as in EasyEDA
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); $('#btnSaveAs').click(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); saveAsCopy(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); $('#btnSave').click(); return; }
       if (view === 'enc') return;
       if (e.key === 'Escape') hideCtx();

@@ -71,7 +71,7 @@ const Welcome = (() => {
           <li><b>PCB</b>: Generate PCB places and routes the board; check it with DRC (JLCPCB rules built in)</li>
           <li><b>Enclosure</b>: a 3D case around the board, from a template or the AI</li>
           <li><b>Order</b> the board at JLCPCB and the case at JLC3DP — or export Gerbers, EasyEDA, KiCad-style files</li>
-          <li><b>Save</b>: projects stay in this browser; sign in with Google or GitHub to have them on every PC</li></ol>
+          <li><b>Save</b>: projects stay in this browser; save them to your GitHub (⌥ GitHub) to have them on every PC</li></ol>
          <p class="muted small">You can open this again any time with 🎬 What's new, and the full guide with 📖 Guide.</p>`;
   }
   function open(t = 'start', title) {
@@ -182,7 +182,7 @@ const Welcome = (() => {
     { sel: '#btnOrderPcb', view: 'pcb', title: 'Order it', text: 'DRC check, Gerbers with the board code printed on the PCB, and a live JLCPCB price. Export ▾ has Gerbers, EasyEDA, BOM, CPL and more.' },
     { sel: '.tab[data-view="enc"]', title: 'A case around it', text: 'The Enclosure view builds a 3D-printable case around the board — templates or the AI — with an explode slider and STL / STEP files for JLC3DP.' },
     { sel: '#btnSave', view: 'sch', title: 'Saving', text: 'Projects are saved as you work (Ctrl+S to save now). They live in this browser unless you sign in.' },
-    { sel: '#cloudBtn', title: 'Your projects on every PC', text: 'Sign in with Google to keep projects in your own Google Drive, or use ⌥ GitHub to keep each design in a repository.' },
+    { sel: '#ghBtn', title: 'Your projects on every PC', text: 'Use ⌥ GitHub to keep each design in your own repository: Load all designs and Sync bring them to any PC.' },
     { sel: '#btnFeedback', title: 'Tell us what to improve', text: 'Ideas, bugs or questions go straight to the developer. 🎬 What\'s new opens the welcome, this tour and every update again.' },
   ];
   let tourEl = null, tourI = 0, tourView = null;

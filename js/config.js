@@ -5,7 +5,9 @@ window.CP_CONFIG = {
   relay: 'https://circuitpilot-relay.circuitpilot.workers.dev',
   // Google sign-in (projects in the user's own Google Drive): the OAuth "Web application" client ID from Google Cloud
   // Console, with the authorized JavaScript origins https://pcbgo.site and http://localhost:5173. Not a secret.
-  googleClientId: '773131004199-8ajg71r8fuv8l0463qmajip7o8bjeqjp.apps.googleusercontent.com',
+  // Turned off for now (sign-in did not work): empty = the Google sign-in button is hidden. To turn it back on, put the ID back:
+  // '773131004199-8ajg71r8fuv8l0463qmajip7o8bjeqjp.apps.googleusercontent.com'
+  googleClientId: '',
   // GitHub sign-in: the Client ID of the GitHub OAuth app (callback URL https://pcbgo.site/). Public, not a secret.
   // The client secret lives in the relay (GITHUB_CLIENT_SECRET). Empty = the sign-in button stays hidden.
   githubClientId: 'Ov23li0Owt2MkdkwsTOy',

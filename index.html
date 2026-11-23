@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611160900">
+<link rel="stylesheet" href="styles.css?v=202611231200">
 </head>
 <body>
 <header id="top">
@@ -88,7 +88,9 @@
         <span class="seg" id="encMode"><button data-m="box" title="Parametric box fitted to the PCB">Box</button><button data-m="custom" title="Free-form 3D model from a script — wristbands, patches, organic cases (AI-editable)">Custom 3D</button></span>
         <button id="encCodeBtn" class="hidden" title="Show / hide the 3D script editor">&lt;/&gt; Script</button>
         <button id="encRegen" title="Rebuild the 3D model">↻ Rebuild</button>
-        <button id="encExplode" title="Lift the lid off">⇕ Explode</button>
+        <button id="encExplode" title="Take the enclosure apart / put it together (animated)">⇕ Explode</button>
+        <span class="encslide" title="Slide to take the assembly apart: the lid lifts off, then the board comes out of the base"><small>Closed</small><input type="range" id="encExpT" min="0" max="100" value="0"><small>Apart</small></span>
+        <button id="encSpin" title="Turn the model slowly round (stops while you drag it)">⟳ Spin</button>
         <button id="encLid">Lid</button>
         <button id="encPcb">PCB</button>
         <button id="encXray">X-ray</button>
@@ -530,7 +532,7 @@
 <script src="js/kicad.js?v=202610301800"></script>
 <script src="js/easyedapro.js?v=202610301800"></script>
 <script src="js/kicadimport.js?v=202611191520"></script>
-<script src="js/encview.js?v=202611170400"></script>
+<script src="js/encview.js?v=202611231200"></script>
 <script src="js/encdesign.js?v=202610301800"></script>
 <script src="js/docview.js?v=202610301800"></script>
 <script src="js/pcb3d.js?v=202611111200"></script>

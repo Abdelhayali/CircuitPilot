@@ -327,7 +327,10 @@ input.warnin { border-color: var(--warn); }
 #encView { position: absolute; inset: 0; background: var(--view3d); }
 #encView canvas { display: block; width: 100%; height: 100%; cursor: grab; }
 .encinfo { position: absolute; left: 10px; bottom: 8px; background: var(--float-bg); border: 1px solid var(--float-line); padding: 5px 10px; border-radius: 6px; font-size: 12px; pointer-events: none; }
-.encmsg { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); color: var(--muted); font-size: 14px; display: none; text-align: center; max-width: 80%; }
+.encslide { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; }
+.encslide small { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; opacity: .7; }
+.encslide input { width: 110px; }
+.encmsg position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); color: var(--muted); font-size: 14px; display: none; text-align: center; max-width: 80%; }
 .encgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px; }
 .encgrid label { margin: 3px 0 !important; }
 ul.cutl { padding-left: 4px; list-style: none; font-size: 12px; margin: 4px 0; }

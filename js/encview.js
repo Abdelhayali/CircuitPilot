@@ -2,7 +2,7 @@
 // Enclosure tab: parameters, 3D preview (three.js from cdnjs), STL / OpenSCAD export.
 const EncView = (() => {
   const $ = s => document.querySelector(s);
-  const ui = { explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
+  const ui = { t: 0, spin: false, dragging: false, explode: false, lid: true, pcb: true, xray: false, section: null, built: null, err: null, showDims: false, measure: false, rulers: [], dims: null };
   const WORKER = 'js/shape-worker.js?v=202611170400';
   let three = null, scene, camera, renderer, root, wrap, cam = { th: -0.9, ph: 1.0, r: 160, tx: 0, ty: 0, tz: 10 }, dirty = true, timer = null, active = false;
 
@@ -41,7 +41,10 @@ const EncView = (() => {
     $('#encTpl').onchange = e => { const k = e.target.value; e.target.value = ''; if (!k) return; if (codeDirty && !confirm('Replace the script in the editor with the template?')) return; $('#encCode').value = (Shape3D.TEMPLATES.find(t => t.id === k) || {}).code || Shape3D.EXAMPLES[k]; codeDirty = true; runEditor(); };
     $('#encHelp').onclick = () => { $('#encOut').innerHTML = `<pre class="ecp-help">${esc(Shape3D.HELP)}</pre>`; };
     $('#encRegen').onclick = () => { dirty = true; rebuild(true); };
-    $('#encExplode').onclick = () => { ui.explode = !ui.explode; $('#encExplode').classList.toggle('on', ui.explode); place(); };
+    // explode: the slider sets how far apart (0 closed … 1 apart); the button animates to the other end
+    $('#encExpT').oninput = e => { stopTween(); ui.t = +e.target.value / 100; ui.explode = false; syncExplode(); place(); };
+    $('#encExplode').onclick = () => tweenTo(explodeT() > 0.5 ? 0 : 1);
+    $('#encSpin').onclick = () => { ui.spin = !ui.spin; $('#encSpin').classList.toggle('on', ui.spin); if (ui.spin) spinLoop(); };
     $('#encLid').onclick = () => { ui.lid = !ui.lid; $('#encLid').classList.toggle('on', ui.lid); place(); };
     $('#encPcb').onclick = () => { ui.pcb = !ui.pcb; $('#encPcb').classList.toggle('on', ui.pcb); place(); };
     $('#encXray').onclick = () => { ui.xray = !ui.xray; $('#encXray').classList.toggle('on', ui.xray); place(); };
@@ -93,8 +96,8 @@ const EncView = (() => {
     // orbit / pan / zoom
     const el = renderer.domElement; let drag = null;
     el.addEventListener('contextmenu', e => e.preventDefault());
-    el.addEventListener('mousedown', e => { if (window.EncDesign && EncDesign.busy()) { drag = null; return; } drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, pan: e.button !== 0 || e.shiftKey }; });
-    window.addEventListener('mouseup', e => { if (drag && e.button === 0 && e.target === el && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 4) { if (ui.measure) pick(e); else if (window.EncDesign && EncDesign.on) EncDesign.click(e); } drag = null; });
+    el.addEventListener('mousedown', e => { if (window.EncDesign && EncDesign.busy()) { drag = null; return; } ui.dragging = true; drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, pan: e.button !== 0 || e.shiftKey }; });
+    window.addEventListener('mouseup', e => { if (drag && e.button === 0 && e.target === el && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 4) { if (ui.measure) pick(e); else if (window.EncDesign && EncDesign.on) EncDesign.click(e); } drag = null; ui.dragging = false; });
     window.addEventListener('mousemove', e => {
       if (!drag || !active) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
@@ -272,23 +275,52 @@ const EncView = (() => {
     $('#encLid').title = m === 'custom' ? 'Show the parts that have an explode offset (lids, covers)' : 'Show the lid';
     if (m !== 'custom') $('#encCodePanel').classList.add('hidden');
   }
+  // ---------- explode slider + spin ----------
+  const explodeT = () => ui.explode ? 1 : (ui.t || 0);
+  const ease = x => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+  // two stages, like taking it apart by hand: the lid / covers lift first, the board follows out of the base
+  const stageLid = t => ease(t / 0.6), stageBoard = t => ease((t - 0.35) / 0.65);
+  function syncExplode() { const t = explodeT(), s = $('#encExpT'); if (s) s.value = Math.round(t * 100); $('#encExplode').classList.toggle('on', t > 0.5); }
+  let tween = null;
+  function stopTween() { if (tween) cancelAnimationFrame(tween.raf); tween = null; }
+  function tweenTo(target) {
+    stopTween(); const from = explodeT(), t0 = performance.now(), dur = 900 * Math.abs(target - from) + 100; ui.explode = false;
+    const step = now => { const k = Math.min(1, (now - t0) / dur); ui.t = from + (target - from) * k; syncExplode(); place(); if (k < 1) tween.raf = requestAnimationFrame(step); else tween = null; };
+    tween = { raf: requestAnimationFrame(step) };
+  }
+  let spinLast = 0;
+  function spinLoop(now) {
+    if (!ui.spin) return;
+    if (now && spinLast && active && !ui.dragging && !document.hidden) { cam.th += Math.min(0.05, (now - spinLast) / 1000) * 0.35; draw(); }
+    spinLast = now || 0; requestAnimationFrame(spinLoop);
+  }
+  // how far the board lifts out: just clear of the base walls (box) / half the covers' lift (custom)
+  function boardLift() {
+    if (ui.built.custom) { let z = 0; for (const m of meshes.parts || []) if (m.userData.explode) z = Math.max(z, m.userData.explode[2] || 0); return z > 0 ? Math.max(4, z * 0.55) : 0; }
+    if (!meshes.base) return 0;
+    if (meshes.base.userData.topZ == null) { const b = new window.THREE.Box3().setFromObject(meshes.base); meshes.base.userData.topZ = b.max.z; }
+    return Math.max(4, meshes.base.userData.topZ - ui.built.L.pcbZ + 3);
+  }
+  // move a group up by dz from where the build put it
+  const liftZ = (m, dz) => { if (m.userData.z0 == null) m.userData.z0 = m.position.z; m.position.z = m.userData.z0 + dz; };
   function place() {
     if (!root || !ui.built) return;
+    const T = explodeT(), tl = stageLid(T), tb = stageBoard(T), lift = T > 0 ? boardLift() : 0;
     if (ui.built.custom) {
       for (const m of meshes.parts || []) {
-        const p = m.userData, ex = ui.explode && p.explode ? p.explode : [0, 0, 0];
+        const p = m.userData, e = p.explode || [0, 0, 0], ex = p.explode ? [e[0] * tl, e[1] * tl, e[2] * tl + lift * tb] : p.kind === 'board' ? [0, 0, lift * tb] : [0, 0, 0];
         m.position.set(ex[0], ex[1], ex[2]);
         m.visible = !p.hidden && (ui.lid || !p.explode) && (p.kind !== 'board' || ui.pcb);
         m.material.opacity = ui.xray ? 0.35 : 1; m.material.depthWrite = !ui.xray;
       }
-      if (meshes.pcb) meshes.pcb.visible = ui.pcb;
-      for (const m of meshes.extras || []) m.visible = ui.pcb;
+      if (meshes.pcb) { meshes.pcb.visible = ui.pcb; liftZ(meshes.pcb, lift * tb); }
+      for (const m of meshes.extras || []) { m.visible = ui.pcb; liftZ(m, lift * tb); }
       applyThickness(); applySection(); drawOverlay(); draw(); return;
     }
-    const L = ui.built.L, ex = ui.explode ? (L.P.explode || 12) + L.P.lipHeight : 0;
+    const L = ui.built.L, ex = ((L.P.explode || 12) + L.P.lipHeight) * tl + lift * tb;
     if (meshes.base) { meshes.base.material.opacity = ui.xray ? 0.35 : 1; meshes.base.material.depthWrite = !ui.xray; }
     if (meshes.lid) { meshes.lid.visible = ui.lid; meshes.lid.position.z = ex; meshes.lid.material.opacity = ui.xray ? 0.35 : 1; meshes.lid.material.depthWrite = !ui.xray; }
-    if (meshes.pcb) meshes.pcb.visible = ui.pcb;
+    if (meshes.pcb) { meshes.pcb.visible = ui.pcb; liftZ(meshes.pcb, lift * tb); }
     applyThickness(); applySection(); drawOverlay(); draw();
   }
   // ---------- custom mode: free-form 3D script (shape3d.js) built in a Web Worker ----------

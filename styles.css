@@ -34,6 +34,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: var(--strong); margin-right: 8px; }
 .brand svg { color: var(--accent); }
 .menu { display: flex; gap: 6px; align-items: center; }
+/* header: buttons never wrap or squeeze; the project name gives way first, then the right-hand labels become icons */
+#top > *, .menu > *, .menu .dd > button { flex-shrink: 0; white-space: nowrap; }
+#top #projName { flex-shrink: 1; min-width: 90px; }
+#top .spacer { flex-shrink: 1; min-width: 0; }
+@media (max-width: 1500px) { #top .lbl { display: none; } }
 .spacer { flex: 1; }
 #projName { width: 200px; text-align: center; background: transparent; border-color: transparent; font-weight: 600; }
 #projName:hover { border-color: var(--line); }

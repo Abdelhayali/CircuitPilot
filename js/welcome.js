@@ -72,7 +72,7 @@ const Welcome = (() => {
           <li><b>Enclosure</b>: a 3D case around the board, from a template or the AI</li>
           <li><b>Order</b> the board at JLCPCB and the case at JLC3DP — or export Gerbers, EasyEDA, KiCad-style files</li>
           <li><b>Save</b>: projects stay in this browser; sign in with Google or GitHub to have them on every PC</li></ol>
-         <p class="muted small">You can open this again any time with 🎬 Demo &amp; what's new, and the full guide with 📖 Guide.</p>`;
+         <p class="muted small">You can open this again any time with 🎬 What's new, and the full guide with 📖 Guide.</p>`;
   }
   function open(t = 'start', title) {
     if (!el) build();
@@ -183,7 +183,7 @@ const Welcome = (() => {
     { sel: '.tab[data-view="enc"]', title: 'A case around it', text: 'The Enclosure view builds a 3D-printable case around the board — templates or the AI — with an explode slider and STL / STEP files for JLC3DP.' },
     { sel: '#btnSave', view: 'sch', title: 'Saving', text: 'Projects are saved as you work (Ctrl+S to save now). They live in this browser unless you sign in.' },
     { sel: '#cloudBtn', title: 'Your projects on every PC', text: 'Sign in with Google to keep projects in your own Google Drive, or use ⌥ GitHub to keep each design in a repository.' },
-    { sel: '#btnFeedback', title: 'Tell us what to improve', text: 'Ideas, bugs or questions go straight to the developer. 🎬 Demo & what\'s new opens the welcome, this tour and every update again.' },
+    { sel: '#btnFeedback', title: 'Tell us what to improve', text: 'Ideas, bugs or questions go straight to the developer. 🎬 What\'s new opens the welcome, this tour and every update again.' },
   ];
   let tourEl = null, tourI = 0, tourView = null;
   const visibleEl = sel => { for (const s of [].concat(sel)) { const e = $(s); if (e && e.getClientRects().length && e.offsetParent !== null) return e; } return null; };

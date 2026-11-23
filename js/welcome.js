@@ -16,7 +16,8 @@ const Welcome = (() => {
       'Design rules per PCB (a 2-layer electrode PCB next to a 4-layer main board); DRC "As EasyEDA Pro checks"',
       'Merge the PCB of another project next to this one with a break-off tab: one board to order',
       'Safer data: GitHub save keeps files you add to a design folder; several projects deleted within seconds are blocked; Projects says when projects vanished',
-      'Tracks keep stable ids; pour-split warnings; free-area placement avoids tracks; dangling vias removed after a reroute'] },
+      'Tracks keep stable ids; pour-split warnings; free-area placement avoids tracks; dangling vias removed after a reroute',
+      'Lock a project (▤ Projects → 🔒): no edits, renaming or delete until you unlock it'] },
     { v: '2026.11.19', date: '2026-11-19', items: [
       'Import KiCad projects (KiCad 6–9): parts with real footprints, nets, tracks, zones, up to 4 copper layers',
       '4-layer boards: inner GND / power planes or signal layers, JLCPCB 4-layer rules',

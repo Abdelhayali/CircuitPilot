@@ -67,14 +67,15 @@ def list_projects():
             revs = [[r.get("pcb") or 1, r.get("rev"), r.get("at")] for r in (fab.get("revs") or []) if isinstance(r, dict)] if code else []
             am = fab.get("asMade") if code else None
             asmade = [am.get("pcb") or 1, am.get("rev")] if isinstance(am, dict) else None
+            locked = bool(d.get("locked"))
         except ValueError:
             parts = nets = 0
             board = False
             edited = updated
-            code, revs, asmade = None, [], None
+            code, revs, asmade, locked = None, [], None, False
         # edited: when the design itself was last changed (kept in the project, so a copy loaded from GitHub or Google
         # Drive keeps it); updated: when this PC last stored it
-        out.append({"id": pid, "name": name, "created": created, "updated": updated, "edited": edited, "parts": parts, "nets": nets, "pcb": board, "code": code, "revs": revs, "asmade": asmade})
+        out.append({"id": pid, "name": name, "created": created, "updated": updated, "edited": edited, "parts": parts, "nets": nets, "pcb": board, "code": code, "revs": revs, "asmade": asmade, "locked": locked})
     return out
 
 
@@ -94,6 +95,27 @@ def get_meta(pid):
     return {"id": row[0], "name": row[1], "updated": row[2]}
 
 
+LOCKED_MSG = "This project is locked - unlock it in Projects (the lock button) to change or delete it"
+# what a locked project may still record: the board code / revisions of exported Gerbers and the edit time
+_LOCK_FREE = ("fab", "edited", "updated", "id")
+
+
+def _is_locked(js):
+    try:
+        return bool(json.loads(js).get("locked"))
+    except (ValueError, AttributeError):
+        return False
+
+
+def _same_design(a, b):
+    a = {k: v for k, v in a.items() if k not in _LOCK_FREE}
+    b = {k: v for k, v in b.items() if k not in _LOCK_FREE}
+    for d in (a, b):
+        if isinstance(d.get("pcb"), dict):
+            d["pcb"] = {k: v for k, v in d["pcb"].items() if k != "fabRev"}
+    return a == b
+
+
 def save_project(pid, data):
     if not isinstance(data, dict):
         raise ValueError("project must be a JSON object")
@@ -104,6 +126,9 @@ def save_project(pid, data):
     js = json.dumps(data)
     with _lock, _db() as con:
         old = con.execute("SELECT name, json FROM projects WHERE id=?", (pid,)).fetchone()
+        # locked: only unlocking (locked: false) or a save that changes nothing of the design goes through
+        if old and _is_locked(old[1]) and data.get("locked") and not _same_design(json.loads(old[1]), data):
+            raise ValueError(LOCKED_MSG)
         if old and old[1] != js:
             before, after = _parts_of(old[1]), len(data.get("components", []))
             drop = after < before and (before - after >= 3 or after < before * 0.8)
@@ -133,6 +158,8 @@ def restore_version(pid, vid):
     data = get_version(pid, vid)
     with _lock, _db() as con:
         cur = con.execute("SELECT name, json FROM projects WHERE id=?", (pid,)).fetchone()
+        if cur and _is_locked(cur[1]):
+            raise ValueError(LOCKED_MSG)
         if cur:
             _keep_version(con, pid, cur[0], cur[1], "before restore", force=True)
     with _lock, _db() as con:   # save_project would thin this out — write directly
@@ -146,6 +173,8 @@ def restore_version(pid, vid):
 def delete_project(pid):
     with _lock, _db() as con:
         old = con.execute("SELECT name, json FROM projects WHERE id=?", (_check(pid),)).fetchone()
+        if old and _is_locked(old[1]):
+            raise ValueError(LOCKED_MSG)
         if old:
             _keep_version(con, pid, old[0], old[1], "deleted", force=True)
         con.execute("DELETE FROM projects WHERE id=?", (pid,))

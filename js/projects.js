@@ -16,7 +16,7 @@ const Projects = (() => {
   }
   function setStatus(s, title = '') {
     const el = $('#saveState'); if (!el) return;
-    const map = { saved: ['✓ Saved', 'good'], saving: ['Saving…', 'muted'], dirty: ['● Unsaved', 'warn'], error: ['⚠ Not saved', 'bad'], local: ['Saved in this browser', 'muted'] };
+    const map = { saved: ['✓ Saved', 'good'], saving: ['Saving…', 'muted'], dirty: ['● Unsaved', 'warn'], error: ['⚠ Not saved', 'bad'], local: ['Saved in this browser', 'muted'], locked: ['🔒 Locked', 'muted'] };
     const [t, c] = map[s] || ['', '']; el.textContent = t; el.className = c; el.title = title;
   }
 
@@ -29,6 +29,7 @@ const Projects = (() => {
   let paused = false;   // a folder import converts files in the editor model: those states must not be autosaved
   function schedule(kind) {
     if (kind === 'move' || paused) return;
+    if (Model.S.locked) { lockState(); return; }
     if (!online) { setStatus('local'); return; }
     if (Model.snapshot() === lastSaved) { setStatus('saved'); return; }
     setStatus('dirty'); clearTimeout(timer); timer = setTimeout(saveNow, 1200);
@@ -104,6 +105,20 @@ const Projects = (() => {
     else { const d = await api('GET', '/api/projects/' + id); d.name = name; await api('PUT', '/api/projects/' + id, d); }
     render();
   }
+  // lock / unlock a project (the lock itself is not an edit: it goes around Model.mutate and is saved at once)
+  async function setLocked(id, on) {
+    if (!on && !confirm('Unlock this project? It can then be edited and deleted again.')) return;
+    if (id === Model.S.id) {
+      if (on) await saveNow();
+      if (on) Model.S.locked = true; else delete Model.S.locked;
+      await api('PUT', '/api/projects/' + id, JSON.parse(Model.snapshot())); lastSaved = Model.snapshot(); Model.emit('meta'); lockState();
+    } else { const d = await api('GET', '/api/projects/' + id); if (on) d.locked = true; else delete d.locked; await api('PUT', '/api/projects/' + id, d); }
+    App.toast(on ? '🔒 Project locked — no edits, renaming or delete until you unlock it (▤ Projects → 🔓)' : '🔓 Project unlocked', 6000);
+    render();
+  }
+  // the open project's lock: shown next to the save state; an edit attempt says why nothing happens
+  let lockNote = 0;
+  function lockState() { if (Model.S.locked) setStatus('locked', 'This project is locked: ▤ Projects → 🔓 to edit it'); }
   async function remove(id) {
     await api('DELETE', '/api/projects/' + id, undefined, true); forget(id);
     if (id === Model.S.id) { const d = Model.blank(); d.name = 'Untitled'; Model.load(d); lastSaved = ''; await saveNow(); Sch.fit(); }
@@ -130,7 +145,7 @@ const Projects = (() => {
   const stamp = t => { const d = new Date(t * 1000); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
   // as-made copies of a board revision are never duplicates
   function dupGroups(ps) {
-    const g = new Map(); for (const p of ps) { if (p.asmade) continue; const k = nameKey(p.name); if (!k) continue; if (!g.has(k)) g.set(k, []); g.get(k).push(p); }
+    const g = new Map(); for (const p of ps) { if (p.asmade || p.locked) continue; const k = nameKey(p.name); if (!k) continue; if (!g.has(k)) g.set(k, []); g.get(k).push(p); }
     return [...g.values()].filter(a => a.length > 1).map(a => a.sort((x, y) => editedOf(y) - editedOf(x)));
   }
   // keep the most recently edited copy of every repeated design, delete the others (desktop: they stay under ⟲ Deleted)
@@ -177,9 +192,9 @@ const Projects = (() => {
         : `<div class="muted small" style="margin-bottom:8px">${window.CPStatic && CPStatic.mode === 'static' ? 'Web version: projects are saved in this browser. ' : 'Projects are saved on this PC. '}<a href="#" id="projGh">⌥ Connect GitHub</a> to keep every project in your own repository and open them on any PC.</div>`;
       const note = signed ? `<div class="muted small" style="margin-bottom:8px">☁ Synced with the Google Drive of ${esc(Cloud.email)} — open CircuitPilot on any PC and sign in to get them.</div>` : ghNote;
       list.innerHTML = goneNote + note + dupNote + (rows.length ? rows.map(p => `<div class="proj${p.id === Model.S.id ? ' cur' : ''}" data-id="${esc(p.id)}">
-        <div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}${p.id === Model.S.id ? ' <span class="badge basic">open</span>' : ''}${dupOf.get(p.id) === 'newest' ? ' <span class="badge basic" title="This name is here more than once: this copy was edited last">newest copy</span>' : dupOf.get(p.id) === 'older' ? ' <span class="badge" title="This name is here more than once: another copy was edited later">older copy</span>' : ''}</div>
+        <div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}${p.locked ? ' <span class="badge" title="Locked: no edits, renaming or delete until unlocked">🔒 locked</span>' : ''}${p.id === Model.S.id ? ' <span class="badge basic">open</span>' : ''}${dupOf.get(p.id) === 'newest' ? ' <span class="badge basic" title="This name is here more than once: this copy was edited last">newest copy</span>' : dupOf.get(p.id) === 'older' ? ' <span class="badge" title="This name is here more than once: another copy was edited later">older copy</span>' : ''}</div>
         ${revNote(p)}<div class="muted small">${p.code ? `<span title="Board code printed on the PCB (search it to find this design)">${esc(p.code)}</span> · ` : ''}${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · last edited <b title="${esc(new Date(editedOf(p) * 1000).toLocaleString())}">${stamp(editedOf(p))}</b> (${ago(editedOf(p))})${createdOf(p) ? ` · created ${stamp(createdOf(p))}` : ''}${IT[p.id] ? ` <span class="muted" title="Dates from the project list ${esc(IT[p.id].src.join(' and '))} (the same on every PC that syncs)">⇅</span>` : ''}</div></div>
-        <div class="pact"><button data-a="open" class="primary">Open</button><button data-a="dup" title="Duplicate">⧉</button>${hasHistory ? '<button data-a="hist" title="Earlier versions (restore)">⟲</button>' : ''}<button data-a="ren" title="Rename">✎</button><button data-a="del" class="danger" title="Delete">🗑</button></div></div>`).join('')
+        <div class="pact"><button data-a="open" class="primary">Open</button><button data-a="dup" title="Duplicate">⧉</button>${hasHistory ? '<button data-a="hist" title="Earlier versions (restore)">⟲</button>' : ''}<button data-a="lock" title="${p.locked ? 'Unlock: allow edits and delete again' : 'Lock: no edits, renaming or delete (a finished / ordered design)'}">${p.locked ? '🔓' : '🔒'}</button><button data-a="ren" title="${p.locked ? 'Locked — unlock to rename' : 'Rename'}" ${p.locked ? 'disabled' : ''}>✎</button><button data-a="del" class="danger" title="${p.locked ? 'Locked — unlock to delete' : 'Delete'}" ${p.locked ? 'disabled' : ''}>🗑</button></div></div>`).join('')
         : '<div class="muted">No projects yet.</div>') + (hasHistory ? '<div class="proj"><div class="pinfo muted small">Every project keeps earlier versions (⟲). </div><div class="pact"><button data-a="deleted">Deleted projects…</button></div></div>' : '');
       if ($('#projGh')) $('#projGh').onclick = e => { e.preventDefault(); close(); const b = $('#ghBtn'); if (b) b.click(); };
     } catch (e) { list.innerHTML = `<div class="bad">${esc(e.message)}</div>`; }
@@ -231,7 +246,7 @@ const Projects = (() => {
   let jobLock = null, lockToast = 0;
   function setLock(tool) {
     if (jobLock === tool) return; jobLock = tool;
-    Model.setLock(tool, t => { if (Date.now() - lockToast > 4000) { lockToast = Date.now(); App.toast('⏳ Claude is running ' + t + ' on this project — wait until it finishes', 4000); } });
+    Model.setLock(tool, t => { if (!t) return lockedToast(); if (Date.now() - lockToast > 4000) { lockToast = Date.now(); App.toast('⏳ Claude is running ' + t + ' on this project — wait until it finishes', 4000); } });
     setStatus('error', 'Claude is running ' + tool + ' on this project');
     const el = $('#saveState'); if (el) el.textContent = '⏳ Claude: ' + tool;
     App.toast('⏳ Claude is running ' + tool + ' on this project — editing is paused until it finishes, then its result loads here', 8000);
@@ -245,6 +260,7 @@ const Projects = (() => {
       App.toast('✓ Claude finished — its result is loaded' + (lost ? ' (it replaced this tab’s unsaved changes from before it started)' : ''), 7000);
     } catch (e) { setStatus('error', e.message); }
   }
+  function lockedToast() { if (Date.now() - lockNote > 4000) { lockNote = Date.now(); App.toast('🔒 This project is locked — unlock it in ▤ Projects (🔓) to edit it', 4000); } }
   async function poll() {
     if (!online || !Model.S.id || saving || document.hidden) return;
     try { const m = await api('GET', '/api/projects/' + Model.S.id + '/meta'); if (m.job) { setLock(m.job); return; } if (jobLock) { await endLock(); return; } } catch (e) { }
@@ -325,6 +341,7 @@ const Projects = (() => {
       // an empty page opened that way is not saved as a new "Untitled" project first
       const want = new URLSearchParams(location.search).get('project');
       if (!(want && !Model.S.id && !Model.S.components.length)) await saveNow();
+      Model.setLock(null, t => { if (!t) lockedToast(); });   // an edit on a locked project: say why nothing happens
       setInterval(poll, 2500);
       if (!(window.CPStatic && CPStatic.mode === 'static')) renderLoop();   // screenshots for Claude: start before opening
       if (want && want !== Model.S.id) { try { await open(want); } catch (e) { } history.replaceState(null, '', location.pathname); }
@@ -345,6 +362,7 @@ const Projects = (() => {
         if (b.dataset.a === 'open') await open(id);
         if (b.dataset.a === 'dup') await duplicate(id);
         if (b.dataset.a === 'rev') await openRevision(id, +b.dataset.pcb, +b.dataset.rev);
+        if (b.dataset.a === 'lock') await setLocked(id, !b.textContent.includes('🔓') );
         if (b.dataset.a === 'ren') { const n = prompt('Rename project', name); if (n && n.trim()) await rename(id, n.trim()); }
         if (b.dataset.a === 'del' && confirm(`Delete project “${name}”?${hasHistory ? ' (It can be brought back later from ⟲ Deleted projects.)' : ' This cannot be undone.'}`)) await remove(id);
         if (b.dataset.a === 'hist') await showHistory(id, name);

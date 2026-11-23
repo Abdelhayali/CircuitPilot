@@ -21,6 +21,7 @@ const Model = (() => {
   // locked: a Claude job is working on this project (the server refuses saves): edits wait until it is done
   let lockedBy = null, onLocked = null;
   function mutate(fn, kind = 'change') {
+    if (S.locked) { if (onLocked) onLocked(null); throw new Error('This project is locked — unlock it in ▤ Projects (🔓) to edit it'); }
     if (lockedBy) { if (onLocked) onLocked(lockedBy); throw new Error('Claude is running ' + lockedBy + ' on this project — edit again when it is done'); }
     const before = snapshot();
     try { const r = fn(); undoStack.push(before); if (undoStack.length > 200) undoStack.shift(); redoStack.length = 0; S.edited = +(Date.now() / 1000).toFixed(3); emit(kind); return r; }
@@ -35,8 +36,8 @@ const Model = (() => {
     for (const v of (S.pcb && S.pcb.vias) || []) if (v.stitch && v.manual && !v.locked) delete v.manual;
     emit('load');
   }
-  function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); S = JSON.parse(undoStack.pop()); emit('load'); }
-  function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); S = JSON.parse(redoStack.pop()); emit('load'); }
+  function undo() { if (!undoStack.length || S.locked) return; redoStack.push(snapshot()); S = JSON.parse(undoStack.pop()); emit('load'); }
+  function redo() { if (!redoStack.length || S.locked) return; undoStack.push(snapshot()); S = JSON.parse(redoStack.pop()); emit('load'); }
 
   // ---------- components & pins ----------
   const comp = ref => S.components.find(c => c.ref === ref) || S.components.find(c => c.ref.toLowerCase() === String(ref).toLowerCase());

@@ -44,6 +44,7 @@
     return b;
   }
   const httpError = (status, message) => Object.assign(new Error(message), { status });
+  const LOCKED = 'This project is locked — unlock it in Projects (🔓) to change or delete it';
   const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
 
   // ---------- IndexedDB ----------
@@ -90,7 +91,7 @@
     const [id, sub] = parts;
     if (method === 'GET' && !id) {
       const all = await dbAll('projects');
-      return all.sort((a, b) => b.updated - a.updated).map(p => { const d = p.data || {}; return { id: p.id, name: p.name, created: p.created, updated: p.updated, edited: typeof d.edited === 'number' ? d.edited : p.updated, parts: (d.components || []).length, nets: Object.keys(d.nets || {}).length, pcb: !!(d.board && d.board.w), code: (d.fab && d.fab.id) || null, revs: d.fab && d.fab.id ? (d.fab.revs || []).map(r => [r.pcb || 1, r.rev, r.at]) : [], asmade: d.fab && d.fab.asMade ? [d.fab.asMade.pcb || 1, d.fab.asMade.rev] : null }; });
+      return all.sort((a, b) => b.updated - a.updated).map(p => { const d = p.data || {}; return { id: p.id, name: p.name, created: p.created, updated: p.updated, edited: typeof d.edited === 'number' ? d.edited : p.updated, parts: (d.components || []).length, nets: Object.keys(d.nets || {}).length, pcb: !!(d.board && d.board.w), code: (d.fab && d.fab.id) || null, revs: d.fab && d.fab.id ? (d.fab.revs || []).map(r => [r.pcb || 1, r.rev, r.at]) : [], asmade: d.fab && d.fab.asMade ? [d.fab.asMade.pcb || 1, d.fab.asMade.rev] : null, locked: !!d.locked }; });
     }
     if (method === 'GET') {
       const p = await dbGet('projects', id); if (!p) throw httpError(404, 'project not found');
@@ -99,11 +100,15 @@
     if (method === 'PUT' || method === 'POST') {
       if (!body || typeof body !== 'object') throw httpError(400, 'project must be a JSON object');
       const pid = id || newId(), now = Date.now() / 1000, old = id ? await dbGet('projects', pid) : null;
+      if (old && old.data && old.data.locked && body.locked) {
+        const strip = d => { const c = JSON.parse(JSON.stringify(d)); for (const k of ['fab', 'edited', 'updated', 'id']) delete c[k]; if (c.pcb) delete c.pcb.fabRev; return JSON.stringify(c, Object.keys(c).sort()); };
+        if (strip(old.data) !== strip(body)) throw httpError(400, LOCKED);
+      }
       body.id = pid; const name = String(body.name || 'Untitled').slice(0, 200);
       await dbPut('projects', { id: pid, name, data: body, created: old ? old.created : now, updated: now });
       return { id: pid, name, updated: now };
     }
-    if (method === 'DELETE' && id) { await dbDel('projects', id); return { ok: true }; }
+    if (method === 'DELETE' && id) { const old = await dbGet('projects', id); if (old && old.data && old.data.locked) throw httpError(400, LOCKED); await dbDel('projects', id); return { ok: true }; }
     throw httpError(404, 'unknown endpoint');
   }
   async function library(method, key, body) {

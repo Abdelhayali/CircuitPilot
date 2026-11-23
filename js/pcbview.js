@@ -689,7 +689,7 @@ const PcbView = (() => {
     // the layer list follows the copper layer count (a 4-layer board opened or imported shows Inner1 / Inner2)
     if (overlay && shownLayers !== Pcb.rules().layers) { shownLayers = Pcb.rules().layers; renderLayers(); }
     const S = Model.S, cs = Pcb.placed();
-    if (cs.length && !(S.fab && S.fab.id)) setTimeout(() => { if (Pcb.placed().length && !(Model.S.fab && Model.S.fab.id)) Model.mutate(() => Pcb.ensureFabId()); }, 0);
+    if (cs.length && !(S.fab && S.fab.id) && !S.locked) setTimeout(() => { if (Pcb.placed().length && !(Model.S.fab && Model.S.fab.id)) Model.mutate(() => Pcb.ensureFabId()); }, 0);
     cache.pads = allPads();
     if (!cs.length || !S.board.w) { world.innerHTML = '<text x="0" y="0" text-anchor="middle" fill="#888" style="font-size:2.4px">No PCB yet — click “Generate PCB”, or ask the Copilot to make the board</text>'; renderLiveLayer(); return; }
     const out = [], hl = ui.hlNet;

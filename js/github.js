@@ -111,7 +111,7 @@ const GitHub = (() => {
     const used = new Set(), rows = [];
     for (const [title, test] of groups) { const list = paths.filter(p => !used.has(p) && test(p)); list.forEach(p => used.add(p)); if (list.length) rows.push(`### ${title}\n\n` + list.map(p => `- \`${p}\``).join('\n')); }
     const rest = paths.filter(p => !used.has(p)); if (rest.length) rows.push('### Other\n\n' + rest.map(p => `- \`${p}\``).join('\n'));
-    return `# ${name}\n\nCircuit design made with [CircuitPilot](https://pcbgo.site) (source: https://github.com/Abdelhayali/CircuitPilot).\n\nOpen the \`.circuit.json\` file in CircuitPilot to edit the design again.\n\n${rows.join('\n\n')}\n`;
+    return `# ${name}\n\nCircuit design made with [CircuitPilot](https://pcbgo.site) (source: https://github.com/Abdelhayali/CircuitPilot).\n\nOpen the \`.circuit.json\` file in CircuitPilot to edit the design again.\n\n${rows.join('\n\n')}\n\n${NOTES}\n`;
   }
 
   // ---------- sign in (OAuth web flow on pcbgo.site; the relay holds the client secret) ----------
@@ -184,6 +184,7 @@ const GitHub = (() => {
     throw new Error('GitHub did not create the first commit in time (open the repository on GitHub, then try again)');
   }
 
+  const MANIFEST = '.circuitpilot-files', NOTES = '<!-- Your notes below this line are kept when CircuitPilot saves again -->';
   // ---------- save one design into its folder of the repository ----------
   // files: { 'name': string | Uint8Array } relative to the design folder. Returns { changed, folder, url }.
   // another device may have saved in between (GitHub answers 422 "not a fast forward"): read the branch again and retry
@@ -200,13 +201,21 @@ const GitHub = (() => {
     const tree = await api('GET', `${base}/git/trees/${commit.tree.sha}?recursive=1`);
     const remote = new Map(tree.tree.filter(e => e.type === 'blob' && e.path.startsWith(prefix)).map(e => [e.path, e.sha]));
     const want = Object.assign({}, files, { 'README.md': readme(name || folder, Object.keys(files).concat(['README.md'])) });
+    // .circuitpilot-files lists what CircuitPilot wrote here last time: only those files are removed when they are no
+    // longer made. Anything else in the folder (your notes, electrodes/, photos) is never touched. A folder saved before
+    // this list existed loses nothing.
+    const mfSha = remote.get(prefix + MANIFEST), made = mfSha ? new Set((await readBlob(repo, mfSha)).split(/\r?\n/).map(x => x.trim()).filter(Boolean)) : new Set();
+    // your own text under the notes line of README.md stays
+    if (remote.get(prefix + 'README.md')) { const old = await readBlob(repo, remote.get(prefix + 'README.md')), k = old.indexOf(NOTES); if (k >= 0) want['README.md'] = want['README.md'].slice(0, want['README.md'].indexOf(NOTES)) + old.slice(k); }
+    want[MANIFEST] = '# Files CircuitPilot made in this folder (it updates or removes only these; other files here are yours and stay)\n' + Object.keys(want).concat([MANIFEST]).sort().join('\n') + '\n';
     const todo = [];
     for (const rel of Object.keys(want)) {
       const path = prefix + rel, sha = await gitSha(want[rel]);
       if (remote.get(path) === sha) { remote.delete(path); continue; }
       todo.push([path, want[rel]]); remote.delete(path);
     }
-    const gone = [...remote.keys()];   // files of this design that are no longer made: removed from the folder
+    const gone = [...remote.keys()].filter(p => made.has(p.slice(prefix.length)));   // files CircuitPilot made before that it no longer makes
+    const kept = [...remote.keys()].filter(p => !made.has(p.slice(prefix.length)));
     if (index) {
       const cur = tree.tree.find(e => e.path === INDEX && e.type === 'blob'), list = cur ? indexParse(await readBlob(repo, cur.sha)) : [];
       const jk = Object.keys(want).find(k => /\.circuit\.json$/.test(k)), row = list.find(r => r.folder === folder) || (list.push({ folder }), list[list.length - 1]);
@@ -214,7 +223,7 @@ const GitHub = (() => {
       const text = indexCsv(list); if (!cur || cur.sha !== await gitSha(text)) todo.push([INDEX, text]);
     }
     const url = `https://github.com/${repo}/tree/${BRANCH}/${folder}`;
-    if (!todo.length && !gone.length) return { changed: 0, folder, url };
+    if (!todo.length && !gone.length) return { changed: 0, folder, url, kept_yours: kept.length };
     const entries = [];
     // blobs, four at a time (GitHub asks clients not to hammer the API)
     let next = 0, done = 0;
@@ -231,7 +240,7 @@ const GitHub = (() => {
     const nt = await api('POST', `${base}/git/trees`, { base_tree: commit.tree.sha, tree: entries });
     const nc = await api('POST', `${base}/git/commits`, { message: `Save ${name || folder} (${todo.length} changed${gone.length ? ', ' + gone.length + ' removed' : ''})`, tree: nt.sha, parents: [head.object.sha] });
     await api('PATCH', `${base}/git/refs/heads/${BRANCH}`, { sha: nc.sha, force: false });
-    return { changed: todo.length + gone.length, folder, url };
+    return { changed: todo.length + gone.length, folder, url, removed: gone.map(p => p.slice(prefix.length)), kept_yours: kept.length };
   }
 
   // ---------- load designs back from the repository ----------

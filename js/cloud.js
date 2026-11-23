@@ -112,8 +112,9 @@ const Cloud = (() => {
   const download = id => g('GET', `${API}/${id}?alt=media`);
   const setProps = (id, props) => g('PATCH', `${API}/${id}?fields=id,modifiedTime,appProperties`, JSON.stringify({ appProperties: props }), { 'content-type': 'application/json' });
   // the app's own project store (desktop: projects.db, web: this browser's IndexedDB) through the same /api the app uses
-  async function local(method, path, body) {
-    const r = await fetch(path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  async function local(method, path, body, user) {
+    const h = body ? { 'content-type': 'application/json' } : {}; if (user) h['X-CircuitPilot-User'] = '1';
+    const r = await fetch(path, { method, headers: h, body: body ? JSON.stringify(body) : undefined });
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j;
   }
   const props = (p, extra = {}) => Object.assign({ kind: 'project', pid: p.id, name: String(p.name || 'Untitled').slice(0, 100), updated: String(p.updated || 0), edited: String(p.edited || p.updated || 0), deleted: '0' }, extra);
@@ -151,14 +152,14 @@ const Cloud = (() => {
         }
         if (merged) { const fresh = await local('GET', '/api/projects'); L.clear(); for (const p of fresh) L.set(p.id, p); }
       }
-      const ids = new Set([...L.keys(), ...byPid.keys()]);
+      const ids = new Set([...L.keys(), ...byPid.keys()]), delAsk = [];
       for (const id of ids) {
         const p = L.get(id), f = byPid.get(id), s = st.map[id], a = f ? f.appProperties || {} : {};
         try {
           if (p && f) {
             const lc = !s || p.updated > s.lup + 0.5, rc = !s || f.modifiedTime !== s.rmod;
-            if (a.deleted === '1') {   // deleted on another PC: delete here too, unless it was edited here since
-              if (!lc) { await local('DELETE', '/api/projects/' + id); delete st.map[id]; del++; continue; }
+            if (a.deleted === '1') {   // deleted on another PC: delete here too (asked first), unless it was edited here since
+              if (!lc) { delAsk.push({ id, name: p.name }); continue; }
               const r = await upload(f.id, `cp-project-${id}.json`, await local('GET', '/api/projects/' + id), props(p)); st.map[id] = { rid: r.id, rmod: r.modifiedTime, lup: p.updated }; up++; continue;
             }
             if (!lc && !rc) continue;
@@ -175,6 +176,10 @@ const Cloud = (() => {
           }
         } catch (e) { if (/not connected|expired/.test(e.message)) throw e; console.warn('sync', id, e); }
         keep();
+      }
+      // deleted on another PC: never silently — ask once for all of them (Cancel keeps them; they stay as they are)
+      if (delAsk.length && confirm(`Google Drive says ${delAsk.length} project${delAsk.length > 1 ? 's were' : ' was'} deleted on another PC:\n\n${delAsk.slice(0, 15).map(x => '• ' + (x.name || 'Untitled')).join('\n')}${delAsk.length > 15 ? '\n…' : ''}\n\nDelete ${delAsk.length > 1 ? 'them' : 'it'} here too? (Cancel keeps ${delAsk.length > 1 ? 'them' : 'it'} on this PC; deleted projects can be restored from Projects → Deleted projects.)`)) {
+        for (const x of delAsk) { try { await local('DELETE', '/api/projects/' + x.id, undefined, true); delete st.map[x.id]; del++; } catch (e) { console.warn('sync delete', x.id, e); } }
       }
       // the dates: created = the one Drive keeps for the project (the PC that first uploaded it), else this PC's
       const createdAt = new Map(); for (const [pid, f] of byPid) { const c = +((f.appProperties || {}).created) || 0; if (c) createdAt.set(pid, c); }

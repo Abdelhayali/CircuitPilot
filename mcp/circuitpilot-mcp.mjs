@@ -44,15 +44,17 @@ process.on('uncaughtException', e => log('uncaught exception (server keeps runni
 process.on('unhandledRejection', e => log('unhandled rejection (server keeps running):', e instanceof Error ? e : String(e)));
 
 // ---------- load the shared engine (same code as the browser app) ----------
-const ctx = loadEngine(ROOT, log);
-const { Engine, Model, Pcb, Cnc } = ctx;
+// (let: reloaded in place when the app's js/ files change — see reloadEngine)
+let ctx = loadEngine(ROOT, log);
+let { Engine, Model, Pcb, Cnc } = ctx;
 // where the app keeps its projects: the Windows app's data folder (also used when this server starts server.py itself),
 // and where this MCP server remembers the current project between restarts
 const DATA_DIR = process.env.CP_DATA_DIR || (process.platform === 'win32' && process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'CircuitPilot') : path.join(os.homedir(), '.circuitpilot'));
 const STATE_FILE = path.join(DATA_DIR, 'mcp-state.json');
-const headers = PASSWORD ? { authorization: 'Bearer ' + PASSWORD } : {};
+// X-CircuitPilot-Job: this server's saves pass the project lock it takes while a job runs (the app's are refused then)
+const headers = Object.assign({ 'X-CircuitPilot-Job': '1' }, PASSWORD ? { authorization: 'Bearer ' + PASSWORD } : {});
 let myLib = [];
-Object.assign(Engine.env, {
+const ENV = {
   base: BASE, headers, fetch,
   myLib: () => myLib,
   savePart: async def => { await api('PUT', '/api/library/' + encodeURIComponent(def.key), def); },
@@ -60,7 +62,8 @@ Object.assign(Engine.env, {
   // screenshots (view_design): drawn by the CircuitPilot tab open in the browser, relayed by server.py
   render: args => renderSerial(currentId, args),   // view_design
   readGerberZip: async f => readGerberZip(f),
-});
+};
+Object.assign(Engine.env, ENV);
 // the files of a zip (stored or deflated), from its central directory
 function unzip(buf) {
   const out = {}; let e = buf.length - 22; while (e >= 0 && buf.readUInt32LE(e) !== 0x06054b50) e--;
@@ -305,6 +308,12 @@ async function startJob(tool, input) {
   else {
     const r = workerRun({ kind: 'tool', name: tool, input, project, myLib, base: BASE, headers });
     job.worker = r.w;
+    // the project lock: the app pauses editing this project until the job is done (renewed every minute; a crashed
+    // server's lock runs out after 3 minutes)
+    const lock = () => api('POST', '/api/projects/' + id + '/lock', { tool, seconds: 180 }).catch(() => { });
+    lock(); const beat = setInterval(lock, 60000);
+    const unlock = () => { clearInterval(beat); return api('DELETE', '/api/projects/' + id + '/lock').catch(() => { }); };
+    r.p.then(unlock, unlock);
     job.promise = r.p.then(async m => {
       const now = await api('GET', '/api/projects/' + id + '/meta').catch(() => null);
       const changed = now && now.updated > meta.updated + 0.001;   // edited meanwhile (in the app)
@@ -401,20 +410,37 @@ const EXTRA = [
   { name: 'restore_project_version', description: 'Make an earlier state of a project current again (version from list_project_versions). The state it replaces is kept as a version too. Also brings back a deleted project (project = its id).', input_schema: { type: 'object', required: ['version'], properties: { version: { type: 'number' } } } },
   { name: 'export_cnc_gcode', description: 'G-code to mill this PCB on a desktop CNC with GRBL (CNC 3018 Pro and similar): 1_isolation.nc (V-bit rings around the copper; pours, clearances and keep-outs as in the Gerbers), 2_drill_<size>.nc (one file per bit), 3_cutout.nc (holes bigger than the end mill, then the outline in steps with holding tabs), preview.svg (toolpaths), result-2d.svg and result-3d.html (the finished board as milled, flat and in 3D) and a README with the bit order and set-up. One copper side only (route with set_design_rules {preset: "cnc3018"}); X0 Y0 = lower-left corner of the PCB, Z0 = copper surface. Checks its own toolpaths: no shorts with a narrower groove (shallow spots), no net cut in two with a wider one (worn bit); warns about vias (they need wire links). Writes the files into out_dir.', input_schema: { type: 'object', required: ['out_dir'], properties: { out_dir: { type: 'string', description: 'Absolute folder path (created if missing)' }, iso_dia: { type: 'number', description: 'groove width at the cut depth, mm (default: from the V-bit, tip + 2 x depth x tan(angle / 2) = 0.207 for 30 deg / 0.1 mm at 0.2 mm)' }, iso_depth: { type: 'number', description: 'isolation depth, mm (default 0.2: cuts through the copper even where the board is ~0.15 mm low)' }, vbit_angle: { type: 'number', description: 'V-bit angle, deg (default 30)' }, vbit_tip: { type: 'number', description: 'V-bit tip width, mm (default 0.1)' }, iso_passes: { type: 'number', description: 'rings around the copper (default 2)' }, iso_overlap: { type: 'number', description: 'overlap between rings, 0-0.9 (default 0.3)' }, iso_feed: { type: 'number', description: 'mm/min (default 120)' }, plunge_feed: { type: 'number', description: 'mm/min (default 60)' }, drill_feed: { type: 'number', description: 'mm/min (default 40)' }, cut_dia: { type: 'number', description: 'end mill for the outline, mm (default 2); holes of this size + 0.1 and bigger are milled with it instead of drilled' }, cut_step: { type: 'number', description: 'depth per outline pass, mm (default 0.3)' }, cut_feed: { type: 'number', description: 'mm/min (default 100)' }, tabs: { type: 'number', description: 'holding tabs on the outline (default 4, 0 = none)' }, tab_width: { type: 'number', description: 'mm (default 2)' }, tab_height: { type: 'number', description: 'mm (default 0.5)' }, spindle: { type: 'number', description: 'S value (default 1000 = full speed with GRBL $30=1000)' }, board_thick: { type: 'number', description: 'copper board thickness, mm (default the design thickness, 1.6)' }, parts_side: { type: 'string', enum: ['auto', 'bare', 'copper'], description: 'Where the parts go — ask the user if it is not known. bare: through-hole parts go in from the side without copper and are soldered on the copper (the usual way; the board is milled MIRRORED so the pins match), 2-pad SMD parts are soldered on the copper side. copper: all parts sit on the copper side (SMD boards; not mirrored). auto (default): picked from the parts — bare when there are through-hole parts and the SMD parts are 2-pad, copper when an SMD IC is on the copper' }, mirror: { type: 'string', enum: ['auto', 'on', 'off'], description: 'the same choice as parts_side (on = bare, off = copper); parts_side wins' }, origin: { type: 'string', enum: ['board', 'job'], description: 'board (default): X0 Y0 = lower-left corner of the PCB (the cutout reaches cut_dia mm left of / below it); job: X0 Y0 = lower-left corner of the whole job, every move at X, Y >= 0' }, drill_bits: { type: 'array', items: { type: 'number' }, description: 'drill bits the user has, mm (default [0.8, 1.0]); each hole gets the smallest bit that fits, holes bigger than every bit are drilled and widened in a small circle' }, pad_relief: { type: 'string', enum: ['auto', 'on', 'off'], description: 'SMD pads on the GND pour: on = a milled gap all round with 4 spokes, so each pad is its own solder spot; off = plain pour; auto (default) = the design rule smdPadRelief (on in the cnc3018 preset)' }, layer: { type: 'string', enum: ['F', 'B'], description: 'copper side to mill (default: the side with the tracks)' } } } },
   { name: 'export_electrodes', description: 'The electrode() plates as gold (ENIG) PCB electrodes for JLCPCB (as: "pcb", default): one 0.6 mm board with all plates joined by mouse-bite tabs — gold over the whole skin side (mask open, vias tented), a solder pad on the back over each pod wire hole, true-arc outline — Gerbers + drill files + a zip for upload + an order README (ENIG 2U", Remove Mark, Single PCB) + an assembly guide picture. as: "sheet": the stainless sheet-metal set (all plates as one part on 5 mm bars + snip guide). projects: more projects whose plates go into the same board / part (e.g. the wrist and the chest designs in one order). Then jlcpcb_quote {gerber_zip} prices the gold board.', input_schema: { type: 'object', properties: { as: { type: 'string', enum: ['pcb', 'sheet'] }, projects: { type: 'array', items: { type: 'string' }, description: 'more project ids / names to merge' }, thickness: { type: 'number' }, out_dir: { type: 'string', description: 'folder (default Documents/CircuitPilot exports/<project>-electrodes)' } } } },
+  { name: 'merge_pcb', description: 'Put the PCB of another project next to this project\'s open PCB, joined by a break-off tab, so both are ONE board to order at JLCPCB (e.g. the main board + its electrode plates). Copies the parts (new references where they clash, on a new schematic sheet), every track, via, pour, hole, keep-out and text; nets get a suffix (net_suffix) so the two circuits stay separate. The outline becomes the union of both boards and the tab. This project\'s design rules apply to both (rule_differences lists what the other board was made with). Then run_drc and export_gerbers.', input_schema: { type: 'object', required: ['from_project'], properties: { from_project: { type: 'string', description: 'project id or exact name to take the board from' }, from_pcb: { type: 'string', description: 'its PCB number or name (default: its open PCB)' }, side: { type: 'string', enum: ['right', 'below'], description: 'default right' }, gap: { type: 'number', description: 'cut between the boards, mm (default 2)' }, tab: { type: 'number', description: 'tab width, mm (default 3)' }, suffix: { type: 'string', description: 'added to the merged board\'s net names (default: initials of its project name)' }, keep_net_names: { type: 'boolean', description: 'keep the net names (the boards then share nets: DRC reports them as not joined)' } } } },
+  { name: 'compare_firmware_pins', description: 'Check that one firmware runs on several boards: compares the firmware pin map (design_pins.h: PIN_ name → MCU pin) of every project listed (or every project whose name contains match) with the first one. Lists the pins that differ, pins only some boards have, and boards with another MCU.', input_schema: { type: 'object', properties: { projects: { type: 'array', items: { type: 'string' }, description: 'project ids or exact names; the first is the reference' }, match: { type: 'string', description: 'instead of projects: every project whose name contains this text (e.g. "Band_v")' } } } },
   { name: 'copy_block', description: 'Copy a circuit block (group of parts: schematic, PCB layout, tracks inside the block) within the current project or into another one (to_project). Power nets and keep_nets stay connected, wiring inside the block gets fresh nets, nets to outside parts are left off.', input_schema: { type: 'object', required: ['refs'], properties: { refs: { type: 'array', items: { type: 'string' } }, to_project: { type: 'string', description: 'target project id or exact name (default: the same project)' }, keep_nets: { type: 'array', items: { type: 'string' } }, suffix: { type: 'string' }, sch_offset: { type: 'array', items: { type: 'number' } }, pcb_offset: { type: 'array', items: { type: 'number' } }, place: { type: 'string', enum: ['next', 'free', 'none'] }, sheet: { type: 'number' }, near: {} } } },
 ];
 // every tool takes `project`: the call works on that project (it becomes the current one) — no guessing after a restart
 const PROJECT_ARG = { type: 'string', description: 'Project id (or exact name) this call works on; it becomes the current project. Pass it in every call.' };
-const NO_PROJECT_ARG = new Set(['list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job', 'export_parts', 'import_parts', 'import_folder', 'import_kicad', 'find_board_code']);
-const TOOLS = [...EXTRA, ...Engine.TOOLS.filter(t => !EXTRA.some(x => x.name === t.name)).map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema }))]
+const NO_PROJECT_ARG = new Set(['compare_firmware_pins', 'list_projects', 'open_project', 'create_project', 'job_status', 'cancel_job', 'export_parts', 'import_parts', 'import_folder', 'import_kicad', 'find_board_code']);
+const makeTools = () => [...EXTRA, ...Engine.TOOLS.filter(t => !EXTRA.some(x => x.name === t.name)).map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema }))]
   .map(t => NO_PROJECT_ARG.has(t.name) ? t : Object.assign({}, t, { input_schema: Object.assign({}, t.input_schema, { properties: Object.assign({ project: PROJECT_ARG }, t.input_schema.properties || {}) }) }));
 // tools that need no project at all
-const NO_PROJECT = new Set(['search_parts', 'web_search', 'web_fetch', 'list_my_parts', 'enclosure_script_help', 'list_batteries']);
-const RO = new Set(Engine.TOOLS.filter(t => t.ro).map(t => t.name));
+let TOOLS = makeTools();
+const NO_PROJECT = new Set(['compare_firmware_pins', 'search_parts', 'web_search', 'web_fetch', 'list_my_parts', 'enclosure_script_help', 'list_batteries']);
+let RO = new Set(Engine.TOOLS.filter(t => t.ro).map(t => t.name));
 
 // the code this server runs vs. the files on disk: an update while it runs is not in its tool list — say so
 const CODE_FILES = ['js/engine.js', 'js/firmware.js', 'js/shape3d.js', 'mcp/circuitpilot-mcp.mjs'].map(f => path.join(ROOT, f)), mtime = f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
 const CODE_AT_START = CODE_FILES.map(mtime);
+// the app's engine files (js/): when they change, the engine is loaded again in place (new tools and options at once;
+// running jobs keep their own worker). Only a change of this file itself still needs a restart.
+const ENGINE_FILES = fs.readdirSync(path.join(ROOT, 'js')).filter(f => f.endsWith('.js')).map(f => path.join(ROOT, 'js', f));
+let engineAt = Math.max(...ENGINE_FILES.map(mtime)), engineChecked = 0;
+function reloadEngine() {
+  if (Date.now() - engineChecked < 3000) return false; engineChecked = Date.now();
+  const now = Math.max(...ENGINE_FILES.map(mtime)); if (now <= engineAt + 500) return false;
+  try {
+    const c = loadEngine(ROOT, log); ctx = c; ({ Engine, Model, Pcb, Cnc } = c);
+    Object.assign(Engine.env, ENV); TOOLS = makeTools(); RO = new Set(Engine.TOOLS.filter(t => t.ro).map(t => t.name));
+    engineAt = now; CODE_FILES.forEach((f, i) => { if (!/circuitpilot-mcp\.mjs$/.test(f)) CODE_AT_START[i] = mtime(f); });
+    log('engine reloaded (app code changed): ' + TOOLS.length + ' tools'); return true;
+  } catch (e) { log('engine reload failed, keeping the loaded one:', e); engineAt = now; return false; }
+}
 const outdated = () => CODE_FILES.some((f, i) => mtime(f) > CODE_AT_START[i] + 1000);
 async function callTool(name, input = {}) {
   if (input.project != null && input.project !== '' && !NO_PROJECT_ARG.has(name)) {
@@ -596,6 +622,40 @@ async function callTool(name, input = {}) {
       await api('PUT', '/api/projects/' + tgt.id, JSON.parse(Model.snapshot()));
       return Object.assign({ from: src, to: tgt.id, to_name: tgt.name, note_current: 'The current project is still ' + src }, r);
     }
+    case 'compare_firmware_pins': {
+      let list = [];
+      if (input.match) { const q = String(input.match).toLowerCase(); list = (await api('GET', '/api/projects')).filter(p => (p.name || '').toLowerCase().includes(q)); }
+      else for (const r of input.projects || []) { const p = await resolveProject(r); if (!p) throw new Error(`No project "${r}"`); list.push(p); }
+      if (list.length < 2) throw new Error('Give at least 2 projects (projects: [...], or match: "part of the names")');
+      const boards = [];
+      for (const p of list.slice(0, 40)) {
+        Model.load(await api('GET', '/api/projects/' + p.id));
+        const f = ctx.Firmware.info(), map = {};
+        for (const x of f.pins || []) map[x.id] = x.mcu_pin != null ? String(x.mcu_pin) : x.todo ? '?' : '';
+        boards.push({ id: p.id, name: p.name, mcu: f.mcu ? f.mcu.name : null, map });
+      }
+      // boards without an MCU (electrode plates, flex leads) run no firmware: listed, not compared
+      const noMcu = boards.filter(b => !b.mcu).map(b => b.name); for (let i = boards.length - 1; i >= 0; i--) if (!boards[i].mcu) boards.splice(i, 1);
+      if (boards.length < 2) return { same: true, boards: boards.map(b => b.name), no_mcu_skipped: noMcu, note: 'Fewer than 2 of these boards have an MCU' };
+      const ref = boards[0], ids = [...new Set(boards.flatMap(b => Object.keys(b.map)))].sort(), differ = [], partial = [];
+      for (const id of ids) {
+        const vals = boards.map(b => b.map[id]);
+        if (vals.some(v => v == null)) partial.push({ pin: id, on: boards.filter(b => b.map[id] != null).map(b => b.name), missing_on: boards.filter(b => b.map[id] == null).map(b => b.name) });
+        else if (new Set(vals).size > 1) differ.push({ pin: id, [ref.name]: ref.map[id], others: boards.slice(1).filter(b => b.map[id] !== ref.map[id]).map(b => ({ board: b.name, mcu_pin: b.map[id] })) });
+      }
+      const mcus = [...new Set(boards.map(b => b.mcu || 'none'))];
+      return { same: !differ.length && !partial.length && mcus.length === 1, reference: ref.name, no_mcu_skipped: noMcu.length ? noMcu : undefined, boards: boards.map(b => ({ name: b.name, mcu: b.mcu, pins: Object.keys(b.map).length })), mcus: mcus.length > 1 ? mcus : undefined, different_pins: differ.length ? differ : undefined, not_on_every_board: partial.length ? partial : undefined,
+        note: differ.length || partial.length ? 'One program runs on every board only when each PIN_ name has the same MCU pin everywhere (and the firmware checks for a missing feature)' : 'Every board uses the same pin map' };
+    }
+    case 'merge_pcb': {
+      const tgt = await ensureProject(), src = await resolveProject(input.from_project);
+      if (!src) throw new Error(`No project "${input.from_project}"`);
+      if (src.id === tgt) throw new Error('Choose another project: from_project is the current one (to put two PCBs of one project together, copy one into a new project first)');
+      Model.load(await api('GET', '/api/projects/' + src.id));
+      if (input.from_pcb != null) Pcb.selectPcb(input.from_pcb);
+      const B = Pcb.boardForMerge();
+      return withProject(() => Object.assign(Model.mutate(() => Pcb.mergeBoard(B, input)), { drc: Pcb.drc().summary }), true, 'merge_pcb');
+    }
     case 'start_here': {
       const ps = await api('GET', '/api/projects'), id = await ensureProject().catch(() => null), cur = ps.find(p => p.id === id);
       const v = await api('GET', '/api/version').catch(() => ({})), dataDir = v.data_dir || '?';
@@ -739,7 +799,7 @@ function startStdio() {
     const fail = (code, message) => id !== undefined && send({ jsonrpc: '2.0', id, error: { code, message } });
     switch (method) {
       case 'initialize':
-        return reply({ protocolVersion: params.protocolVersion || '2025-06-18', capabilities: { tools: { listChanged: false }, prompts: { listChanged: false } }, serverInfo: { name: 'circuitpilot', version: '1.0.0' }, instructions: INSTRUCTIONS });
+        return reply({ protocolVersion: params.protocolVersion || '2025-06-18', capabilities: { tools: { listChanged: true }, prompts: { listChanged: false } }, serverInfo: { name: 'circuitpilot', version: '1.0.0' }, instructions: INSTRUCTIONS });
       // ready-made prompt in the client's prompt menu (Claude Desktop: + → CircuitPilot)
       case 'prompts/list': return reply({ prompts: [{ name: 'design_board', title: 'Design a board with CircuitPilot', description: 'Describe a circuit; Claude designs the schematic, PCB and (optionally) the enclosure in CircuitPilot', arguments: [{ name: 'description', description: 'What should the board do? e.g. "ESP32-C3 with a BME280 sensor and USB-C, 30 × 30 mm"', required: true }] }] });
       case 'prompts/get': {
@@ -749,9 +809,10 @@ function startStdio() {
       }
       case 'notifications/initialized': case 'notifications/cancelled': return;
       case 'ping': return reply({});
-      case 'tools/list': return reply({ tools: TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.input_schema })) });
+      case 'tools/list': reloadEngine(); return reply({ tools: TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.input_schema })) });
       case 'tools/call': {
         try {
+          if (reloadEngine()) send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
           const out = await run(params.name, params.arguments || {});
           if (out && typeof out === 'object' && out.__image) {   // view_design: hand the screenshot to the model as an image
             const { __image, ...rest } = out;

@@ -713,7 +713,7 @@ const PcbView = (() => {
         for (const p of cache.pads) if (p.net !== pr.net && padLayers(p).includes(L)) m.push(padEl(p, 'black', '', cl));
         for (const v of S.pcb.vias) if (v.net !== pr.net) m.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2 + cl}" fill="black"/>`);
         m.push(`<path d="${bpath}" fill="none" stroke="black" stroke-width="${2 * R0.edgeClearance}"/>`);
-        for (const k of Pcb.keepouts()) if (k.pours && (k.layer === 'both' || k.layer === L)) m.push(`<path d="M${k.pts.map(q => q.join(' ')).join('L')}Z" fill="black"/>`);
+        for (const k of Pcb.keepouts()) if (k.pours && (k.layer === 'both' || k.layer === 'all' || k.layer === L)) m.push(`<path d="M${k.pts.map(q => q.join(' ')).join('L')}Z" fill="black"/>`);
         out.push(`<defs><mask id="pm${i}" maskUnits="userSpaceOnUse" x="-50" y="-50" width="${S.board.w + 100}" height="${S.board.h + 100}">${m.join('')}</mask></defs>`);
         const sel = ui.item && ui.item.k === 'pour' && ui.item.i === i;
         // only the live pieces (as in the Gerber), with the clearance around other nets' copper masked out
@@ -775,10 +775,10 @@ const PcbView = (() => {
     const fx = S.pcb.flex; if (fx && fx.on) for (const st of fx.stiffeners || []) out.push(`<path d="M${st.pts.map(q => q.join(' ')).join('L')}Z" fill="#a46bff" fill-opacity="0.08" stroke="#a46bff" stroke-width="0.12" stroke-dasharray="0.5 0.3" pointer-events="none"><title>${esc(st.name)} · ${st.material} ${st.thickness} mm · ${st.side}</title></path>`);
     // top keep-outs on TopKeepOutLayer, bottom ones on BottomKeepOutLayer; top + bottom ones show with either
     Pcb.keepouts().forEach((k, i) => {
-      const ids = k.layer === 'both' ? ['KOT', 'KOB'].filter(vis) : [k.layer === 'B' ? 'KOB' : 'KOT'].filter(vis); if (!ids.length) return;
+      const ids = k.layer === 'both' || k.layer === 'all' || k.layer === 'inner' || /^In/.test(k.layer) ? ['KOT', 'KOB'].filter(vis) : [k.layer === 'B' ? 'KOB' : 'KOT'].filter(vis); if (!ids.length) return;
       const d = `M${k.pts.map(q => q.join(' ')).join('L')}Z`, on = ui.item && (k.auto ? ui.item.k === 'koa' && ui.item.ref === k.epRef : ui.item.k === 'ko' && ui.item.i === i);
       out.push(`<path d="${d}" fill="url(#hatch${ids[0]})" stroke="none" pointer-events="none" opacity="0.5"/>`);
-      out.push(`<path ${k.auto ? `data-k="koa" data-ref="${esc(k.epRef)}" ` : `data-k="ko" data-i="${i}" `}class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="${col(ids[0])}" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="stroke"><title>${k.auto ? 'Automatic keep-out ' : 'Keep-out '}"${esc(k.name)}" · ${k.layer === 'both' ? 'top + bottom' : k.layer === 'B' ? 'bottom' : 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')} · click to select, Del removes</title></path>`);
+      out.push(`<path ${k.auto ? `data-k="koa" data-ref="${esc(k.epRef)}" ` : `data-k="ko" data-i="${i}" `}class="keepout${on ? ' on' : ''}" d="${d}" fill="none" stroke="${col(ids[0])}" stroke-width="${on ? 0.2 : 0.12}" stroke-dasharray="0.6 0.35" pointer-events="stroke"><title>${k.auto ? 'Automatic keep-out ' : 'Keep-out '}"${esc(k.name)}" · ${{ both: 'top + bottom', all: 'every layer', inner: 'inner layers', In1: 'inner layer In1', In2: 'inner layer In2', B: 'bottom', F: 'top' }[k.layer] || 'top'} · no ${['tracks', 'vias', 'pours', 'parts'].filter(f => k[f]).join(', ')} · click to select, Del removes</title></path>`);
     });
     (S.pcb.lines || []).forEach((l, i) => {
       if (!vis(l.layer) || l.pts.length < 2) return;
@@ -975,7 +975,7 @@ const PcbView = (() => {
       const k = (S.pcb.keepouts || [])[it.i]; if (!k) return false;
       const chk = (id, on, t) => `<label class="chk"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> ${t}</label>`;
       el.innerHTML = `<div class="ph">Keep-out area</div><label>Name<input id="pkN" value="${esc(k.name)}"></label>
-        <label>Layers<select id="pkL"><option value="both" ${k.layer === 'both' ? 'selected' : ''}>Top + bottom</option><option value="F" ${k.layer === 'F' ? 'selected' : ''}>Top only</option><option value="B" ${k.layer === 'B' ? 'selected' : ''}>Bottom only</option></select></label>
+        <label>Layers<select id="pkL"><option value="both" ${k.layer === 'both' ? 'selected' : ''}>Top + bottom</option><option value="F" ${k.layer === 'F' ? 'selected' : ''}>Top only</option><option value="B" ${k.layer === 'B' ? 'selected' : ''}>Bottom only</option>${+Pcb.rules().layers === 4 ? ['all|Every layer', 'inner|Inner layers (In1 + In2)', 'In1|Inner In1', 'In2|Inner In2'].map(x => x.split('|')).map(([v, t]) => `<option value="${v}" ${k.layer === v ? 'selected' : ''}>${t}</option>`).join('') : ''}</select></label>
         ${chk('pkT', k.tracks, 'No tracks')}${chk('pkV', k.vias, 'No vias')}${chk('pkP', k.pours, 'No copper pour')}${chk('pkC', k.parts, 'No parts')}
         <div class="muted small">The autorouter and copper pours keep out; DRC reports anything inside. Press Route after changing it.</div>
         <div class="row"><button id="ppDel" class="danger">Delete keep-out (Del)</button></div>`;

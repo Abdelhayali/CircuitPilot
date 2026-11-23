@@ -6,10 +6,12 @@ const Projects = (() => {
   let myLib = [];
   let serverUpdated = 0; // server timestamp of the version we have
 
-  async function api(method, path, body) {
-    const r = await fetch(path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  // deletes the user clicked carry X-CircuitPilot-User (the server refuses bulk deletes without it)
+  async function api(method, path, body, user) {
+    const h = body ? { 'content-type': 'application/json' } : {}; if (user) h['X-CircuitPilot-User'] = '1';
+    const r = await fetch(path, { method, headers: h, body: body ? JSON.stringify(body) : undefined });
     const j = await r.json().catch(() => ({ error: r.statusText }));
-    if (!r.ok) throw new Error(j.error || r.statusText);
+    if (!r.ok) { const e = new Error(j.error || r.statusText); e.status = r.status; e.job = j.job; throw e; }
     return j;
   }
   function setStatus(s, title = '') {
@@ -47,7 +49,7 @@ const Projects = (() => {
       if (typeof Cloud !== 'undefined') Cloud.saved(Model.S.id);   // signed in with Google: the project goes to Drive too
       if (window.GitHubAuto) GitHubAuto.saved();   // auto-save to GitHub, if turned on
       return true;
-    } catch (e) { setStatus('error', e.message); return false; }
+    } catch (e) { if (e.status === 423) { setLock(e.job || 'a job'); return false; } setStatus('error', e.message); return false; }
     finally { saving = false; if (again) { again = false; schedule(); } }
   }
 
@@ -103,7 +105,7 @@ const Projects = (() => {
     render();
   }
   async function remove(id) {
-    await api('DELETE', '/api/projects/' + id);
+    await api('DELETE', '/api/projects/' + id, undefined, true); forget(id);
     if (id === Model.S.id) { const d = Model.blank(); d.name = 'Untitled'; Model.load(d); lastSaved = ''; await saveNow(); Sch.fit(); }
     render();
   }
@@ -137,7 +139,7 @@ const Projects = (() => {
     const lines = groups.map(a => '• ' + (a[0].name || 'Untitled') + ': keep the one edited ' + stamp(editedOf(a[0])) + ', remove ' + (a.length - 1) + ' older (' + a.slice(1).map(p => stamp(editedOf(p))).join(', ') + ')');
     if (!confirm('Merge repeated designs?\n\n' + lines.join('\n') + '\n\n' + (hasHistory ? 'Removed copies can be brought back from ⟲ Deleted projects.' : 'Removed copies cannot be brought back in the web version.'))) return;
     let open = Model.S.id, removed = 0;
-    for (const a of groups) for (const p of a.slice(1)) { if (p.id === Model.S.id) { await saveNow(); open = a[0].id; } await api('DELETE', '/api/projects/' + p.id); removed++; }
+    for (const a of groups) for (const p of a.slice(1)) { if (p.id === Model.S.id) { await saveNow(); open = a[0].id; } await api('DELETE', '/api/projects/' + p.id, undefined, true); forget(p.id); removed++; }
     if (open !== Model.S.id) await openQuiet(open);
     App.toast(removed + ' older cop' + (removed === 1 ? 'y' : 'ies') + ' removed; the newest of each design is kept', 6000);
     if (typeof Cloud !== 'undefined' && Cloud.email) Cloud.sync().catch(() => { });
@@ -150,7 +152,7 @@ const Projects = (() => {
     if (!online) { list.innerHTML = '<div class="muted">Project storage needs the app to run with <code>server.py</code>. You can still download / import project files.</div>'; return; }
     list.innerHTML = '<div class="muted">Loading…</div>';
     try {
-      const ps = await api('GET', '/api/projects'), q = $('#projSearch').value.toLowerCase();
+      const ps = await api('GET', '/api/projects'), q = $('#projSearch').value.toLowerCase(), goneNote = vanished(ps);
       const sort = $('#projSort') ? $('#projSort').value : 'edited-desc', created = createdOf, nm = p => String(p.name || 'Untitled');
       const order = { 'edited-desc': (a, b) => editedOf(b) - editedOf(a), 'edited-asc': (a, b) => editedOf(a) - editedOf(b), 'created-desc': (a, b) => created(b) - created(a), 'created-asc': (a, b) => created(a) - created(b),
         'name-asc': (a, b) => nm(a).localeCompare(nm(b), undefined, { numeric: true, sensitivity: 'base' }), 'name-desc': (a, b) => nm(b).localeCompare(nm(a), undefined, { numeric: true, sensitivity: 'base' }) }[sort] || ((a, b) => editedOf(b) - editedOf(a));
@@ -174,13 +176,24 @@ const Projects = (() => {
       const ghNote = repo && ghTok ? `<div class="muted small" style="margin-bottom:8px">⌥ Saved to your GitHub repository <b>${esc(repo)}</b> — on another PC open <a href="#" id="projGh">⌥ GitHub</a> → Load all designs, then Sync to keep them the same.</div>`
         : `<div class="muted small" style="margin-bottom:8px">${window.CPStatic && CPStatic.mode === 'static' ? 'Web version: projects are saved in this browser. ' : 'Projects are saved on this PC. '}<a href="#" id="projGh">⌥ Connect GitHub</a> to keep every project in your own repository and open them on any PC.</div>`;
       const note = signed ? `<div class="muted small" style="margin-bottom:8px">☁ Synced with the Google Drive of ${esc(Cloud.email)} — open CircuitPilot on any PC and sign in to get them.</div>` : ghNote;
-      list.innerHTML = note + dupNote + (rows.length ? rows.map(p => `<div class="proj${p.id === Model.S.id ? ' cur' : ''}" data-id="${esc(p.id)}">
+      list.innerHTML = goneNote + note + dupNote + (rows.length ? rows.map(p => `<div class="proj${p.id === Model.S.id ? ' cur' : ''}" data-id="${esc(p.id)}">
         <div class="pinfo"><div class="pname">${esc(p.name || 'Untitled')}${p.id === Model.S.id ? ' <span class="badge basic">open</span>' : ''}${dupOf.get(p.id) === 'newest' ? ' <span class="badge basic" title="This name is here more than once: this copy was edited last">newest copy</span>' : dupOf.get(p.id) === 'older' ? ' <span class="badge" title="This name is here more than once: another copy was edited later">older copy</span>' : ''}</div>
         ${revNote(p)}<div class="muted small">${p.code ? `<span title="Board code printed on the PCB (search it to find this design)">${esc(p.code)}</span> · ` : ''}${p.parts} parts · ${p.nets} nets${p.pcb ? ' · PCB' : ''} · last edited <b title="${esc(new Date(editedOf(p) * 1000).toLocaleString())}">${stamp(editedOf(p))}</b> (${ago(editedOf(p))})${createdOf(p) ? ` · created ${stamp(createdOf(p))}` : ''}${IT[p.id] ? ` <span class="muted" title="Dates from the project list ${esc(IT[p.id].src.join(' and '))} (the same on every PC that syncs)">⇅</span>` : ''}</div></div>
         <div class="pact"><button data-a="open" class="primary">Open</button><button data-a="dup" title="Duplicate">⧉</button>${hasHistory ? '<button data-a="hist" title="Earlier versions (restore)">⟲</button>' : ''}<button data-a="ren" title="Rename">✎</button><button data-a="del" class="danger" title="Delete">🗑</button></div></div>`).join('')
         : '<div class="muted">No projects yet.</div>') + (hasHistory ? '<div class="proj"><div class="pinfo muted small">Every project keeps earlier versions (⟲). </div><div class="pact"><button data-a="deleted">Deleted projects…</button></div></div>' : '');
       if ($('#projGh')) $('#projGh').onclick = e => { e.preventDefault(); close(); const b = $('#ghBtn'); if (b) b.click(); };
     } catch (e) { list.innerHTML = `<div class="bad">${esc(e.message)}</div>`; }
+  }
+  // ids seen in the list last time (per browser): ones missing now that were not deleted from this list are reported
+  const KNOWN = 'cp.knownProjects';
+  const forget = id => { try { const k = JSON.parse(localStorage.getItem(KNOWN) || '{}'); delete k[id]; localStorage.setItem(KNOWN, JSON.stringify(k)); } catch (e) { } };
+  function vanished(ps) {
+    let k = {}; try { k = JSON.parse(localStorage.getItem(KNOWN) || '{}'); } catch (e) { }
+    const now = new Set(ps.map(p => p.id)), gone = Object.entries(k).filter(([id]) => !now.has(id));
+    const next = {}; for (const p of ps) next[p.id] = p.name || 'Untitled';
+    try { localStorage.setItem(KNOWN, JSON.stringify(next)); } catch (e) { }
+    if (!gone.length || !Object.keys(k).length) return '';
+    return `<div class="row-h" style="margin-bottom:8px;padding:6px 8px;border:1px solid var(--bad, #c44);border-radius:6px"><span class="small"><b class="bad">${gone.length} project${gone.length > 1 ? 's were' : ' was'} removed since you last looked</b> (not from this list — a sync or another tool): ${gone.slice(0, 8).map(([, n]) => esc(n)).join(', ')}${gone.length > 8 ? ' …' : ''}.</span>${hasHistory ? '<button data-a="deleted">Restore…</button>' : ''}</div>`;
   }
   // earlier versions of a project (desktop server keeps them: every ~10 min while editing, big part losses, deletes)
   const hasHistory = !(window.CPStatic && CPStatic.mode === 'static');
@@ -214,8 +227,27 @@ const Projects = (() => {
   }
   async function deletePart(key) { await api('DELETE', '/api/library/' + encodeURIComponent(key)); await loadLibrary(); }
 
+  // a Claude job (route_pcb, reroute …) works on this project: editing pauses, and its result loads when it is done
+  let jobLock = null, lockToast = 0;
+  function setLock(tool) {
+    if (jobLock === tool) return; jobLock = tool;
+    Model.setLock(tool, t => { if (Date.now() - lockToast > 4000) { lockToast = Date.now(); App.toast('⏳ Claude is running ' + t + ' on this project — wait until it finishes', 4000); } });
+    setStatus('error', 'Claude is running ' + tool + ' on this project');
+    const el = $('#saveState'); if (el) el.textContent = '⏳ Claude: ' + tool;
+    App.toast('⏳ Claude is running ' + tool + ' on this project — editing is paused until it finishes, then its result loads here', 8000);
+  }
+  async function endLock() {
+    jobLock = null; Model.setLock(null);
+    try {
+      const d = await api('GET', '/api/projects/' + Model.S.id), m = await api('GET', '/api/projects/' + Model.S.id + '/meta');
+      const lost = Model.snapshot() !== lastSaved;
+      serverUpdated = m.updated; Model.load(d, true); lastSaved = Model.snapshot(); remember(); setStatus('saved');
+      App.toast('✓ Claude finished — its result is loaded' + (lost ? ' (it replaced this tab’s unsaved changes from before it started)' : ''), 7000);
+    } catch (e) { setStatus('error', e.message); }
+  }
   async function poll() {
     if (!online || !Model.S.id || saving || document.hidden) return;
+    try { const m = await api('GET', '/api/projects/' + Model.S.id + '/meta'); if (m.job) { setLock(m.job); return; } if (jobLock) { await endLock(); return; } } catch (e) { }
     if (Model.snapshot() !== lastSaved) return; // local edits pending — they win
     try {
       const m = await api('GET', '/api/projects/' + Model.S.id + '/meta');

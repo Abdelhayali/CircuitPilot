@@ -668,6 +668,8 @@ const App = (() => {
     rDraft = JSON.parse(JSON.stringify(Pcb.rules()));
     { const pm = Pcb.planeMap(Object.assign({}, rDraft, { layers: 4 })); rDraft.planeIn1 = pm.In1 || ''; rDraft.planeIn2 = pm.In2 || ''; }
     $('#rPreset').innerHTML = Object.entries(Pcb.RULE_PRESETS).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
+    const L = Pcb.pcbList(); $('#rPcbName').textContent = L.length > 1 ? '— ' + L[Pcb.activePcb()].name + ' (each PCB has its own)' : '';
+    $('#rAllWrap').classList.toggle('hidden', L.length < 2); $('#rAllPcbs').checked = false;
     fillRules(); $('#rulesModal').classList.remove('hidden');
   }
   function fillRules() {
@@ -686,9 +688,10 @@ const App = (() => {
     const removed = Object.keys(cur.netWidths).filter(n => !(n in rDraft.netWidths));
     u.netWidths = Object.assign({}, rDraft.netWidths); removed.forEach(n => u.netWidths[n] = 0);
     try {
-      const r = Model.mutate(() => { Model.S.rules = { preset: rDraft.preset, netWidths: Model.S.rules && Model.S.rules.netWidths || {} }; return Pcb.setRules(u); });
+      const all = $('#rAllPcbs').checked && Pcb.pcbList().length > 1;
+      const r = Model.mutate(() => { Model.S.rules = { preset: rDraft.preset, netWidths: Model.S.rules && Model.S.rules.netWidths || {} }; const x = Pcb.setRules(u); if (all) Pcb.setRulesAll(u); return x; });
       $('#rulesModal').classList.add('hidden');
-      toast(r.warnings.length ? '⚠ ' + r.warnings[0] : 'Design rules saved');
+      toast(r.warnings.length ? '⚠ ' + r.warnings[0] : all ? 'Design rules saved on every PCB' : 'Design rules saved' + (r.pcb ? ' for ' + r.pcb : ''));
       if (route) { showView('pcb'); $('#btnRoute').click(); }
     } catch (e) { $('#rWarn').textContent = e.message; }
   }
@@ -707,14 +710,16 @@ const App = (() => {
     $('#rulesSave').onclick = () => saveRules(false); $('#rulesRoute').onclick = () => saveRules(true);
   }
   function showDrc(goto) {
-    const d = Pcb.drc(); Pcb.ui.drc = d; Pcb.ui.drcFocus = null;
+    const d = Pcb.drc({ as: Pcb.ui.drcAs }); Pcb.ui.drc = d; Pcb.ui.drcFocus = null;
     if (goto && view !== 'pcb') showView('pcb'); else Pcb.render();
     renderStatus();
     const items = d.violations;
     $('#props').innerHTML = `<div class="ph">Design rule check · <span class="${d.errors ? 'bad' : d.warnings ? 'warn' : 'good'}">${esc(d.summary || '')}</span></div>
-      <div class="muted small">Rules: ${esc(Pcb.RULE_PRESETS[Pcb.rules().preset] ? Pcb.RULE_PRESETS[Pcb.rules().preset].label : 'custom')}</div>` +
+      <div class="muted small">Rules: ${esc(Pcb.RULE_PRESETS[Pcb.rules().preset] ? Pcb.RULE_PRESETS[Pcb.rules().preset].label : 'custom')}</div>
+      <div class="seg small" style="margin:4px 0" title="EasyEDA Pro checks its own numbers (0.152 mm next to pads and vias, 0.254 mm pour gap) instead of this board's rules — pick it to see the same list as EasyEDA's DRC"><button data-drcas="" class="${Pcb.ui.drcAs ? '' : 'on'}">This board's rules</button><button data-drcas="easyeda" class="${Pcb.ui.drcAs ? 'on' : ''}">As EasyEDA Pro checks</button></div>` +
       (items.length ? '<ul class="erc drc">' + items.map((v, i) => `<li class="${v.severity === 'error' ? 'error' : 'warn'}" data-v="${i}">${esc(v.msg)}</li>`).join('') + '</ul>' : '<div class="good">✓ No violations</div>');
     $('#props').querySelectorAll('[data-v]').forEach(li => li.onclick = () => gotoDrc(+li.dataset.v));
+    $('#props').querySelectorAll('[data-drcas]').forEach(b => b.onclick = () => { Pcb.ui.drcAs = b.dataset.drcas || undefined; showDrc(); });
     return d;
   }
   // zoom to a DRC problem and mark it (ring on the board, row in the list); a net that is not routed: its pads

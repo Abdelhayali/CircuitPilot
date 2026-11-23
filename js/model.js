@@ -18,7 +18,10 @@ const Model = (() => {
   function begin() {
     undoStack.push(snapshot()); if (undoStack.length > 200) undoStack.shift(); redoStack.length = 0;
   }
+  // locked: a Claude job is working on this project (the server refuses saves): edits wait until it is done
+  let lockedBy = null, onLocked = null;
   function mutate(fn, kind = 'change') {
+    if (lockedBy) { if (onLocked) onLocked(lockedBy); throw new Error('Claude is running ' + lockedBy + ' on this project — edit again when it is done'); }
     const before = snapshot();
     try { const r = fn(); undoStack.push(before); if (undoStack.length > 200) undoStack.shift(); redoStack.length = 0; S.edited = +(Date.now() / 1000).toFixed(3); emit(kind); return r; }
     catch (e) { S = JSON.parse(before); throw e; }
@@ -292,6 +295,7 @@ const Model = (() => {
   // JLCPCB/LCSC number of a component (a per-component copy "C15850-C1" keeps the number of the part it came from)
   function lcscOf(c) {
     if (c.type !== 'part') return c.lcscPart || '';
+    if (/^C\d+$/.test(c.lcscPart || '')) return c.lcscPart;   // set for this part (match_jlcpcb_parts, or by hand)
     const l = S.lib[c.lcsc], n = l && l.lcsc;
     return /^C\d+$/.test(n || '') ? n : /^C\d+$/.test(c.lcsc || '') ? c.lcsc : '';
   }
@@ -583,6 +587,7 @@ const Model = (() => {
 
   return {
     get S() { return S; }, blank, subscribe: f => subs.push(f), emit, begin, mutate, load, undo, redo, snapshot,
+    setLock: (tool, cb) => { lockedBy = tool || null; if (cb) onLocked = cb; }, get lockedBy() { return lockedBy; },
     canUndo: () => undoStack.length > 0, canRedo: () => redoStack.length > 0,
     comp, pinsWorld, bbox, pinIndex, netOf, resolvePins, addComponent, removeComponent, updateComponent, connect, disconnect,
     renameNet, removeNet, clear, setLibPart, fpNameFor, lcscOf, assignPart, copyParts, pasteParts, attachDb, erc, autoLayout, organize, spaceOut, labelBox, sheetOf, summary, isPower, isGround, invalidate, netsOfComp, nextRef, autoNetName

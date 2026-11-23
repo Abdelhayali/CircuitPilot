@@ -33,6 +33,16 @@ import knowledge
 import webtools
 
 _jlc_status = {}   # JLCPCB API key check, cached 5 min
+_recent_deletes = []   # times of the last project deletes (bulk-delete guard)
+_job_locks = {}   # project id -> {"tool", "until"}: a Claude job is working on it (the MCP server renews it every minute)
+
+
+def _job_lock(pid):
+    lk = _job_locks.get(pid)
+    if lk and lk["until"] < time.time():
+        _job_locks.pop(pid, None)
+        return None
+    return lk
 
 PROXY_RE = re.compile(r"^/llm-proxy/(\d{1,5})(/.*)?$")
 STATIC_RE = re.compile(r"^/(|index\.html|styles\.css|favicon\.ico|js/[\w.-]+\.js|js/vendor/(?:manifold\.(?:js|wasm)|TransformControls\.js)|data/kicad-footprints\.txt|data/open-parts\.txt)$")
@@ -428,10 +438,26 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 body = json.loads(self.rfile.read(n).decode("utf-8"))
             m = self.command
             if kind == "projects":
+                if key and len(parts) > 2 and parts[2] == "lock":
+                    if m == "POST":
+                        b = body or {}
+                        _job_locks[key] = {"tool": str(b.get("tool") or "job")[:40], "until": time.time() + max(30, min(600, float(b.get("seconds") or 180)))}
+                        out = {"ok": True}
+                    elif m == "DELETE":
+                        _job_locks.pop(key, None)
+                        out = {"ok": True}
+                    else:
+                        out = _job_lock(key) or {}
+                    return self._send(200, json.dumps(out).encode(), "application/json")
+                if m in ("PUT", "POST") and key and _job_lock(key) and self.headers.get("X-CircuitPilot-Job") != "1" and not (len(parts) > 2 and parts[2] == "restore"):
+                    lk = _job_lock(key)
+                    return self._send(423, json.dumps({"error": "Claude is running " + lk["tool"] + " on this project - saving is paused until it finishes", "job": lk["tool"]}).encode(), "application/json")
                 if m == "GET" and key == "_deleted":
                     out = store.deleted_projects()
                 elif m == "GET" and key and len(parts) > 2 and parts[2] == "meta":
                     out = store.get_meta(key)
+                    if _job_lock(key):
+                        out = dict(out, job=_job_lock(key)["tool"])
                 elif m == "GET" and key and len(parts) > 2 and parts[2] == "versions":
                     out = store.get_version(key, parts[3]) if len(parts) > 3 else store.list_versions(key)
                 elif m == "POST" and key and len(parts) > 2 and parts[2] == "restore":
@@ -441,6 +467,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 elif m in ("PUT", "POST"):
                     out = store.save_project(key, body)
                 elif m == "DELETE" and key:
+                    # bulk-delete guard: a third project deleted within 20 s is refused unless the request says the user
+                    # asked for it (the Projects list sends X-CircuitPilot-User: 1). A sync or script gone wrong stops here.
+                    now = time.time()
+                    _recent_deletes[:] = [t for t in _recent_deletes if now - t < 20]
+                    if len(_recent_deletes) >= 2 and self.headers.get("X-CircuitPilot-User") != "1":
+                        return self._send(409, json.dumps({"error": "Blocked: several projects deleted within seconds. Nothing more was deleted. Delete projects one at a time in Projects, or restore from Projects -> Deleted projects."}).encode(), "application/json")
+                    _recent_deletes.append(now)
                     out = store.delete_project(key)
                 else:
                     raise ValueError("bad request")

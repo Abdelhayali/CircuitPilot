@@ -93,7 +93,7 @@ const Pcb3D = (() => {
       for (const v of S.pcb.vias) if (v.net !== pr.net) m.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2 + cl}" fill="black"/>`);
       for (const hh of S.pcb.holes || []) m.push(`<circle cx="${hh.x}" cy="${hh.y}" r="${hh.d / 2 + cl}" fill="black"/>`);
       m.push(`<path d="${d}" fill="none" stroke="black" stroke-width="${2 * R.edgeClearance}"/>`);
-      for (const k of Pcb.keepouts()) if (k.pours && (k.layer === 'both' || k.layer === L)) m.push(`<path d="M${k.pts.map(q => q.join(' ')).join('L')}Z" fill="black"/>`);
+      for (const k of Pcb.keepouts()) if (k.pours && (k.layer === 'both' || k.layer === 'all' || k.layer === L)) m.push(`<path d="M${k.pts.map(q => q.join(' ')).join('L')}Z" fill="black"/>`);
       masks.push(`<mask id="pm${i}" maskUnits="userSpaceOnUse" x="-50" y="-50" width="${w + 100}" height="${h + 100}">${m.join('')}</mask>`);
       let fd; try { fd = Pcb.pourFill(pr, 'view').rings.map(rg => 'M' + rg.pts.map(q => q.join(' ')).join('L') + 'Z').join(''); } catch (e) { fd = 'M' + pp.map(q => q.join(' ')).join('L') + 'Z'; }
       if (fd) o.push(`<path d="${fd}" fill-rule="evenodd" fill="${cu}" mask="url(#pm${i})"/>`);   // live pieces only, as in the Gerber

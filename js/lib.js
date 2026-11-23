@@ -180,14 +180,15 @@ const Lib = (() => {
   const inline3 = (s, dr) => [tht(1, -2.54, 0, s, dr), tht(2, 0, 0, s, dr), tht(3, 2.54, 0, s, dr)];
   const cache = {};
   function footprint(name) {
-    if (cache[name]) return cache[name];
     let pads = null, m;
     if ((m = /^(?:LCSC|LIB):(.+)$/.exec(name))) {
       const d = typeof Model !== 'undefined' && Model.S.lib && Model.S.lib[m[1]];
       if (!d || !d.footprint) return null;
       const f = d.footprint, b = f.body;
-      return (cache[name] = { name, pads: f.pads, box: [b[0] - 0.3, b[1] - 0.3, b[2] + 0.3, b[3] + 0.3], body: null, lcsc: m[1] });
+      const c = cache[name]; if (c && c.src === f && c.pads === f.pads && c.bodySrc === b && c.n === f.pads.length) return c;
+      return (cache[name] = { name, pads: f.pads, box: [b[0] - 0.3, b[1] - 0.3, b[2] + 0.3, b[3] + 0.3], body: null, lcsc: m[1], courtyard: 0.3, src: f, bodySrc: b, n: f.pads.length });
     }
+    if (cache[name]) return cache[name];
     switch (name) {
       case '0402': pads = smd2(0.51, 0.54, 0.64); break;
       case '0603': pads = smd2(0.825, 0.8, 0.95); break;
@@ -235,7 +236,7 @@ const Lib = (() => {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const p of pads) { x0 = Math.min(x0, p.x - p.w / 2); x1 = Math.max(x1, p.x + p.w / 2); y0 = Math.min(y0, p.y - p.h / 2); y1 = Math.max(y1, p.y + p.h / 2); }
     const body = name.startsWith('SOIC') ? [-1.95, y0 - 0.3, 1.95, y1 + 0.3] : name.startsWith('DIP') ? [-2.8, y0 - 0.6, 2.8, y1 + 0.6] : null;
-    const fp = { name, pads, box: [Math.min(x0, body ? body[0] : x0) - 0.4, Math.min(y0, body ? body[1] : y0) - 0.4, Math.max(x1, body ? body[2] : x1) + 0.4, Math.max(y1, body ? body[3] : y1) + 0.4], body };
+    const fp = { name, pads, box: [Math.min(x0, body ? body[0] : x0) - 0.4, Math.min(y0, body ? body[1] : y0) - 0.4, Math.max(x1, body ? body[2] : x1) + 0.4, Math.max(y1, body ? body[3] : y1) + 0.4], body, courtyard: 0.4 };
     return (cache[name] = fp);
   }
   const FOOTPRINT_PATTERNS = ['0402', '0603', '0805', '1206', 'SOD123', 'SOT23', 'SOT223', 'TO92', 'TO220', 'Pot_THT', 'THT_P2.54', 'THT_P5.08', 'THT_P7.62', 'THT_P10.16', 'DIP-<n>', 'SOIC-<n>', 'TSSOP-<n>', 'QFN-<n>', 'QFN-<n>-EP', 'PinHeader_1x<n>'];

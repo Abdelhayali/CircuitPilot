@@ -1996,6 +1996,7 @@ const App = (() => {
     // record the signed-in user for the shared AI admin page (one quiet check per page load)
     if (GitHub.getIdToken()) fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getIdToken() } }).catch(() => { });
     $('#asClose').onclick = () => $('#chooseModal').classList.add('hidden');
+    $('#asBack').onclick = () => { $('#chOwnPanel').classList.add('hidden'); $('#chPicks').classList.remove('hidden'); $('#chooseModal .dlg').scrollTop = 0; };   // back to the two-box chooser
     $('#chooseModal .as-tabs').onclick = e => { const b = e.target.closest('button[data-p]'); if (b) { setupTab = b.dataset.p; setupRender(); } };
     $('#asConnect').onclick = setupConnect;
     $('#asKey').onkeydown = e => { if (e.key === 'Enter') setupConnect(); };

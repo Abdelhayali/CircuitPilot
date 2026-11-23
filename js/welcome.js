@@ -17,7 +17,8 @@ const Welcome = (() => {
       'Merge the PCB of another project next to this one with a break-off tab: one board to order',
       'Safer data: GitHub save keeps files you add to a design folder; several projects deleted within seconds are blocked; Projects says when projects vanished',
       'Tracks keep stable ids; pour-split warnings; free-area placement avoids tracks; dangling vias removed after a reroute',
-      'Lock a project (▤ Projects → 🔒): no edits, renaming or delete until you unlock it'] },
+      'Lock a project (▤ Projects → 🔒): no edits, renaming or delete until you unlock it',
+      '3D view: real-looking parts without a library model — chip R / C with tinned ends, ICs with leads, QFN, USB-C, XIAO module, headers'] },
     { v: '2026.11.19', date: '2026-11-19', items: [
       'Import KiCad projects (KiCad 6–9): parts with real footprints, nets, tracks, zones, up to 4 copper layers',
       '4-layer boards: inner GND / power planes or signal layers, JLCPCB 4-layer rules',

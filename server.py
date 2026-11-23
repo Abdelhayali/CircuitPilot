@@ -45,7 +45,7 @@ def _job_lock(pid):
     return lk
 
 PROXY_RE = re.compile(r"^/llm-proxy/(\d{1,5})(/.*)?$")
-STATIC_RE = re.compile(r"^/(|index\.html|styles\.css|favicon\.ico|js/[\w.-]+\.js|js/vendor/(?:manifold\.(?:js|wasm)|TransformControls\.js)|data/kicad-footprints\.txt|data/open-parts\.txt)$")
+STATIC_RE = re.compile(r"^/(|index\.html|styles\.css|favicon\.ico|js/[\w.-]+\.js|js/vendor/(?:manifold\.(?:js|wasm)|TransformControls\.js)|data/kicad-footprints\.txt|data/open-parts\.txt|data/demo-ecg\.json)$")
 HOP_HEADERS = {"host", "origin", "referer", "connection", "content-length", "accept-encoding",
                "cookie", "cf-connecting-ip", "cf-ray", "cf-visitor", "cf-ipcountry", "cdn-loop",
                "x-forwarded-for", "x-forwarded-proto"}

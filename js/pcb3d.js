@@ -131,40 +131,178 @@ const Pcb3D = (() => {
   }
 
   // ---------- 3D part models ----------
+  // ---------- built-in part models (when the parts library has no 3D model) ----------
+  // Built in the footprint's own frame (mm, y up, origin = footprint origin) from its pads, then placed like the real
+  // models (placeOnBoard). Chip resistors / capacitors get tinned ends, gull-wing ICs their leads, QFN / DFN a flat body,
+  // modules a PCB with a shield, pads-only footprints (test points, electrode / wire pads) nothing.
+  const matCache = new Map();
   function partModel(c, T) {
-    const b = Pcb.fpBox(c), lib = c.lcsc && Model.S.lib[c.lcsc];
-    const text = [c.footprint, c.value, c.type, lib && lib.name, lib && lib.package].filter(Boolean).join(' ').toUpperCase();
-    const h = Enclosure.partHeight(c, Enclosure.params()), w = b[2] - b[0], d = b[3] - b[1], g = new T.Group();
-    // no environment map → keep metalness low so metal parts read as bright metal instead of black
-    const mat = (color, metal = 0.1, rough = 0.6) => new T.MeshStandardMaterial({ color, metalness: Math.min(metal, 0.3), roughness: metal > 0.5 ? Math.max(rough, 0.35) : rough, emissive: metal > 0.5 ? 0x202020 : 0x000000 });
-    const box = (sx, sy, sz, color, z0 = 0, metal, rough) => { const m = new T.Mesh(new T.BoxGeometry(sx, sy, sz), mat(color, metal, rough)); m.position.z = z0 + sz / 2; return m; };
-    const fp = Lib.footprint(c.footprint), pads = Pcb.padsOf(c), cx = (b[0] + b[2]) / 2, cy = -(b[1] + b[3]) / 2;
-    const smdBody = (col) => { const bw = Math.max(0.5, w * 0.62), bd = Math.max(0.4, d * 0.78); return box(Math.max(bw, w * (w > d ? 0.62 : 0.85)), Math.max(bd, d * (d > w ? 0.62 : 0.85)), h, col); };
-    if (/CAPACITOR_POLARIZED|ELECTROLYTIC|CP_RADIAL/.test(text) || c.type === 'capacitor_polarized') {
-      const r = Math.max(1.5, Math.min(w, d) / 2 * 0.95), cyl = new T.Mesh(new T.CylinderGeometry(r, r, h, 32), mat(0x1c2f73, 0.2, 0.4)); cyl.rotation.x = Math.PI / 2; cyl.position.z = h / 2; g.add(cyl);
-      const top = new T.Mesh(new T.CylinderGeometry(r * 0.98, r * 0.98, 0.2, 32), mat(0xcfd4da, 0.7, 0.3)); top.rotation.x = Math.PI / 2; top.position.z = h; g.add(top);
-    } else if (c.type === 'led' && fp && fp.pads.some(p => p.drill)) {
-      const col = /RED/.test(text) ? 0xff3030 : /BLUE/.test(text) ? 0x3060ff : /YELLOW/.test(text) ? 0xffd000 : /WHITE/.test(text) ? 0xf0f0ff : 0x30e060;
-      const m = new T.MeshStandardMaterial({ color: col, transparent: true, opacity: 0.8, roughness: 0.2 });
-      const cyl = new T.Mesh(new T.CylinderGeometry(2.5, 2.5, h - 2.5, 24), m); cyl.rotation.x = Math.PI / 2; cyl.position.z = (h - 2.5) / 2; g.add(cyl);
-      const dome = new T.Mesh(new T.SphereGeometry(2.5, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), m); dome.rotation.x = Math.PI / 2; dome.position.z = h - 2.5; g.add(dome);
-    } else if (c.type === 'led') {
-      const col = /RED/.test(text) ? 0xff4040 : /BLUE/.test(text) ? 0x4070ff : /YELLOW/.test(text) ? 0xffd000 : 0x40f070;
-      g.add(smdBody(0xeeeeee)); const lens = box(w * 0.5, d * 0.5, 0.15, col, h); lens.material.transparent = true; lens.material.opacity = 0.9; g.add(lens);
-    } else if (/TYPE-?C|USB|MICRO-?B/.test(text)) g.add(box(w * 0.92, d * 0.92, h, 0xc8ccd0, 0, 0.85, 0.25));
-    else if (/ESP32|WROOM|MINI-1|MODULE|WIFIM/.test(text)) { g.add(box(w * 0.98, d * 0.98, 0.8, 0x1d4d8a)); g.add(box(w * 0.86, d * 0.66, h - 0.8, 0xc0c4c8, 0.8, 0.8, 0.3)); }
-    else if (/PINHEADER|HEADER/.test(text) || c.type === 'connector' || c.type === 'battery') {
-      g.add(box(w * 0.98, d * 0.98, 2.5, 0x161616));
-      for (const p of pads) { const pin = new T.Mesh(new T.BoxGeometry(0.64, 0.64, h + 3), mat(0xd8b04a, 0.8, 0.3)); pin.position.set(p.x - cx - b[0] + b[0], -p.y - cy, (h + 3) / 2 - 3); g.add(pin); }
-    } else if (/TO-?220/.test(text)) { g.add(box(w * 0.95, 4.5, h - 6, 0x161616)); g.add(box(w * 0.95, 1.3, h, 0xc0c4c8, 0, 0.8, 0.3)); }
-    else if (c.type === 'switch') { g.add(box(Math.min(w, d) * 1.0, Math.min(w, d) * 1.0, 3.5, 0x2a2a2a)); const cap = new T.Mesh(new T.CylinderGeometry(1.75, 1.75, h - 3.5, 24), mat(0x111111)); cap.rotation.x = Math.PI / 2; cap.position.z = 3.5 + (h - 3.5) / 2; g.add(cap); }
-    else if (c.type === 'crystal' || /CRYSTAL|HC49/.test(text)) g.add(box(w * 0.95, d * 0.8, h, 0xc8ccd0, 0, 0.85, 0.25));
-    else if (c.type === 'resistor') { g.add(smdBody(0x151515)); }
-    else if (c.type === 'capacitor') g.add(smdBody(0xb98a52));
-    else if (c.type === 'inductor') g.add(smdBody(0x3a3a3a));
-    else if (c.type === 'diode' || c.type === 'zener' || c.type === 'schottky') g.add(smdBody(0x222222));
-    else { const body = box(Math.max(0.6, w * 0.82), Math.max(0.6, d * 0.82), h, 0x1a1a1a); g.add(body); const dot = new T.Mesh(new T.CylinderGeometry(0.3, 0.3, 0.05, 12), mat(0x777777)); dot.rotation.x = Math.PI / 2; dot.position.set(-w * 0.3, d * 0.3, h + 0.03); if (w > 2 && d > 2) g.add(dot); }
-    g.position.set(cx, cy, 0);
+    const g = new T.Group(), fp = Lib.footprint(c.footprint); if (!fp || !fp.pads.length) return g;
+    const lib = (c.lcsc && Model.S.lib[c.lcsc]) || (c.dbfp && Model.S.lib[c.dbfp]);
+    const text = [c.footprint, c.value, c.type, c.name, lib && lib.name, lib && lib.package, lib && lib.footprint && lib.footprint.name, lib && lib.footprint && lib.footprint.model3d && lib.footprint.model3d.title].filter(Boolean).join(' ').toUpperCase();
+    const H = Enclosure.partHeight(c, Enclosure.params());
+    const mat = (color, kind) => {
+      const k = color + '|' + (kind || ''); if (matCache.has(k)) return matCache.get(k);
+      const m = kind === 'metal' ? new T.MeshStandardMaterial({ color, metalness: 0.3, roughness: 0.35, emissive: 0x1a1a1a })
+        : kind === 'gold' ? new T.MeshStandardMaterial({ color, metalness: 0.3, roughness: 0.3, emissive: 0x2a1e00 })
+        : kind === 'glass' ? new T.MeshStandardMaterial({ color, transparent: true, opacity: 0.75, roughness: 0.15 })
+        : new T.MeshStandardMaterial({ color, metalness: 0.02, roughness: kind === 'gloss' ? 0.3 : 0.65 });
+      matCache.set(k, m); return m;
+    };
+    // a box from (x0, y0) to (x1, y1) in footprint mm (y down), z0 … z1 above the board
+    const box = (x0, y0, x1, y1, z0, z1, color, kind) => {
+      const m = new T.Mesh(new T.BoxGeometry(Math.max(0.02, Math.abs(x1 - x0)), Math.max(0.02, Math.abs(y1 - y0)), Math.max(0.01, z1 - z0)), mat(color, kind));
+      m.position.set((x0 + x1) / 2, -(y0 + y1) / 2, (z0 + z1) / 2); g.add(m); return m;
+    };
+    const cyl = (x, y, r, z0, z1, color, kind, seg = 24) => { const m = new T.Mesh(new T.CylinderGeometry(r, r, z1 - z0, seg), mat(color, kind)); m.rotation.x = Math.PI / 2; m.position.set(x, -y, (z0 + z1) / 2); g.add(m); return m; };
+    const pads = fp.pads.map(p => { const q = (((p.rot || 0) % 180) + 180) % 180 === 90; return Object.assign({}, p, { w: q ? p.h : p.w, h: q ? p.w : p.h }); });
+    const smd = pads.filter(p => !p.drill), tht = pads.filter(p => p.drill);
+    const ext = ps => [Math.min(...ps.map(p => p.x - p.w / 2)), Math.min(...ps.map(p => p.y - p.h / 2)), Math.max(...ps.map(p => p.x + p.w / 2)), Math.max(...ps.map(p => p.y + p.h / 2))];
+    const cy0 = fp.courtyard != null ? fp.courtyard : 0.3, ob = [fp.box[0] + cy0, fp.box[1] + cy0, fp.box[2] - cy0, fp.box[3] - cy0];   // real outline (pads + body)
+    const mh = text.match(/[-_]H(\d+(?:\.\d+)?)(?=[-_ ]|$)/), pkgH = mh ? +mh[1] : null;
+    const pin1 = pads.find(p => p.num === '1') || pads[0];
+    const BLACK = 0x1b1b1d, TIN = 0xc9ccd0, GOLD = 0xd9b45a;
+    const dot = (x, y, z) => cyl(x, y, 0.12, z, z + 0.02, 0x8a8a8a, null, 12);
+
+    // nothing stands on the board: test points, electrode / wire / solder pads, holes
+    if (H <= 0.05 || (/^LIB:/.test(c.footprint) && /TEST|\bTP\b|ELECTRODE|WIRE|SOLDER|FIDUCIAL|_PAD|PAD_|HOLE|MOUNT|ACCESS/.test(text) && !/HEADER|USB|JST|HOLDER/.test(text)) || /^TP\d/.test(c.ref)) return g;
+
+    // ----- XIAO and other small boards / modules: PCB, metal shield, USB-C at the end nearest pin 1 -----
+    if (/XIAO|SUPER ?MINI|PRO ?MICRO|ESP32|WROOM|WROVER|MINI-1|MODULE|WIFIM|NRF52|BLE ?MOD/.test(text) && pads.length >= 8) {
+      const [x0, y0, x1, y1] = ob, th = 0.9, long = (x1 - x0) >= (y1 - y0);
+      box(x0, y0, x1, y1, 0, th, /XIAO/.test(text) ? 0x1f2a44 : 0x1d4d8a, 'gloss');
+      const usb = /XIAO|SUPER ?MINI|PRO ?MICRO|USB/.test(text);
+      // which short edge has pin 1 (USB end on XIAO-type boards)
+      const endLow = long ? pin1.x < (x0 + x1) / 2 : pin1.y < (y0 + y1) / 2;
+      const L = long ? x1 - x0 : y1 - y0, Wd = long ? y1 - y0 : x1 - x0, sh = Math.max(1.2, Math.min(2.4, (pkgH || 3.3) - th));
+      // shield over the far part of the board (antenna end left free on bare modules)
+      const s0 = usb ? 0.32 : 0.05, s1 = usb ? 0.92 : 0.72, inset = Wd * 0.12;
+      const a = endLow ? s0 : 1 - s1, b = endLow ? s1 : 1 - s0;
+      if (long) box(x0 + L * a, y0 + inset, x0 + L * b, y1 - inset, th, th + sh, 0xc4c8cc, 'metal');
+      else box(x0 + inset, y0 + L * a, x1 - inset, y0 + L * b, th, th + sh, 0xc4c8cc, 'metal');
+      if (usb) {   // USB-C plug opening flush with the board end, a little proud of it
+        const uw = Math.min(9, Wd * 0.5), ud = 7.4, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        if (long) { const e = endLow ? x0 - 0.6 : x1 + 0.6, f = endLow ? e + ud : e - ud; box(Math.min(e, f), cy - uw / 2, Math.max(e, f), cy + uw / 2, th, th + 3.2, 0xd2d5d8, 'metal'); box(endLow ? e - 0.01 : e - 0.3, cy - uw / 2 + 0.5, endLow ? e + 0.3 : e + 0.01, cy + uw / 2 - 0.5, th + 0.6, th + 2.6, 0x101010); }
+        else { const e = endLow ? y0 - 0.6 : y1 + 0.6, f = endLow ? e + ud : e - ud; box(cx - uw / 2, Math.min(e, f), cx + uw / 2, Math.max(e, f), th, th + 3.2, 0xd2d5d8, 'metal'); box(cx - uw / 2 + 0.5, endLow ? e - 0.01 : e - 0.3, cx + uw / 2 - 0.5, endLow ? e + 0.3 : e + 0.01, th + 0.6, th + 2.6, 0x101010); }
+      }
+      for (const p of smd) box(p.x - p.w * 0.35, p.y - p.h * 0.35, p.x + p.w * 0.35, p.y + p.h * 0.35, 0, th + 0.02, GOLD, 'gold');   // castellations
+      return g;
+    }
+    // ----- electrolytic capacitor -----
+    if (/CAPACITOR_POLARIZED|ELECTROLYTIC|CP_RADIAL|CP_ELEC/.test(text) || c.type === 'capacitor_polarized') {
+      const r = Math.max(1.5, Math.min(ob[2] - ob[0], ob[3] - ob[1]) / 2 * 0.95), cx = (ob[0] + ob[2]) / 2, cy = (ob[1] + ob[3]) / 2, h = H || 5;
+      cyl(cx, cy, r, 0.3, h, 0x1c2f73, 'gloss', 32); cyl(cx, cy, r * 0.97, h, h + 0.05, 0xcfd4da, 'metal', 32);
+      if (!tht.length) box(cx - r - 0.2, cy - r - 0.2, cx + r + 0.2, cy + r + 0.2, 0, 0.3, 0x222222);
+      return g;
+    }
+    // ----- through-hole LED -----
+    if (c.type === 'led' && tht.length) {
+      const col = /RED/.test(text) ? 0xff3030 : /BLUE/.test(text) ? 0x3060ff : /YELLOW/.test(text) ? 0xffd000 : /WHITE/.test(text) ? 0xf0f0ff : 0x30e060, h = H || 8.6;
+      const cx = (tht[0].x + tht[tht.length - 1].x) / 2, cy = (tht[0].y + tht[tht.length - 1].y) / 2;
+      cyl(cx, cy, 2.5, 0, h - 2.5, col, 'glass'); const d = new T.Mesh(new T.SphereGeometry(2.5, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), mat(col, 'glass')); d.rotation.x = Math.PI / 2; d.position.set(cx, -cy, h - 2.5); g.add(d);
+      return g;
+    }
+    // ----- USB / USB-C receptacle: metal shell, opening away from the signal pins -----
+    if (/TYPE-?C|USB|MICRO-?B/.test(text)) {
+      const [x0, y0, x1, y1] = ob, h = Math.min(H || 3.2, 3.4), sig = smd.filter(p => p.w < 0.8 || p.h < 0.8);
+      const sy = sig.length ? sig.reduce((a, p) => a + p.y, 0) / sig.length : y0, openLow = sy > (y0 + y1) / 2;   // pins at the back
+      const bx0 = x0 + 0.2, bx1 = x1 - 0.2, by0 = openLow ? y0 - 0.4 : y0 + (y1 - y0) * 0.25, by1 = openLow ? y1 - (y1 - y0) * 0.25 : y1 + 0.4;
+      box(bx0, by0, bx1, by1, 0.05, h, 0xd2d5d8, 'metal');
+      const fy = openLow ? by0 : by1; box(bx0 + 0.5, fy - 0.02, bx1 - 0.5, fy + 0.02, 0.6, h - 0.6, 0x0d0d0d);
+      for (const p of sig) box(p.x - p.w * 0.3, p.y - p.h * 0.4, p.x + p.w * 0.3, p.y + p.h * 0.4, 0, 0.1, TIN, 'metal');
+      return g;
+    }
+    // ----- pin headers and through-hole connectors: black housing per row, gold pins through it -----
+    if (tht.length >= 2 && (/PINHEADER|HEADER|PIN_?HEADER|CONN|JST|TERMINAL|THT_P2\.54/.test(text) || c.type === 'connector')) {
+      const [x0, y0, x1, y1] = ext(tht), hh = 2.5, top = Math.max(hh + 2, H || 8.6);
+      box(x0 - 0.3, y0 - 0.3, x1 + 0.3, y1 + 0.3, 0, hh, 0x161616);
+      for (const p of tht) box(p.x - 0.32, p.y - 0.32, p.x + 0.32, p.y + 0.32, -3, top, GOLD, 'gold');
+      return g;
+    }
+    // ----- SMD connectors (JST SH / GH, FPC …): beige housing over the part -----
+    if (c.type === 'connector' || /JST|FPC|FFC|CONN|SOCKET|RECEPTACLE/.test(text)) {
+      const [x0, y0, x1, y1] = ob; box(x0 + 0.1, y0 + 0.1, x1 - 0.1, y1 - 0.1, 0, H || 2.5, /FPC|FFC/.test(text) ? 0x2a2a2a : 0xe8dfc8);
+      for (const p of smd) box(p.x - p.w * 0.35, p.y - p.h * 0.35, p.x + p.w * 0.35, p.y + p.h * 0.35, 0, 0.12, TIN, 'metal');
+      return g;
+    }
+    // ----- tactile switch -----
+    if (c.type === 'switch' || /SW_|TACT|BUTTON/.test(text)) {
+      const [x0, y0, x1, y1] = ob, s = Math.min(x1 - x0, y1 - y0) * 0.8, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, h = H || 3.5;
+      box(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2, 0, Math.min(h, 1.6) * 0.75, 0x2a2a2a); box(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2, Math.min(h, 1.6) * 0.75, Math.min(h, 1.6), 0xc4c8cc, 'metal');
+      cyl(cx, cy, s * 0.22, Math.min(h, 1.6), h, 0x111111); return g;
+    }
+    // ----- TO-220 -----
+    if (/TO-?220/.test(text)) { const [x0, , x1] = ext(tht); box(x0 - 3, -2.4, x1 + 3, 2.1, 6, H || 15, BLACK); box(x0 - 3, 0.8, x1 + 3, 2.1, 6, (H || 15) + 3, 0xc4c8cc, 'metal'); for (const p of tht) box(p.x - 0.4, p.y - 0.25, p.x + 0.4, p.y + 0.25, -3, 6, TIN, 'metal'); return g; }
+
+    // ----- two-pad SMD parts: chip R / C / L / ferrite / fuse, diodes, LEDs, crystals -----
+    if (smd.length === 2 && !tht.length) {
+      const [a, b] = smd, hor = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y), D = hor ? Math.abs(a.x - b.x) : Math.abs(a.y - b.y);
+      const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, cross = Math.min(hor ? a.h : a.w, hor ? b.h : b.w);
+      const isDiode = /diode|zener|schottky/.test(c.type) || /SOD|SMA\b|SMB\b|SMC\b|DO-?214|DIODE/.test(text);
+      const L = isDiode ? D + Math.min(hor ? a.w : a.h, 1.2) * 0.4 : D * 1.03, W = Math.min(cross * 0.92, L * (isDiode ? 0.7 : 0.62));
+      const rect = (l0, l1, w0, w1, z0, z1, col, kind) => hor ? box(cx + l0, cy + w0, cx + l1, cy + w1, z0, z1, col, kind) : box(cx + w0, cy + l0, cx + w1, cy + l1, z0, z1, col, kind);
+      const along = p => hor ? p.x - cx : p.y - cy;
+      if (isDiode) {   // black body, leads under the ends, cathode band at pin 1 (K)
+        const h = Math.min(pkgH || H || 1.1, W * 1.1), k = smd.find(p => /^(1|K|C|-)$/i.test(p.num)) || a, s = Math.sign(along(k)) || -1, bl = L * 0.72;
+        rect(-bl / 2, bl / 2, -W / 2, W / 2, 0.08, h, BLACK);
+        rect(s > 0 ? bl / 2 - bl * 0.22 : -bl / 2 + bl * 0.08, s > 0 ? bl / 2 - bl * 0.08 : -bl / 2 + bl * 0.22, -W / 2 - 0.005, W / 2 + 0.005, h - 0.001, h + 0.01, 0xd8d8d8);
+        for (const p of smd) { const q = along(p); rect(q - 0.35 * Math.min(hor ? p.w : p.h, 1), q + 0.35 * Math.min(hor ? p.w : p.h, 1), -W * 0.3, W * 0.3, 0, 0.12, TIN, 'metal'); }
+        return g;
+      }
+      const isLed = c.type === 'led' || /LED/.test(text), isXtal = c.type === 'crystal' || /XTAL|CRYSTAL|OSC/.test(text);
+      const isCap = /capacitor/.test(c.type) || /^C\d/.test(c.ref) && !/RES/.test(text), isInd = c.type === 'inductor' || /^L\d/.test(c.ref) || /INDUCTOR|FERRITE|BEAD/.test(text), isFuse = c.type === 'fuse' || /^F\d/.test(c.ref) || /FUSE|PTC/.test(text);
+      const h = isXtal ? Math.min(H || 0.8, 1.2) : Math.min(pkgH || W * (isCap ? 0.85 : isInd ? 0.75 : isLed ? 0.8 : 0.55), H > 0.1 ? H : 9);
+      const e = Math.min(L * 0.22, 0.5);   // tinned end caps
+      if (isXtal) { rect(-L / 2, L / 2, -W / 2, W / 2, 0, h * 0.3, 0xe0d6c0); rect(-L / 2 + 0.1, L / 2 - 0.1, -W / 2 + 0.1, W / 2 - 0.1, h * 0.3, h, 0xc4c8cc, 'metal'); return g; }
+      rect(-L / 2, -L / 2 + e, -W / 2, W / 2, 0, h, TIN, 'metal'); rect(L / 2 - e, L / 2, -W / 2, W / 2, 0, h, TIN, 'metal');
+      const body = isCap ? 0xa4825a : isInd ? 0x3c3c3c : isFuse ? 0xe6e0d0 : isLed ? 0xf2f2f2 : 0xece8e0;
+      rect(-L / 2 + e, L / 2 - e, -W / 2, W / 2, 0, h, body);
+      if (!isCap && !isInd && !isFuse && !isLed) rect(-L / 2 + e, L / 2 - e, -W / 2 + 0.01, W / 2 - 0.01, h, h + 0.02, 0x161616);   // resistor: black top
+      if (isLed) { const col = /RED/.test(text) ? 0xff3a3a : /BLUE/.test(text) ? 0x3a6cff : /YELLOW|AMBER|ORANGE/.test(text) ? 0xffc400 : /WHITE/.test(text) ? 0xfafaff : 0x3ae070; rect(-L / 2 + e + 0.05, L / 2 - e - 0.05, -W / 2 + 0.05, W / 2 - 0.05, h, h + 0.08, col, 'glass'); }
+      return g;
+    }
+
+    // ----- ICs: leads in rows (SOT / SOIC / MSOP / TSSOP / QFP: gull-wing) or no leads (QFN / DFN / SON / LGA) -----
+    if (smd.length >= 3 && !tht.length) {
+      const [px0, py0, px1, py1] = ext(smd), mx = (px0 + px1) / 2, my = (py0 + py1) / 2;
+      const noLead = /QFN|DFN|SON|LGA|BGA|WLCSP|CSP|\bUSON|\bVSON|\bWSON|TDFN|UDFN|LLP/.test(text);
+      // which side each pad is on (edge pads: on the outline; a big pad in the middle is the exposed pad)
+      const tol = 0.25, side = p => Math.abs(p.x + p.w / 2 - px1) < tol && p.w >= p.h * 0.9 ? 'R' : Math.abs(p.x - p.w / 2 - px0) < tol && p.w >= p.h * 0.9 ? 'L' : Math.abs(p.y + p.h / 2 - py1) < tol && p.h >= p.w * 0.9 ? 'B' : Math.abs(p.y - p.h / 2 - py0) < tol && p.h >= p.w * 0.9 ? 'T' : null;
+      const rows = { L: [], R: [], T: [], B: [] }; for (const p of smd) { const s = side(p); if (s) rows[s].push(p); }
+      const lr = rows.L.length + rows.R.length, tb = rows.T.length + rows.B.length;
+      if (noLead || lr + tb < 3) {   // flat package over its pads
+        const h = Math.min(pkgH || 0.85, 1.6), [x0, y0, x1, y1] = noLead ? [px0, py0, px1, py1] : ob;
+        box(x0, y0, x1, y1, 0.02, h, BLACK);
+        for (const p of smd) box(p.x - p.w / 2 - 0.01, p.y - p.h / 2 - 0.01, p.x + p.w / 2 + 0.01, p.y + p.h / 2 + 0.01, 0, 0.05, TIN, 'metal');
+        dot(x0 + Math.min(0.5, (x1 - x0) * 0.2), y0 + Math.min(0.5, (y1 - y0) * 0.2), h);
+        return g;
+      }
+      // body between the lead rows (to the pads' inner edges, a little over them)
+      const inner = (arr, k, sgn) => arr.length ? Math.min(...arr.map(p => sgn * (p[k] - (k === 'x' ? mx : my)) - (k === 'x' ? p.w : p.h) / 2)) + 0.12 : null;
+      const hx = lr ? Math.min(inner(rows.L, 'x', -1) ?? Infinity, inner(rows.R, 'x', 1) ?? Infinity) : (px1 - px0) / 2 + 0.1;
+      const hy = tb ? Math.min(inner(rows.T, 'y', -1) ?? Infinity, inner(rows.B, 'y', 1) ?? Infinity) : (py1 - py0) / 2 + 0.1;
+      const hxB = lr ? hx : Math.max(hx, (px1 - px0) / 2 + 0.15), hyB = tb ? hy : Math.max(hy, (py1 - py0) / 2 + 0.15);
+      const h = Math.min(pkgH || (smd.length <= 6 ? 1.1 : 1.5), Math.max(H || 1.2, 0.8), 3), z0 = 0.1;
+      box(mx - hxB, my - hyB, mx + hxB, my + hyB, z0, h, BLACK);
+      // gull-wing leads: from the body side at mid-height down to a foot on the pad
+      const lt = 0.13, lz = z0 + (h - z0) * 0.4;
+      for (const [s, arr] of Object.entries(rows)) for (const p of arr) {
+        const horiz = s === 'L' || s === 'R', sg = s === 'R' || s === 'B' ? 1 : -1, cr = horiz ? p.h : p.w, lw = cr > 1.5 ? cr * 0.9 : Math.min(cr, 0.5) * 0.85;   // a wide pad is a tab (SOT-223, DPAK)
+        const edge = horiz ? mx + sg * hxB : my + sg * hyB, outer = horiz ? p.x + sg * p.w * 0.38 : p.y + sg * p.h * 0.38, knee = edge + sg * Math.max(0.15, Math.abs(outer - edge) * 0.35);
+        const c0 = horiz ? p.y : p.x;
+        const seg = (a0, a1, z0_, z1_) => horiz ? box(Math.min(a0, a1), c0 - lw / 2, Math.max(a0, a1), c0 + lw / 2, z0_, z1_, TIN, 'metal') : box(c0 - lw / 2, Math.min(a0, a1), c0 + lw / 2, Math.max(a0, a1), z0_, z1_, TIN, 'metal');
+        seg(edge, knee, lz - lt / 2, lz + lt / 2); seg(knee - sg * lt / 2, knee + sg * lt / 2, 0, lz + lt / 2); seg(knee, outer, 0, lt);
+      }
+      // pin 1 mark
+      const p1 = pin1, ox = Math.sign(p1.x - mx) || -1, oy = Math.sign(p1.y - my) || -1;
+      if (hxB > 0.5 && hyB > 0.5) dot(mx + ox * (hxB - 0.35), my + oy * (hyB - 0.35), h);
+      return g;
+    }
+    // ----- anything else: a dark body over its outline -----
+    const [x0, y0, x1, y1] = ob, h = H || 1.5;
+    box(x0 + (x1 - x0) * 0.06, y0 + (y1 - y0) * 0.06, x1 - (x1 - x0) * 0.06, y1 - (y1 - y0) * 0.06, tht.length ? 0.4 : 0.05, h, BLACK);
+    for (const p of tht) box(p.x - Math.min(0.32, p.drill * 0.4), p.y - Math.min(0.32, p.drill * 0.4), p.x + Math.min(0.32, p.drill * 0.4), p.y + Math.min(0.32, p.drill * 0.4), -2.5, 0.5, TIN, 'metal');
+    if (x1 - x0 > 2 && y1 - y0 > 2) dot(x0 + 0.6, y0 + 0.6, h);
     return g;
   }
 
@@ -284,8 +422,7 @@ const Pcb3D = (() => {
     const parts = new T.Group(); parts.visible = ui.parts; root.add(parts); root.userData.parts = parts;
     const myRoot = root, cs = Pcb.placed(), simple = new Map();
     for (const c of cs) {
-      const m = partModel(c, T);
-      if (Pcb.isBottom(c)) { m.scale.z = -1; m.position.z = 0; } else m.position.z = th;
+      let m; try { m = placeOnBoard(partModel(c, T), c, th); } catch (e) { console.warn('3D model', c.ref, e); continue; }
       parts.add(m); simple.set(c.ref, m);
     }
     resize(); if (fit) preset('iso'); else draw();

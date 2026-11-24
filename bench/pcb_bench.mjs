@@ -24,8 +24,12 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RES = path.join(ROOT, 'bench', 'results');
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const has = k => process.argv.includes('--' + k);
-const PROVIDER = arg('provider', 'openai'), BASE = arg('base', PROVIDER === 'anthropic' ? 'https://api.anthropic.com' : 'http://localhost:11434/v1');
-const MODEL = arg('model', 'qwen3.5:4b'), KEY = arg('key', process.env.BENCH_KEY || ''), TOOLSET = arg('tools', 'compact');
+// API key: --key, else the BENCH_KEY environment variable, else bench/.key (gitignored). With no --provider / --base the
+// key picks the service: sk-ant-… → Anthropic, sk-or-… → OpenRouter.
+const KEY = arg('key', process.env.BENCH_KEY || (() => { try { return fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '.key'), 'utf8').trim(); } catch { return ''; } })());
+const PROVIDER = arg('provider', /^sk-ant-/.test(KEY) ? 'anthropic' : 'openai');
+const BASE = arg('base', PROVIDER === 'anthropic' ? 'https://api.anthropic.com' : /^sk-or-/.test(KEY) ? 'https://openrouter.ai/api/v1' : 'http://localhost:11434/v1');
+const MODEL = arg('model', 'qwen3.5:4b'), TOOLSET = arg('tools', 'compact');
 const ONLY = arg('only', ''), REPEAT = +arg('repeat', 1), STEPS = +arg('steps', 24), TEMP = +arg('temperature', 0), LABEL = arg('label', MODEL);
 const CAP = 3000, THINK = arg('think', 'default');   // --think off: reasoning_effort none (thinking models)
 
@@ -196,7 +200,7 @@ async function runTask(t) {
   for (let step = 0; step < STEPS; step++) {
     stats.steps++;
     let r; try { r = await call(systemFor(mode), hist, tools); } catch (e) { trace.push('REQUEST FAILED ' + e.message); break; }
-    stats.tokens_in += r.usage.prompt_tokens || r.usage.input_tokens || 0; stats.tokens_out += r.usage.completion_tokens || r.usage.output_tokens || 0;
+    stats.tokens_in += r.usage.prompt_tokens || (r.usage.input_tokens || 0) + (r.usage.cache_read_input_tokens || 0) + (r.usage.cache_creation_input_tokens || 0); stats.tokens_out += r.usage.completion_tokens || r.usage.output_tokens || 0;
     hist.push({ role: 'assistant', content: r.text, calls: r.calls });
     if (!r.calls.length) { final = r.text; stats.finished = true; break; }
     for (const c of r.calls) {
@@ -244,14 +248,19 @@ return { ...head, tasks: results.length,
   score: avg('total'), design: avg('total', results.filter(r => r.kind === 'design')), repair: avg('total', results.filter(r => r.kind === 'repair')),
   schematic_pct: +(avg('schematic') / 35 * 100).toFixed(1), placement_pct: pcbRs.length ? +(avg('placement', pcbRs) / 15 * 100).toFixed(1) : null, routing_pct: pcbRs.length ? +(avg('routing', pcbRs) / 25 * 100).toFixed(1) : null,
   drc_clean: pcbRs.length ? `${pcbRs.filter(r => r.details.drc_errors === 0).length}/${pcbRs.length}` : null, fully_routed: pcbRs.length ? `${pcbRs.filter(r => !(r.details.missing_connections || []).length).length}/${pcbRs.length}` : null,
+  tokens_in_task: Math.round(results.reduce((a, r) => a + (r.stats.tokens_in || 0), 0) / results.length), tokens_out_task: Math.round(results.reduce((a, r) => a + (r.stats.tokens_out || 0), 0) / results.length),
   tool_calls: results.reduce((a, r) => a + r.stats.calls, 0), tool_errors: results.reduce((a, r) => a + r.stats.errors + r.stats.bad, 0), minutes: +(results.reduce((a, r) => a + r.seconds, 0) / 60).toFixed(1) };
 }
 
 function leaderboard() {
-  const rows = fs.readdirSync(RES).filter(f => f.endsWith('.json')).map(f => JSON.parse(fs.readFileSync(path.join(RES, f), 'utf8')).summary).sort((a, b) => b.score - a.score);
-  const table = ['| Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Date |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
-    ...rows.map(s => `| ${s.model} | ${s.tools} | ${s.tasks / 14 >= 1 ? Math.round(s.tasks / 14) + ' × 14' : s.tasks + ' tasks'} | **${s.score}** | ${s.design} | ${s.repair} | ${s.schematic_pct} | ${s.placement_pct} | ${s.routing_pct} | ${s.drc_clean} | ${s.fully_routed} | ${s.tool_errors}/${s.tool_calls} | ${String(s.date).slice(0, 10)} |`)];
-  const md = ['# CircuitPilot PCB Bench — leaderboard', '', 'Each model designs and repairs boards with CircuitPilot\'s tools; the design it leaves behind is scored 0–100 per task (schematic 35, placement 15, routing 25, DRC 15, behaviour 10) and averaged. "Design" = the 8 tasks from an empty project, "Repair" = the 6 broken boards; DRC clean / fully routed count the PCB tasks. How to run: [bench/README.md](../README.md).', '', ...table];
+  const rows = fs.readdirSync(RES).filter(f => f.endsWith('.json')).map(f => { const j = JSON.parse(fs.readFileSync(path.join(RES, f), 'utf8')), r = j.results || [];
+    // older runs: the token averages from their task results
+    if (j.summary.tokens_in_task == null && r.length) { j.summary.tokens_in_task = Math.round(r.reduce((a, x) => a + (x.stats.tokens_in || 0), 0) / r.length); j.summary.tokens_out_task = Math.round(r.reduce((a, x) => a + (x.stats.tokens_out || 0), 0) / r.length); }
+    return j.summary; }).sort((a, b) => b.score - a.score);
+  const kt = n => n == null ? '–' : n >= 1000 ? (n / 1000).toFixed(n >= 1e5 ? 0 : 1) + 'k' : String(n);
+  const table = ['| Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Tokens / task (in · out) | Date |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    ...rows.map(s => `| ${s.model} | ${s.tools} | ${s.tasks / 14 >= 1 ? Math.round(s.tasks / 14) + ' × 14' : s.tasks + ' tasks'} | **${s.score}** | ${s.design} | ${s.repair} | ${s.schematic_pct} | ${s.placement_pct} | ${s.routing_pct} | ${s.drc_clean} | ${s.fully_routed} | ${s.tool_errors}/${s.tool_calls} | ${kt(s.tokens_in_task)} · ${kt(s.tokens_out_task)} | ${String(s.date).slice(0, 10)} |`)];
+  const md = ['# CircuitPilot PCB Bench — leaderboard', '', 'Each model designs and repairs boards with CircuitPilot\'s tools; the design it leaves behind is scored 0–100 per task (schematic 35, placement 15, routing 25, DRC 15, behaviour 10) and averaged. "Design" = the 8 tasks from an empty project, "Repair" = the 6 broken boards; DRC clean / fully routed count the PCB tasks. Tokens / task = average tokens sent to the model (the conversation is re-sent at every step, so this grows with the number of steps) and generated by it, per task. How to run: [bench/README.md](../README.md).', '', ...table];
   fs.writeFileSync(path.join(RES, 'LEADERBOARD.md'), md.join('\n') + '\n');
   // the same table in the main README, between its markers
   const readme = path.join(ROOT, 'README.md');

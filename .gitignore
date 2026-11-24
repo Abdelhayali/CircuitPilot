@@ -21,3 +21,4 @@ dist/
 data/parts-archive.tsv.gz
 data/parts-archive.json
 jlc-address.json
+bench/.key

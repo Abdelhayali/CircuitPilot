@@ -269,8 +269,8 @@ tools, small enough for a laptop GPU, Ollama on any PC or a **free Google Colab*
 - **Training data** made by running CircuitPilot's real engine, so every tool result the model learns from is what the
   app really returns: circuits built from real JLCPCB parts, edits, PCB steps, questions, plans, recovering from a
   wrong pin name, and requests typed with typos. Only designs that pass ERC / DRC are kept.
-- **Training**: QLoRA (`finetune/train.py`), 4-bit base + LoRA r 32, on one 16–24 GB GPU. v1: 400 steps-worth of
-  conversations where the PCB was a follow-up request; **v2** adds requests that ask for the whole job at once
+- **Training**: QLoRA (`finetune/train.py`), 4-bit base + LoRA r 32, on one 16–24 GB GPU. v1: 25 steps (400
+  conversations) where the PCB was a follow-up request; **v2** adds requests that ask for the whole job at once
   (schematic + PCB + size / pour / holes / edge connector) and continues from v1 for 125 steps.
 - **Result on the PCB Bench** (3 × 14 tasks, thinking off, same llama.cpp server): **v2 79.3** vs the untuned
   Qwen3.5-4B **65.1** — design tasks 70.3 vs 38.9, placement 82 % vs 57 %, routing 82 % vs 52 %, DRC clean 25/33 vs 17/33,

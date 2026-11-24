@@ -974,6 +974,38 @@ const Engine = (() => {
     return txt;
   }
 
-  return { env, TOOLS, exec, enclosureFiles, plates, electrodeFiles, useDatabaseParts, matchJlcpcb, loadPart, partsApi, api, designContext, knowledgeDigest, newKey };
+  // ---------- compact mode for small local models (the fine-tuned CircuitPilot 4B, or any 2–8B model) ----------
+  // The full tool list is ~23k tokens — too much for a small model's context and speed. Compact mode sends the core
+  // design tools with short descriptions and a short system prompt. The fine-tune data (finetune/) is made with exactly
+  // this, so keep them in step: change LITE here, then make the dataset again.
+  const LITE_NAMES = ['search_parts', 'get_part', 'get_design', 'add_components', 'update_component', 'remove_components', 'connect', 'disconnect', 'rename_net',
+    'add_sheet', 'organize_schematic', 'run_erc', 'generate_pcb', 'route_pcb', 'optimize_pcb', 'pcb_status', 'run_drc', 'get_pcb_layout', 'place_footprint',
+    'place_in_free_area', 'check_placement', 'set_board_shape', 'add_mounting_holes', 'add_copper_pour', 'add_track', 'add_via', 'remove_tracks',
+    'get_design_rules', 'set_design_rules', 'match_jlcpcb_parts'];
+  const LITE_SYSTEM = `You are CircuitPilot, an electronics engineer inside a schematic + PCB design app. You change the design only by calling tools.
+- Pins are "REF.PIN" with the pin number or name ("R1.1", "Q1.B", "U1.VCC"). Built-in pin numbers: resistor / capacitor / inductor 1, 2; LED / diode 1 = K (cathode), 2 = A (anode); electrolytic 1 = +, 2 = -; npn / pnp 1 = B, 2 = E, 3 = C; nmos / pmos 1 = G, 2 = S, 3 = D; regulator 1 = IN, 2 = GND, 3 = OUT; opamp 2 = IN-, 3 = IN+, 4 = V-, 6 = OUT, 7 = V+; battery 1 = +, 2 = -; potentiometer 1, 2 = wiper, 3.
+- Ground is the net GND; supplies are +3V3, +5V, +12V, VIN, VBAT. Give important signals clear names (OUT, LED_A, SDA, SCL).
+- Real ICs, modules and connectors: search_parts, then get_part, then add_components with {"lcsc": "Cxxxx"}, and connect with the pin names get_part returned. Simple parts (resistor, capacitor, LED, diode, transistor) use the built-in types with a value and footprint (0603 by default).
+- Build in this order: add every part in ONE add_components call, connect every net in ONE connect call, then run_erc and fix what it reports.
+- PCB: generate_pcb, then run_drc. If nets stay unrouted, optimize_pcb.
+- When a tool returns an error, read it and call again with the fix; do not repeat the same call.
+- Use real values and show the key calculation in one line (e.g. R = (5 - 2.0) / 0.01 = 300 → 330 Ω). Keep replies short.`;
+  const LITE_MODE = {
+    agent: 'MODE: AGENT — you may change the design.',
+    ask: 'MODE: ASK — read-only: inspect the design with the tools you have and answer; do not try to change anything.',
+    plan: 'MODE: PLAN — do not change anything. Write a short plan: parts (ref, type, value, footprint), connections (net: pins), steps. End with: press **Execute plan** to build it.',
+  };
+  const short = (t, n) => { t = String(t || '').replace(/\s+/g, ' ').trim(); if (t.length <= n) return t; const cut = t.slice(0, n); const k = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('; ')); return (k > n * 0.45 ? cut.slice(0, k + 1) : cut.replace(/\s+\S*$/, '') + ' …'); };
+  const shortSchema = s => {
+    if (!s || typeof s !== 'object') return s;
+    if (Array.isArray(s)) return s.map(shortSchema);
+    const o = {}; for (const [k, v] of Object.entries(s)) o[k] = k === 'description' && typeof v === 'string' ? short(v, 90) : shortSchema(v);
+    return o;
+  };
+  let liteCache = null;
+  const liteTools = () => liteCache || (liteCache = LITE_NAMES.map(n => TOOLS.find(t => t.name === n)).filter(Boolean).map(t => Object.assign({ name: t.name, description: short(t.description, 230), input_schema: shortSchema(t.input_schema) }, t.ro ? { ro: true } : {}, t.web ? { web: true } : {})));
+  const LITE = { names: LITE_NAMES, system: LITE_SYSTEM, mode: LITE_MODE, tools: liteTools };
+
+  return { LITE, env, TOOLS, exec, enclosureFiles, plates, electrodeFiles, useDatabaseParts, matchJlcpcb, loadPart, partsApi, api, designContext, knowledgeDigest, newKey };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

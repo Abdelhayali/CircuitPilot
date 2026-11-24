@@ -444,9 +444,12 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     lastIn = null;
   }
 
+  // compact mode: the core tools with short descriptions and a short prompt, for small local models (the fine-tuned
+  // CircuitPilot 4B and other 2–8B models). On for models named circuitpilot-…, or with the Compact tools setting.
+  const isLite = model => settings.compactTools === true || (settings.compactTools !== false && /circuitpilot-|cp-?\d+b/i.test(String((model && (model.model || model.id)) || '')));
   async function run(text, mode, hooks) {
-    const model = currentModel();
-    const tools = TOOLS.filter(t => (mode === 'agent' || t.ro) && (settings.webAccess || !t.web));
+    const model = currentModel(), lite = isLite(model);
+    const tools = (lite ? Engine.LITE.tools() : TOOLS).filter(t => (mode === 'agent' || t.ro) && (settings.webAccess || !t.web));
     history.push(Object.assign({ role: 'user', text, mode, checkpoint: hooks.checkpoint }, hooks.files && hooks.files.length ? { files: hooks.files } : {}));
     persist();
     controller = new AbortController();
@@ -467,7 +470,8 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
           const k = await Engine.knowledgeDigest();
           if (k) know = `\n\nPROJECT KNOWLEDGE FOLDER: ${k.folder} (${k.files} files)\nFiles:\n${k.index}\n` + (k.included ? `\nIncluded documents:\n${k.included}` : '') + '\n(Use knowledge_search / knowledge_read for anything not included.)';
         } catch (e) { know = '\n\nPROJECT KNOWLEDGE FOLDER: unavailable (' + e.message + ')'; }
-        const system = BASE + '\n\n' + MODE[mode] + know + (settings.includeContext ? '\n\n' + designContext() : '');
+        const system = lite ? Engine.LITE.system + '\n\n' + Engine.LITE.mode[mode] + (settings.includeContext ? '\n\n' + designContext() : '')
+          : BASE + '\n\n' + MODE[mode] + know + (settings.includeContext ? '\n\n' + designContext() : '');
         systemChars = system.length;
         const sentLen = history.length;
         const r = await callModel(model, system, history.map(({ role, text, toolCalls, results, files }) => ({ role, text, toolCalls, results, files })), tools, controller.signal);
@@ -484,6 +488,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
             if (out && typeof out === 'object' && out.__image) { image = out.__image; const rest = Object.assign({}, out); delete rest.__image; content = JSON.stringify(rest); }
             else content = typeof out === 'string' ? out : JSON.stringify(out);
           } catch (e) { content = 'Error: ' + e.message; error = true; }
+          if (lite && content.length > 3000) content = content.slice(0, 3000) + ' …(cut)';   // as in the fine-tune data
           results.push(Object.assign({ id: tc.id, name: tc.name, content, error }, image ? { image } : {}));
           hooks.onTool(tc, content, error);
           if (controller.signal.aborted) break;

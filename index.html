@@ -227,6 +227,7 @@
       <label>Max output tokens (Claude)<input id="sMax" type="number" min="1024" step="1024"></label>
       <label>Context window (tokens, empty = auto-detect)<input id="sCtxWin" type="number" min="0" step="1024" placeholder="auto"></label>
       <label class="chk"><input id="sCtx" type="checkbox"> Send current design to the model with every request</label>
+      <label title="Small local models (2–8B, e.g. CircuitPilot-4B on Ollama or Colab) work far better with 30 core tools and a short prompt (~6k instead of ~23k tokens)">Compact tools for small models <select id="sCompact"><option value="auto">Auto (models named circuitpilot-…)</option><option value="on">Always</option><option value="off">Never</option></select></label>
       <label class="chk"><input id="sWeb" type="checkbox"> Let the AI search the internet and read web pages / PDF datasheets</label>
       <label>Brave Search API key (optional, desktop version — DuckDuckGo is used without one)<input id="sBrave" type="password" autocomplete="off" placeholder="BSA…"></label>
       <label class="webonly">Relay address (web version: part search and web search — never API keys)<input id="sRelay" autocomplete="off" placeholder="https://circuitpilot-relay.your-name.workers.dev"></label>
@@ -541,8 +542,8 @@
 <script src="js/pcb3d.js?v=202611240100"></script>
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
-<script src="js/engine.js?v=202611232100"></script>
-<script src="js/ai.js?v=202611162200"></script>
+<script src="js/engine.js?v=202611241200"></script>
+<script src="js/ai.js?v=202611241200"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202611231900"></script>
@@ -552,7 +553,7 @@
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
 <script src="js/welcome.js?v=202611240100"></script>
-<script src="js/app.js?v=202611232100"></script>
+<script src="js/app.js?v=202611241200"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

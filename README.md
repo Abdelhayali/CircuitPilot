@@ -561,6 +561,14 @@ Options: `--port 5173`, `--server-only` (no window), `--lan --password SECRET` (
 - **Projects → Import → EasyEDA Pro project** moves a whole EasyEDA Pro design here: in EasyEDA Pro use *File → Save As (Local)* / *File → Export → Project* to get a `.epro` or `.epro2` file (a `.zip` works too) and import it. You get the schematic (every sheet, parts placed where they were, real pin names, values, LCSC numbers) and the PCB (board outline, part placement on top and bottom, tracks, arcs, vias, copper pours). If the project holds several boards you choose one. Nets come from the PCB's netlist, or from the schematic wires, net labels and power ports when there is no PCB. CircuitPilot boards have 2 copper layers: tracks on inner layers of a 4+ layer board are skipped (the import says how many), so those nets show as unrouted; run the router or re-route them. Parts rotated at odd angles (e.g. 45°) keep their exact pad positions.
 - **Projects → Import → EasyEDA Standard PCB** opens an EasyEDA Standard PCB (*File → Export → EasyEDA Source* in EasyEDA) as a new project: footprints become library parts (LCSC numbers kept), with placement (top/bottom, rotation), nets, tracks, vias, holes, copper areas and the board outline; a schematic is generated from the nets.
 
+## Privacy: GitHub sign-in and the shared AI
+
+- **GitHub sign-in** goes through GitHub's own page; each user signs in with **their own** account. GitHub gives the access token to **the user's browser**, where it stays (local storage). The CircuitPilot relay only exchanges GitHub's one-time sign-in code for the token and returns it — it does not store or log tokens. The owner of the CircuitPilot GitHub app has **no access** to users' repositories or files.
+- **Saving to GitHub** (`repo` permission) sends designs from the user's browser directly to the user's own repository, not through the relay.
+- **The free shared AI** asks only for identity (no permission). The relay reads the GitHub **username** to count daily requests and keeps the username, first / last sign-in and request counts. Chat requests pass through the relay to the AI provider and are not stored.
+- **Feedback** you send (text, an optional e-mail, your username, country, app version) is kept for the developer to read.
+- Revoke CircuitPilot any time: GitHub → Settings → Applications → Authorized OAuth Apps.
+
 ## License
 
 CircuitPilot is **source-available** under the [PolyForm Strict License 1.0.0](LICENSE), © 2026 Abdelhay Ali. The code is public so you can see how it works, but the licence allows **use only**.

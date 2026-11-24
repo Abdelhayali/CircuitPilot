@@ -258,7 +258,7 @@
       <button class="choose-card" id="chShared">
         <span class="choose-ico">☁</span>
         <b>Use CircuitPilot's free AI</b>
-        <span class="small">No key needed. Sign in with GitHub: only your public username is read, no access to your files or repositories. Free with <span id="chLimit">a daily limit</span> per person.</span>
+        <span class="small">No key needed. Sign in with GitHub: only your public username is read (to count your daily requests), no access to your files or repositories; the token stays in this browser. Free with <span id="chLimit">a daily limit</span> per person.</span>
       </button>
       <button class="choose-card" id="chOwn">
         <span class="choose-ico">🔑</span>
@@ -436,6 +436,7 @@
 
     <div id="ghOut">
       <button id="ghOauth" class="primary" style="display:none">Sign in with GitHub</button>
+      <p class="small" style="margin:6px 0 2px">🔒 <b>Your GitHub access stays with you.</b> GitHub gives the sign-in token to <b>this browser only</b> (kept in its local storage). Designs go from your browser straight to <b>your own</b> repository. The CircuitPilot relay only swaps GitHub's one-time sign-in code for the token and never stores it; the CircuitPilot owner has no access to your repositories or files. Revoke it any time: GitHub → Settings → Applications.</p>
       <p class="muted small" style="margin:8px 0 4px">Or paste a classic personal access token with the <code>repo</code> scope (GitHub: Settings → Developer settings → Personal access tokens → Tokens (classic)). Fine-grained tokens cannot create repositories. The token stays in this browser.</p>
       <input id="ghToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_…" style="width:100%">
       <div class="row-h" style="margin-top:8px"><span></span><button id="ghSaveToken">Use this token</button></div>

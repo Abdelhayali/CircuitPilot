@@ -215,6 +215,61 @@ In **⚙ Settings → OpenAI-compatible**, enter the server URL (e.g. `http://lo
 
 Requests to `localhost` servers are routed through `server.py` (`/llm-proxy/<port>/...`), so local models work even when they only listen on 127.0.0.1 or don't send CORS headers — including from a phone on your LAN.
 
+### Small local models: compact mode
+
+Small models (2–8B) get **compact mode**: the 30 core design tools with short descriptions and a short system prompt
+(~6k tokens instead of ~23k for the full tool list), and tool results cut to 3000 characters. It switches on by itself
+for models named `circuitpilot-…`, or always / never with **⚙ Settings → Compact tools for small models**.
+
+## AI model benchmark — CircuitPilot PCB Bench
+
+How well does an AI model design boards **with CircuitPilot's tools**? [`bench/pcb_bench.mjs`](bench/README.md) gives a
+model 14 tasks in the same agent loop as the AI Copilot — CircuitPilot's real engine runs its tool calls — and scores the
+**design it leaves behind**, 0–100 per task:
+
+| Part | Points | Checked |
+|---|---|---|
+| Schematic | 35 | required parts · required connections (e.g. LED in series with a resistor between a supply and GND, regulator in / out each with a capacitor to GND) · values (LED current, divider ratio, 555 frequency, op-amp gain) · ERC |
+| Placement | 15 | every part placed · no overlaps, parts off the board or on holes · requested board size, edge connector, GND pour, mounting holes |
+| Routing | 25 | routed nets / all nets — unrouted nets are listed as missing connections |
+| DRC | 15 | DRC errors |
+| Behaviour | 10 | finishes with an answer within the step limit; failed or malformed tool calls |
+
+**8 design tasks** start from an empty project (LED indicator, 3.3 V supply with a GND pour, 555 blinker with mounting
+holes, I2C sensor board with the header on the edge, relay driver, op-amp stage, a full sensor node, a schematic-only
+filter). **6 repair tasks** start from a broken board (missing connection, unrouted nets, overlapping parts, DRC short,
+wrong resistor value, part outside the outline). Any model can be tested: Ollama / llama.cpp / LM Studio, any
+OpenAI-compatible API (OpenAI, Gemini, OpenRouter …) or Claude, with the compact or the full tool set.
+
+<!-- BENCH:START -->
+| Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Date |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Qwen3.5-4B (base) | compact | 3 × 14 | **60.3** | 30.4 | 100 | 65.7 | 52.7 | 45.6 | 15/33 | 19/33 | 6/520 | 2026-11-24 |
+
+<sub>Updated 2026-11-24 · full results: [bench/results/LEADERBOARD.md](bench/results/LEADERBOARD.md)</sub>
+<!-- BENCH:END -->
+
+```bash
+node bench/pcb_bench.mjs --base http://localhost:11434/v1 --model qwen3.5:4b --repeat 3          # Ollama
+node bench/pcb_bench.mjs --base https://openrouter.ai/api/v1 --model <id> --key <key> --repeat 3
+node bench/pcb_bench.mjs --provider anthropic --model claude-sonnet-5-5 --key <key> --tools full
+```
+Results with every tool call, the final design, unrouted nets and DRC errors are in `bench/results/`; the table above
+is rewritten after every run. Send a pull request with your model's results file to add it.
+
+## CircuitPilot-4B — a small model fine-tuned for CircuitPilot (in training)
+
+[Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) fine-tuned with LoRA to design with CircuitPilot's
+tools, small enough for a laptop GPU, Ollama on any PC or a **free Google Colab** GPU. Everything is in
+[`finetune/`](finetune/README.md):
+- **Training data** made by running CircuitPilot's real engine, so every tool result the model learns from is what the
+  app really returns: circuits built from real JLCPCB parts, edits, PCB steps, questions, plans, recovering from a
+  wrong pin name, and requests typed with typos. Only designs that pass ERC / DRC are kept.
+- **Training**: QLoRA on a 16 GB GPU (`finetune/train.py`); its progress and results will be listed here and in the
+  benchmark table above.
+- **Free hosting**: [`CircuitPilot_4B_Colab.ipynb`](finetune/CircuitPilot_4B_Colab.ipynb) serves the model on Colab and
+  prints the address to paste into **🔑 Connect AI → Use your own API** (model `circuitpilot-4b`).
+
 ## Public URL (Cloudflare tunnel)
 
 ```bash

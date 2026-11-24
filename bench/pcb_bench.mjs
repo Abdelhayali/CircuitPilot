@@ -50,19 +50,19 @@ const systemFor = mode => Engine.LITE.system + '\n\n' + Engine.LITE.mode[mode] +
 const S = () => Model.S;
 const val = v => { const m = /^([\d.]+)\s*([kKmMuUµnNpPrR]?)/.exec(String(v || '').replace(',', '.')); if (!m) return NaN; return +m[1] * ({ k: 1e3, K: 1e3, M: 1e6, m: 1e-3, u: 1e-6, U: 1e-6, 'µ': 1e-6, n: 1e-9, N: 1e-9, p: 1e-12, P: 1e-12 }[m[2]] || 1); };
 const near = (a, b, t) => isFinite(a) && Math.abs(a - b) / b <= t;
-const text = c => `${c.type} ${c.value} ${c.footprint} ${(S().lib[c.lcsc] || {}).name || ''}`.toUpperCase();
+const text = c => { const l = S().lib[c.lcsc] || S().lib[c.dbfp] || {}; return `${c.type} ${c.value} ${c.footprint} ${l.name || ''} ${l.package || ''} ${l.category || ''} ${l.footprint && l.footprint.name || ''}`.toUpperCase(); };
 // what a part is, also for database / library parts (type "part"): from its reference letter and name
 const kindOf = c => {
   if (c.type !== 'part') return c.type;
   const t = text(c), p = String(c.ref).replace(/\d+$/, '').toUpperCase();
-  if (/LED/.test(t)) return 'led';
+  if (p === 'LED' || /LED/.test(t)) return 'led';
   if (p === 'R' || /RESISTOR/.test(t)) return 'resistor';
   if (p === 'C' || /CAPACITOR|MLCC/.test(t)) return 'capacitor';
   if (p === 'L' || /INDUCTOR|FERRITE/.test(t)) return 'inductor';
   if (/MOSFET|AO3400|SI2302|2N7002|N-CH/.test(t)) return 'nmos';
   if (/NPN|3904|8050|2222|BC8[0-9]7/.test(t)) return 'npn';
   if (p === 'D' || /DIODE|1N4148|1N400|SS1\d|SCHOTTKY/.test(t)) return 'diode';
-  if (p === 'J' || p === 'P' || p === 'CN' || /HEADER|CONN|TERMINAL|JST/.test(t)) return 'connector';
+  if (p === 'J' || p === 'P' || p === 'CN' || p === 'H' || p === 'HDR' || /HEADER|HDR|CONN|TERMINAL|JST|PZ254|PIN ?HEADER|2\.54/.test(t)) return 'connector';
   if (p === 'SW' || /SWITCH|BUTTON|TACT/.test(t)) return 'switch';
   return 'part';
 };
@@ -210,10 +210,18 @@ async function runTask(t) {
     }
   }
   const sc = score(t, final, stats);
-  return Object.assign({ id: t.id, kind: t.kind, seconds: Math.round((Date.now() - t0) / 1000) }, sc, { stats, final: final.slice(0, 600), trace });
+  return Object.assign({ id: t.id, kind: t.kind, seconds: Math.round((Date.now() - t0) / 1000) }, sc, { stats, final: final.slice(0, 600), trace, design: JSON.parse(Model.snapshot()) });
 }
 
 // ---------- run ----------
+if (has('rescore')) {
+  for (const f of fs.readdirSync(RES).filter(f => f.endsWith('.json'))) {
+    const J = JSON.parse(fs.readFileSync(path.join(RES, f), 'utf8'));
+    for (const r of J.results) { const t = TASKS.find(x => x.id === r.id); if (!t || !r.design) continue; Model.load(r.design); Object.assign(r, score(t, r.final, r.stats)); }
+    Object.assign(J.summary, summarize(J.results, J.summary)); fs.writeFileSync(path.join(RES, f), JSON.stringify(J, null, 1)); console.log('rescored', f, J.summary.score);
+  }
+  leaderboard(); process.exit(0);
+}
 const list = TASKS.filter(t => !ONLY || ONLY.split(',').includes(t.id));
 const results = [];
 console.log(`CircuitPilot PCB Bench · ${LABEL} · ${PROVIDER} ${BASE} · tools ${TOOLSET} · ${list.length} tasks × ${REPEAT}`);
@@ -222,24 +230,34 @@ for (let k = 0; k < REPEAT; k++) for (const t of list) {
   const pcb = t.pcb ? ` place ${String(r.placement).padStart(4)} route ${String(r.routing).padStart(4)} drc ${String(r.drc).padStart(4)}` : ' '.repeat(36);
   console.log(`${t.id.padEnd(3)} ${String(r.total).padStart(5)}  sch ${String(r.schematic).padStart(4)}${pcb} beh ${String(r.behaviour).padStart(4)}  ${r.stats.calls} calls ${r.stats.errors + r.stats.bad} err ${r.seconds}s${r.details.failed.length ? '  ✗ ' + r.details.failed.join('; ') : ''}${(r.details.missing_connections || []).length ? '  unrouted: ' + r.details.missing_connections.join(',') : ''}`);
 }
-const avg = (k, rs = results) => { const v = rs.map(r => r[k]).filter(x => x != null); return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : null; };
-const pcbRs = results.filter(r => r.routing != null);
-const summary = { model: LABEL, provider: PROVIDER, base: BASE, tools: TOOLSET, date: new Date().toISOString().slice(0, 16), tasks: results.length,
-  score: avg('total'), design: avg('total', results.filter(r => r.kind === 'design')), repair: avg('total', results.filter(r => r.kind === 'repair')),
-  schematic_pct: +(avg('schematic') / 35 * 100).toFixed(1), placement_pct: pcbRs.length ? +(avg('placement', pcbRs) / 15 * 100).toFixed(1) : null, routing_pct: pcbRs.length ? +(avg('routing', pcbRs) / 25 * 100).toFixed(1) : null,
-  drc_clean: pcbRs.length ? `${pcbRs.filter(r => r.details.drc_errors === 0).length}/${pcbRs.length}` : null, fully_routed: pcbRs.length ? `${pcbRs.filter(r => !(r.details.missing_connections || []).length).length}/${pcbRs.length}` : null,
-  tool_calls: results.reduce((a, r) => a + r.stats.calls, 0), tool_errors: results.reduce((a, r) => a + r.stats.errors + r.stats.bad, 0), minutes: +(results.reduce((a, r) => a + r.seconds, 0) / 60).toFixed(1) };
+const summary = summarize(results, { model: LABEL, provider: PROVIDER, base: BASE, tools: TOOLSET, date: new Date().toISOString().slice(0, 16) });
 console.log(JSON.stringify(summary));
 const file = path.join(RES, LABEL.replace(/[^\w.-]+/g, '_') + '__' + TOOLSET + '.json');
 fs.writeFileSync(file, JSON.stringify({ summary, results }, null, 1));
 leaderboard();
 process.exit(0);
 
+function summarize(results, head) {
+const avg = (k, rs = results) => { const v = rs.map(r => r[k]).filter(x => x != null); return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : null; };
+const pcbRs = results.filter(r => r.routing != null);
+return { ...head, tasks: results.length,
+  score: avg('total'), design: avg('total', results.filter(r => r.kind === 'design')), repair: avg('total', results.filter(r => r.kind === 'repair')),
+  schematic_pct: +(avg('schematic') / 35 * 100).toFixed(1), placement_pct: pcbRs.length ? +(avg('placement', pcbRs) / 15 * 100).toFixed(1) : null, routing_pct: pcbRs.length ? +(avg('routing', pcbRs) / 25 * 100).toFixed(1) : null,
+  drc_clean: pcbRs.length ? `${pcbRs.filter(r => r.details.drc_errors === 0).length}/${pcbRs.length}` : null, fully_routed: pcbRs.length ? `${pcbRs.filter(r => !(r.details.missing_connections || []).length).length}/${pcbRs.length}` : null,
+  tool_calls: results.reduce((a, r) => a + r.stats.calls, 0), tool_errors: results.reduce((a, r) => a + r.stats.errors + r.stats.bad, 0), minutes: +(results.reduce((a, r) => a + r.seconds, 0) / 60).toFixed(1) };
+}
+
 function leaderboard() {
   const rows = fs.readdirSync(RES).filter(f => f.endsWith('.json')).map(f => JSON.parse(fs.readFileSync(path.join(RES, f), 'utf8')).summary).sort((a, b) => b.score - a.score);
-  const md = ['# CircuitPilot PCB Bench — leaderboard', '', 'Each model designs and repairs boards with CircuitPilot\'s tools; the resulting design is scored 0–100 (schematic 35, placement 15, routing 25, DRC 15, behaviour 10). Run `node bench/pcb_bench.mjs --help` style flags: see the top of `bench/pcb_bench.mjs`.', '',
-    '| Model | Tools | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Minutes | Date |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
-    ...rows.map(s => `| ${s.model} | ${s.tools} | **${s.score}** | ${s.design} | ${s.repair} | ${s.schematic_pct} | ${s.placement_pct} | ${s.routing_pct} | ${s.drc_clean} | ${s.fully_routed} | ${s.tool_errors}/${s.tool_calls} | ${s.minutes} | ${s.date} |`)];
+  const table = ['| Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Date |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    ...rows.map(s => `| ${s.model} | ${s.tools} | ${s.tasks / 14 >= 1 ? Math.round(s.tasks / 14) + ' × 14' : s.tasks + ' tasks'} | **${s.score}** | ${s.design} | ${s.repair} | ${s.schematic_pct} | ${s.placement_pct} | ${s.routing_pct} | ${s.drc_clean} | ${s.fully_routed} | ${s.tool_errors}/${s.tool_calls} | ${String(s.date).slice(0, 10)} |`)];
+  const md = ['# CircuitPilot PCB Bench — leaderboard', '', 'Each model designs and repairs boards with CircuitPilot\'s tools; the design it leaves behind is scored 0–100 per task (schematic 35, placement 15, routing 25, DRC 15, behaviour 10) and averaged. "Design" = the 8 tasks from an empty project, "Repair" = the 6 broken boards; DRC clean / fully routed count the PCB tasks. How to run: [bench/README.md](../README.md).', '', ...table];
   fs.writeFileSync(path.join(RES, 'LEADERBOARD.md'), md.join('\n') + '\n');
+  // the same table in the main README, between its markers
+  const readme = path.join(ROOT, 'README.md');
+  try {
+    const r = fs.readFileSync(readme, 'utf8'), nl = r.includes('\r\n') ? '\r\n' : '\n', a = r.indexOf('<!-- BENCH:START -->'), b = r.indexOf('<!-- BENCH:END -->');
+    if (a >= 0 && b > a) fs.writeFileSync(readme, r.slice(0, a) + '<!-- BENCH:START -->' + nl + table.join(nl) + nl + nl + '<sub>Updated ' + new Date().toISOString().slice(0, 10) + ' · full results: [bench/results/LEADERBOARD.md](bench/results/LEADERBOARD.md)</sub>' + nl + r.slice(b));
+  } catch (e) { }
   if (has('board')) console.log(md.join('\n'));
 }

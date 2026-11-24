@@ -352,12 +352,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._send(200, json.dumps(desktop_link.connect()).encode(), "application/json")
             except Exception as e:
                 return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
-        if path.startswith("/api/localai/") and path.rsplit("/", 1)[1] in ("download", "cancel", "start", "stop", "delete"):
+        if path.startswith("/api/localai/"):   # local AI (Windows app): models, downloads, the model server, its settings
             if not self._authed():
                 return self._send(401, b'{"error":"login required"}', "application/json")
+            # it can start programs on this PC: only CircuitPilot's own page may call it — a custom header (other sites'
+            # pages cannot send it without a CORS preflight, which this server never allows) and a same-origin check
+            origin = self.headers.get("Origin") or ""
+            host = self.headers.get("Host") or ""
+            if self.headers.get("X-CircuitPilot-App") != "1" or (origin and urllib.parse.urlparse(origin).netloc != host):
+                return self._send(403, b'{"error":"only the CircuitPilot app may do this"}', "application/json")
             import localai
             try:
-                return self._send(200, json.dumps(getattr(localai, path.rsplit("/", 1)[1])()).encode(), "application/json")
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+                return self._send(200, json.dumps(localai.api(path.rsplit("/", 1)[1], body)).encode(), "application/json")
             except Exception as e:
                 return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
         if path == "/api/parts/archive/download":   # start downloading a parts archive (progress: GET /api/parts/archive)
@@ -563,14 +571,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         port, rest = PROXY_RE.match(path).groups()
         local_ai = sys.modules.get("localai")   # pcbgo-v1 on this PC: the port its model server runs on
-        if int(port) not in ALLOWED_PORTS and not (local_ai and local_ai._srv.get("port") == int(port)):
+        # any local port for CircuitPilot's own page (a model server the user added, e.g. Maya on 8899): it sends a header
+        # that other web sites' pages cannot send without a CORS preflight (never allowed here), from the same origin
+        origin = self.headers.get("Origin") or ""
+        own_page = self.headers.get("X-CircuitPilot-App") == "1" and (not origin or urllib.parse.urlparse(origin).netloc == (self.headers.get("Host") or ""))
+        if int(port) not in ALLOWED_PORTS and not own_page and not (local_ai and local_ai._srv.get("port") == int(port)):
             msg = (f'{{"error":{{"message":"Port {port} is not allowed by the proxy. '
                    f'Restart server.py with --allow-ports {port}"}}}}').encode()
             return self._send(403, msg, "application/json")
         url = f"http://127.0.0.1:{port}{rest or '/'}" + (f"?{query}" if query else "")
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else None
-        headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_HEADERS}
+        headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_HEADERS and k.lower() != "x-circuitpilot-app"}
         req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
         try:
             with urllib.request.urlopen(req, timeout=900) as r:

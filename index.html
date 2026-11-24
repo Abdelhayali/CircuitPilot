@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611241900">
+<link rel="stylesheet" href="styles.css?v=202611242200">
 </head>
 <body>
 <header id="top">
@@ -272,24 +272,57 @@
       </button>
       <button class="choose-card wide hidden" id="chLocal">
         <span class="choose-ico">🖥</span>
-        <b>Run pcbgo-v1 on this PC — offline</b>
-        <span class="small">Download our small design AI once (2.8 GB) and it runs on this computer: no internet, no key, no limit, your designs never leave the PC. Uses your graphics card when there is one (NVIDIA, AMD or Intel), else the processor (slower).</span>
+        <b>Run a model on this PC — offline</b>
+        <span class="small">pcbgo-v1 (2.8 GB) or a larger open model (Qwen3.8-27B, Qwen3.6-35B-A3B, Gemma-4-31B, any GGUF from Hugging Face or your PC): download once and it runs on this computer — no internet, no key, no limit, your designs never leave the PC. Graphics card(s) or processor, with all llama.cpp settings.</span>
       </button>
     </div>
     </div>
     <div id="chLocalPanel" class="hidden">
-      <div class="row" style="gap:8px;align-items:center;margin-top:10px"><button id="clBack">← Back</button><h2 style="margin:0">pcbgo-v1 on this PC</h2></div>
-      <p class="small" style="margin:10px 0 6px">The model is downloaded once from Hugging Face (abdelhayali91/pcbgo-v1, checked with its SHA-256) and kept in your CircuitPilot folder. After that everything runs on this computer, also without internet.</p>
-      <progress id="clBar" class="hidden" max="1" value="0" style="width:100%;height:14px"></progress>
-      <p id="clStatus" class="small" style="min-height:1.2em;margin:8px 0"></p>
-      <div class="row" style="gap:8px;flex-wrap:wrap">
-        <button id="clDownload" class="primary hidden">Download pcbgo-v1</button>
-        <button id="clCancel" class="hidden">Pause download</button>
-        <button id="clStart" class="primary hidden">Start and connect</button>
-        <button id="clStop" class="hidden">Stop the model</button>
-        <button id="clDelete" class="hidden" title="Remove the 2.8 GB model file from this PC">Delete the model</button>
+      <div class="row" style="gap:8px;align-items:center;margin-top:10px"><button id="clBack">← Back</button><h2 style="margin:0">Local AI on this PC</h2></div>
+      <p class="small" style="margin:8px 0">Pick a model, download it once (resumable, checked with its SHA-256), then <b>Start</b>: it runs on this computer and the copilot uses it, also without internet.</p>
+      <div id="laModels" class="la-list"></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin:8px 0">
+        <button id="laBrowse" title="A .gguf model file already on this PC">📂 Browse for a .gguf file…</button>
+        <button id="laHfOpen">🤗 Search Hugging Face…</button>
       </div>
-      <p class="muted small" style="margin-top:10px">It starts by itself when you open CircuitPilot with this AI selected. Small model: check its work with ERC / DRC. Part searches still use the internet when it is there (the parts archive in Settings works offline).</p>
+      <div id="laHf" class="hidden la-box">
+        <div class="row" style="gap:8px"><input id="laHfQ" placeholder="model name, e.g. qwen3.6 35b, gemma 4, phi" style="flex:1" spellcheck="false"><button id="laHfGo" class="primary">Search</button></div>
+        <div id="laHfList" class="la-list" style="margin-top:6px"></div>
+      </div>
+      <progress id="laBar" class="hidden" max="1" value="0" style="width:100%;height:14px"></progress>
+      <p id="laStatus" class="small" style="min-height:1.2em;margin:8px 0"></p>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button id="laStart" class="primary">Start and connect</button>
+        <button id="laStop" class="hidden">Stop</button>
+        <button id="laLogBtn">Show log</button>
+      </div>
+      <pre id="laLog" class="hidden la-log"></pre>
+      <details id="laAdv" style="margin-top:10px">
+        <summary><b>Hardware and llama.cpp settings</b></summary>
+        <div class="la-grid">
+          <label>Run on <select id="laDevice"><option value="auto">Auto (GPU when there is one)</option><option value="gpu">Graphics card(s)</option><option value="cpu">Processor only</option></select></label>
+          <label>GPU layers <input id="laNgl" type="number" min="0" max="999" title="99 = the whole model on the GPU; fewer = the rest in RAM (slower, for big models on small cards)"></label>
+          <div class="la-wide"><span>Graphics cards</span> <span id="laGpus" class="small muted">—</span> <button id="laDetect" class="small">Detect</button></div>
+          <label>GPU split <input id="laSplit" placeholder="e.g. 60,40" title="Share of the model per selected GPU (tensor split), in the order above"></label>
+          <label>Split mode <select id="laSplitMode"><option value="layer">layer (default)</option><option value="row">row</option><option value="none">none (one GPU)</option></select></label>
+          <label>Context <select id="laCtx"><option value="4096">4k tokens</option><option value="8192">8k tokens</option><option value="16384">16k tokens</option><option value="32768">32k tokens</option><option value="65536">64k tokens</option><option value="131072">128k tokens</option><option value="262144">256k tokens</option></select></label>
+          <label>KV cache type <select id="laKv"><option>f16</option><option>bf16</option><option>q8_0</option><option>q5_1</option><option>q5_0</option><option>q4_1</option><option>q4_0</option><option>iq4_nl</option><option>f32</option></select></label>
+          <label>Flash attention <select id="laFlash"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label>
+          <label>Threads <input id="laThreads" type="number" min="0" placeholder="0 = auto"></label>
+          <label>Batch <input id="laBatch" type="number" min="0" placeholder="0 = 2048"></label>
+          <label>Micro-batch <input id="laUbatch" type="number" min="0" placeholder="0 = 512"></label>
+          <label class="la-check"><input id="laThinking" type="checkbox"> Thinking (reasoning models; slower)</label>
+          <label class="la-check"><input id="laMlock" type="checkbox"> Lock in RAM (mlock)</label>
+          <label class="la-check"><input id="laNoMmap" type="checkbox"> No mmap</label>
+          <label class="la-wide">More llama-server options <input id="laExtra" placeholder="any option, e.g. --temp 0.7 --top-k 20 -ot exps=CPU" spellcheck="false"></label>
+          <label class="la-wide">Models folder <span class="row" style="gap:6px"><input id="laDir" placeholder="default: %LOCALAPPDATA%\CircuitPilot\models" style="flex:1" spellcheck="false"><button id="laDirBrowse">Browse…</button></span></label>
+          <label class="la-wide">llama.cpp <span class="row" style="gap:6px"><select id="laEngine"><option value="builtin">built in (Vulkan: NVIDIA, AMD, Intel)</option><option value="custom">my llama-server.exe (e.g. a CUDA build)</option></select><input id="laExe" placeholder="C:\…\llama-server.exe" style="flex:1" spellcheck="false"><button id="laExeBrowse">Browse…</button></span></label>
+          <label class="la-wide">External engine command (models marked “own engine”, e.g. Inkling-2-Mini on Maya) <input id="laExtCmd" placeholder="e.g. D:\DualGPU\start-maya.bat 64k-new {port}" spellcheck="false"><span class="small muted">{port} = the port CircuitPilot gives it, {model} = the model file, {ctx} = the context. It must serve an OpenAI-compatible API on that port.</span></label>
+          <label class="la-wide">… started in folder <input id="laExtCwd" placeholder="(optional)" spellcheck="false"></label>
+        </div>
+        <div class="row" style="gap:8px;margin-top:8px"><button id="laSave" class="primary">Save settings</button><span id="laSaved" class="small muted"></span></div>
+        <p class="small muted">Quantised KV cache (q8_0, q4_0 …) halves or quarters its memory and needs flash attention. Two GPUs: select both and set the split, e.g. 60,40 for a 24 GB + 16 GB pair.</p>
+      </details>
     </div>
     <div id="chColabPanel" class="hidden">
       <div class="row" style="gap:8px;align-items:center;margin-top:10px"><button id="ccBack">← Back</button><h2 style="margin:0">pcbgo-v1 on Google Colab</h2></div>
@@ -582,7 +615,7 @@
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
 <script src="js/engine.js?v=202611242000"></script>
-<script src="js/ai.js?v=202611242000"></script>
+<script src="js/ai.js?v=202611242200"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202611231900"></script>
@@ -591,8 +624,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611242000"></script>
-<script src="js/app.js?v=202611242000"></script>
+<script src="js/welcome.js?v=202611242200"></script>
+<script src="js/app.js?v=202611242200"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

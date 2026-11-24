@@ -9,6 +9,8 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.24', date: '2026-11-24', items: [
+      'Windows app → Connect AI → Run a model on this PC: pcbgo-v1, Qwen3.6-35B-A3B, Qwen3.8-27B, Gemma-4-31B, Inkling-2-Mini (Maya engine), any GGUF from Hugging Face (search in the app) or a .gguf on your PC (Browse); processor or graphics card(s) with GPU split, context, KV cache type, flash attention, threads, batch and any llama-server option; your own llama-server.exe (e.g. CUDA) or an external engine command',
+      'Use your own API: a model server on any local port (e.g. http://127.0.0.1:8899) works in the Windows app without --allow-ports',
       'Windows app: Connect AI → Run pcbgo-v1 on this PC — download our design AI once (2.8 GB) and it runs offline on your graphics card (NVIDIA, AMD, Intel) or processor',
       'Small models: a part number you ask about is looked up in the parts database first (no answers from memory), and a tool call that fails the same way 4 times stops the run instead of looping',
       'add_components: a value code or reference in lcsc (C104, C1) no longer blocks a resistor / capacitor — the built-in part is added and the model is told why',

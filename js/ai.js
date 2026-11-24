@@ -114,6 +114,8 @@ const AI = (() => {
     if (web && /(^|\.)ollama\.com$/.test(host.replace(/:\d+$/, ''))) throw desktopOnly(host);
     const resolved = await resolveBase(base);
     const direct = resolved === base && /^https:/.test(base);   // local servers and Ollama Cloud already have their own route
+    // the local proxy reaches any port on this PC only for CircuitPilot's own page (this header proves it)
+    if (resolved.includes('/llm-proxy/')) opts = Object.assign({}, opts, { headers: Object.assign({}, opts.headers, { 'X-CircuitPilot-App': '1' }) });
     if (direct && viaProxy.has(host) && !web) return fetch(extBase(base) + path, opts);
     try { return await fetch(resolved + path, opts); }
     catch (e) {
@@ -356,7 +358,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   async function probeContextRaw(model) {
     try {
       const base = await resolveBase(model.base), root = base.replace(/\/v1$/, '');
-      const headers = model.key ? { authorization: 'Bearer ' + model.key } : {};
+      const headers = Object.assign(model.key ? { authorization: 'Bearer ' + model.key } : {}, base.includes('/llm-proxy/') ? { 'X-CircuitPilot-App': '1' } : {});
       const get = async u => { const r = await fetch(u, { headers, signal: AbortSignal.timeout(4000) }); return r.ok ? r.json() : null; };
       const props = await get(root + '/props').catch(() => null);
       const n = props && (props.default_generation_settings?.n_ctx || props.n_ctx);

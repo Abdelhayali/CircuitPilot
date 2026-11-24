@@ -2044,56 +2044,131 @@ const App = (() => {
     }
     $('#chColab').onclick = showColabPanel;
     $('#ccBack').onclick = () => { $('#chColabPanel').classList.add('hidden'); $('#chPicks').classList.remove('hidden'); };
-    // ---- pcbgo-v1 on this PC (Windows app / server.py): downloaded once, then served by llama.cpp on 127.0.0.1 — offline
-    const LOCAL_NAME = 'pcbgo-v1 on this PC', GB = b => (b / 1e9).toFixed(2) + ' GB';
-    let localPoll = null;
-    async function localApi(op) {
-      const r = await fetch('/api/localai/' + op, op === 'status' ? { cache: 'no-store' } : { method: 'POST' });
+    // ---- local AI (Windows app / server.py): a GGUF model run by llama.cpp (or an external engine) on 127.0.0.1 — offline
+    const LOCAL_NAME = 'Local AI (this PC)', OLD_LOCAL = /^(pcbgo-v1 on this PC|Local AI \(this PC\))$/, GB = b => (b / 1e9).toFixed(b >= 1e10 ? 1 : 2) + ' GB';
+    const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let localPoll = null, laState = null;
+    async function localApi(op, body) {
+      const r = await fetch('/api/localai/' + op, op === 'status' ? { cache: 'no-store' } : { method: 'POST', headers: { 'content-type': 'application/json', 'X-CircuitPilot-App': '1' }, body: JSON.stringify(body || {}) });
       const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j;
     }
-    function connectLocal(url) {
+    const laMsg = (t, cls) => { const st = $('#laStatus'); st.className = (cls || '') + ' small'; st.textContent = t; };
+    function connectLocal(sv) {
+      const url = sv.url, model = sv.alias;
       const cur = (AI.settings.providers || []).find(p => p.name === LOCAL_NAME);
-      if (cur && cur.base === url && AI.settings.model === cur.id + '::pcbgo-v1') return;
-      for (const p of (AI.settings.providers || []).filter(p => p.name === LOCAL_NAME)) AI.removeProvider(p.id);
-      const pid = AI.saveProvider({ name: LOCAL_NAME, base: url, key: 'local', models: ['pcbgo-v1'] });
-      AI.saveSettings({ model: pid + '::pcbgo-v1' });
+      if (cur && cur.base === url && AI.settings.model === cur.id + '::' + model) return;
+      for (const p of (AI.settings.providers || []).filter(p => OLD_LOCAL.test(p.name || ''))) AI.removeProvider(p.id);
+      const pid = AI.saveProvider({ name: LOCAL_NAME, base: url, key: 'local', models: [model] });
+      AI.saveSettings({ model: pid + '::' + model });
       renderModels(); renderChat(); AI.probeContext().then(updateCtx);
-      toast('🖥 AI: pcbgo-v1 on this PC (offline)', 6000);
+      toast('🖥 AI: ' + model + ' on this PC (offline)', 6000);
     }
-    async function refreshLocal() {
-      clearTimeout(localPoll);
-      const st = $('#clStatus'), show = (id, on) => $(id).classList.toggle('hidden', !on);
-      let s; try { s = await localApi('status'); } catch (e) { st.className = 'bad small'; st.textContent = '✗ ' + e.message; return; }
+    function renderModels_(s) {
       const d = s.download, sv = s.server;
-      show('#clDownload', s.runtime && !s.present && !d.active); show('#clCancel', d.active && d.phase !== 'checking');
-      show('#clStart', s.runtime && s.present && !sv.running); show('#clStop', sv.running); show('#clDelete', s.present && !sv.running && !d.active);
-      $('#clDownload').textContent = s.partial ? `Resume download (${GB(s.partial)} of ${GB(s.size)})` : `Download pcbgo-v1 (${GB(s.size)})`;
-      show('#clBar', d.active); if (d.active) $('#clBar').value = d.total ? d.bytes / d.total : 0;
-      st.className = 'small';
-      if (!s.runtime) { st.className = 'bad small'; st.textContent = 'This copy of CircuitPilot has no model runtime. Use the Windows app (CircuitPilot.exe from pcbgo.site), or set CP_LLAMA_SERVER to a llama-server.exe.'; }
-      else if (d.active) st.textContent = d.phase === 'checking' ? 'Checking the downloaded file (SHA-256)…' : `Downloading… ${GB(d.bytes)} of ${GB(d.total)}${d.speed ? ' · ' + (d.speed / 1e6).toFixed(1) + ' MB/s' : ''}`;
-      else if (d.error) { st.className = 'bad small'; st.textContent = '✗ ' + d.error; }
-      else if (sv.ready) { st.className = 'good small'; st.textContent = '✓ pcbgo-v1 is running on this PC — the copilot uses it, no internet needed.'; connectLocal(sv.url); }
-      else if (sv.running) st.textContent = 'Starting pcbgo-v1 (loading 2.8 GB into the graphics card or memory, up to a minute)…';
-      else if (sv.error) { st.className = 'bad small'; st.textContent = '✗ ' + sv.error; }
-      else if (s.present) st.textContent = 'pcbgo-v1 is on this PC (' + s.folder + '). Click Start.';
-      else st.textContent = 'Not downloaded yet: one download of ' + GB(s.size) + ', then it works offline.';
-      if (d.active || (sv.running && !sv.ready)) localPoll = setTimeout(refreshLocal, 1000);
+      $('#laModels').innerHTML = s.models.map(m => {
+        const dl = d.active && d.id === m.id, run = sv.running && sv.id === m.id;
+        const state = m.present ? (run ? (sv.ready ? '● running' : '◌ starting') : '✓ on this PC') : dl ? 'downloading…' : m.partial ? 'paused at ' + GB(m.partial) : m.path ? '✗ file missing' : 'not downloaded';
+        const btns = [
+          !m.present && !m.path && !dl ? `<button data-la="download" data-id="${esc(m.id)}" class="small">${m.partial ? 'Resume' : 'Download'}</button>` : '',
+          dl ? '<button data-la="cancel" class="small">Pause</button>' : '',
+          m.repo ? `<button data-la="sizes" data-repo="${esc(m.repo)}" class="small" title="Other files (sizes / quantisations) of ${esc(m.repo)}">Other sizes</button>` : '',
+          m.present && !m.path && !run ? `<button data-la="delete" data-id="${esc(m.id)}" class="small" title="Delete the downloaded file">Delete</button>` : '',
+          m.source ? `<button data-la="remove" data-id="${esc(m.id)}" class="small" title="Take it off this list (the file stays)">Remove</button>` : '',
+        ].join('');
+        return `<div class="la-row${s.active === m.id ? ' on' : ''}"><label><input type="radio" name="laM" value="${esc(m.id)}"${s.active === m.id ? ' checked' : ''}><span><b>${esc(m.name)}</b>${m.engine === 'external' ? ' <span class="la-tag">own engine</span>' : ''}<br><span class="small muted">${esc(m.note || '')}</span></span></label><span class="small la-state">${esc(state)}</span><span class="la-btns">${btns}</span></div>`;
+      }).join('');
     }
-    function showLocalPanel() { for (const id of ['#chPicks', '#chOwnPanel', '#chColabPanel']) $(id).classList.add('hidden'); $('#chLocalPanel').classList.remove('hidden'); $('#chooseModal').classList.remove('hidden'); refreshLocal(); }
-    const localDo = op => localApi(op).then(refreshLocal).catch(e => { $('#clStatus').className = 'bad small'; $('#clStatus').textContent = '✗ ' + e.message; });
+    function fillSettings(s) {
+      const g = s.settings, set = (id, v) => { const e = $(id); if (e.type === 'checkbox') e.checked = !!v; else e.value = v == null ? '' : v; };
+      set('#laDevice', g.device); set('#laNgl', g.ngl); set('#laSplit', g.split); set('#laSplitMode', g.split_mode); set('#laCtx', String(g.ctx)); set('#laKv', g.kv); set('#laFlash', g.flash);
+      set('#laThreads', g.threads || ''); set('#laBatch', g.batch || ''); set('#laUbatch', g.ubatch || ''); set('#laThinking', g.thinking); set('#laMlock', g.mlock); set('#laNoMmap', g.no_mmap);
+      set('#laExtra', g.extra); set('#laDir', g.models_dir); set('#laEngine', g.engine); set('#laExe', g.server_exe); set('#laExtCmd', g.external_cmd); set('#laExtCwd', g.external_cwd);
+      if (![...$('#laCtx').options].some(o => o.value === String(g.ctx))) { const o = document.createElement('option'); o.value = o.textContent = String(g.ctx); $('#laCtx').appendChild(o); $('#laCtx').value = String(g.ctx); }
+      renderGpus(s.devices, g.gpus);
+    }
+    function renderGpus(devs, sel) {
+      if (!devs) { $('#laGpus').textContent = 'click Detect'; return; }
+      if (!devs.length) { $('#laGpus').textContent = 'none found (the model runs on the processor)'; return; }
+      $('#laGpus').innerHTML = devs.map(d => `<label class="la-check" style="display:inline-flex;margin-right:10px"><input type="checkbox" class="laGpu" value="${esc(d.id)}"${!sel.length || sel.includes(d.id) ? ' checked' : ''}> ${esc(d.id)}: ${esc(d.name)} (${(d.mib / 1024).toFixed(0)} GB)</label>`).join('');
+    }
+    async function refreshLocal(first) {
+      clearTimeout(localPoll);
+      let s; try { s = await localApi('status'); } catch (e) { laMsg('✗ ' + e.message, 'bad'); return; }
+      laState = s; renderModels_(s);
+      if (first) fillSettings(s);
+      const d = s.download, sv = s.server, m = s.models.find(x => x.id === s.active) || {};
+      $('#laStart').classList.toggle('hidden', !m.present || (sv.running && sv.id === s.active));
+      $('#laStop').classList.toggle('hidden', !sv.running);
+      $('#laStart').textContent = sv.running ? 'Switch to this model' : 'Start and connect';
+      $('#laBar').classList.toggle('hidden', !d.active); if (d.active) $('#laBar').value = d.total ? d.bytes / d.total : 0;
+      if (d.active) laMsg(d.phase === 'checking' ? 'Checking the downloaded file (SHA-256)…' : `Downloading ${(s.models.find(x => x.id === d.id) || {}).name || ''}… ${GB(d.bytes)} of ${d.total ? GB(d.total) : '?'}${d.speed ? ' · ' + (d.speed / 1e6).toFixed(1) + ' MB/s' : ''}`);
+      else if (d.error) laMsg('✗ ' + d.error, 'bad');
+      else if (sv.ready) { laMsg(`✓ ${sv.alias} is running on this PC — the copilot uses it, no internet needed.`, 'good'); connectLocal(sv); }
+      else if (sv.running) laMsg(`Starting ${sv.alias} (loading it into the graphics card or memory: up to a few minutes for big models) … ${sv.seconds} s`);
+      else if (sv.error) laMsg('✗ ' + sv.error, 'bad');
+      else if (m.engine === 'external' && !s.settings.external_cmd) laMsg('This model runs on its own engine: set its start command under Hardware and llama.cpp settings → External engine command.');
+      else if (!s.runtime && m.engine !== 'external') laMsg('This copy of CircuitPilot has no llama.cpp server: use the Windows app (pcbgo.site), or choose a llama-server.exe in the settings.', 'bad');
+      else if (m.present) laMsg('Ready: click Start and connect.');
+      else laMsg('Download the selected model first (once), or choose one you have.');
+      if (d.active || (sv.running && !sv.ready)) localPoll = setTimeout(() => refreshLocal(), 1200);
+    }
+    function showLocalPanel() { for (const id of ['#chPicks', '#chOwnPanel', '#chColabPanel']) $(id).classList.add('hidden'); $('#chLocalPanel').classList.remove('hidden'); $('#chooseModal').classList.remove('hidden'); refreshLocal(true); }
+    const localDo = (op, body) => localApi(op, body).then(() => refreshLocal()).catch(e => laMsg('✗ ' + e.message, 'bad'));
     $('#chLocal').onclick = showLocalPanel;
     $('#clBack').onclick = () => { $('#chLocalPanel').classList.add('hidden'); $('#chPicks').classList.remove('hidden'); };
-    $('#clDownload').onclick = () => localDo('download');
-    $('#clCancel').onclick = () => localDo('cancel');
-    $('#clStart').onclick = () => localDo('start');
-    $('#clStop').onclick = () => localDo('stop');
-    $('#clDelete').onclick = () => { if (confirm('Delete pcbgo-v1 (2.8 GB) from this PC? You can download it again later.')) localDo('delete'); };
+    $('#laModels').addEventListener('change', e => { if (e.target.name === 'laM') localDo('settings', { active: e.target.value }); });
+    $('#laModels').addEventListener('click', e => {
+      const b = e.target.closest('[data-la]'); if (!b) return;
+      const op = b.dataset.la, id = b.dataset.id;
+      if (op === 'sizes') { $('#laHf').classList.remove('hidden'); hfFiles(b.dataset.repo); return; }
+      if (op === 'delete' && !confirm('Delete the downloaded model file from this PC? You can download it again later.')) return;
+      localDo(op, { id });
+    });
+    $('#laStart').onclick = () => localDo('start', {});
+    $('#laStop').onclick = () => localDo('stop');
+    $('#laLogBtn').onclick = async () => { const box = $('#laLog'); if (!box.classList.toggle('hidden')) box.textContent = (await localApi('log').catch(e => ({ log: e.message }))).log || '(empty)'; };
+    $('#laBrowse').onclick = async () => { try { const r = await localApi('browse', { kind: 'gguf' }); if (r.path) await localDo('add_local', { path: r.path }); } catch (e) { laMsg('✗ ' + e.message, 'bad'); } };
+    $('#laDirBrowse').onclick = async () => { const r = await localApi('browse', { kind: 'folder' }).catch(e => (laMsg('✗ ' + e.message, 'bad'), {})); if (r.path) $('#laDir').value = r.path; };
+    $('#laExeBrowse').onclick = async () => { const r = await localApi('browse', { kind: 'exe' }).catch(e => (laMsg('✗ ' + e.message, 'bad'), {})); if (r.path) { $('#laExe').value = r.path; $('#laEngine').value = 'custom'; } };
+    $('#laDetect').onclick = async () => { $('#laGpus').textContent = 'detecting…'; const r = await localApi('devices').catch(e => ({ devices: [] })); renderGpus(r.devices, (laState && laState.settings.gpus) || []); };
+    $('#laSave').onclick = async () => {
+      const num = id => +$(id).value || 0, gpus = [...document.querySelectorAll('.laGpu')], sel = gpus.filter(x => x.checked).map(x => x.value);
+      const body = { device: $('#laDevice').value, ngl: num('#laNgl'), split: $('#laSplit').value.trim(), split_mode: $('#laSplitMode').value, ctx: num('#laCtx'), kv: $('#laKv').value, flash: $('#laFlash').value,
+        threads: num('#laThreads'), batch: num('#laBatch'), ubatch: num('#laUbatch'), thinking: $('#laThinking').checked, mlock: $('#laMlock').checked, no_mmap: $('#laNoMmap').checked,
+        extra: $('#laExtra').value, models_dir: $('#laDir').value.trim(), engine: $('#laEngine').value, server_exe: $('#laExe').value.trim(), external_cmd: $('#laExtCmd').value.trim(), external_cwd: $('#laExtCwd').value.trim(),
+        gpus: gpus.length && sel.length < gpus.length ? sel : [] };
+      try { const s = await localApi('settings', body); $('#laSaved').textContent = s.server.running ? 'Saved — click Start to restart the model with them.' : 'Saved.'; if (s.server.running) $('#laStart').classList.remove('hidden'); refreshLocal(); }
+      catch (e) { $('#laSaved').textContent = '✗ ' + e.message; }
+    };
+    // Hugging Face: search GGUF repos, list a repo's files, add + download one
+    $('#laHfOpen').onclick = () => { $('#laHf').classList.toggle('hidden'); $('#laHfQ').focus(); };
+    async function hfSearch() {
+      const q = $('#laHfQ').value.trim(); if (!q) return;
+      $('#laHfList').innerHTML = '<p class="small muted">Searching…</p>';
+      try {
+        const r = await localApi('hf_search', { q });
+        $('#laHfList').innerHTML = r.results.length ? r.results.map(m => `<div class="la-row"><span><b>${esc(m.repo)}</b><br><span class="small muted">${m.downloads.toLocaleString()} downloads · ${esc(m.updated)}</span></span><span class="la-btns"><button class="small" data-repo="${esc(m.repo)}">Files…</button></span></div>`).join('') : '<p class="small muted">No GGUF models found.</p>';
+      } catch (e) { $('#laHfList').innerHTML = `<p class="bad small">✗ ${esc(e.message)}</p>`; }
+    }
+    async function hfFiles(repo) {
+      $('#laHfList').innerHTML = `<p class="small muted">Files of ${esc(repo)}…</p>`;
+      try {
+        const r = await localApi('hf_files', { repo });
+        $('#laHfList').innerHTML = `<p class="small"><b>${esc(repo)}</b> — pick a file (Q4_K_M is a good start; bigger = better quality, more memory):</p>` + r.files.map(f => `<div class="la-row"><span>${esc(f.file)}${f.parts ? ` <span class="small muted">(${f.parts.length} parts)</span>` : ''}${f.mmproj ? ' <span class="la-tag">vision projector</span>' : ''}</span><span class="small la-state">${GB(f.size)}</span><span class="la-btns">${f.mmproj ? '' : `<button class="small primary" data-add="${esc(f.file)}" data-repo="${esc(repo)}">Add + download</button>`}</span></div>`).join('');
+      } catch (e) { $('#laHfList').innerHTML = `<p class="bad small">✗ ${esc(e.message)}</p>`; }
+    }
+    $('#laHfGo').onclick = hfSearch;
+    $('#laHfQ').onkeydown = e => { if (e.key === 'Enter') hfSearch(); };
+    $('#laHfList').addEventListener('click', async e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.add) { try { const s = await localApi('add_hf', { repo: b.dataset.repo, file: b.dataset.add }); await localDo('download', { id: s.active }); $('#laHf').classList.add('hidden'); } catch (err) { laMsg('✗ ' + err.message, 'bad'); } }
+      else if (b.dataset.repo) hfFiles(b.dataset.repo);
+    });
     // only where CircuitPilot's own server runs (not pcbgo.site); start the model by itself when it is the selected AI
     localApi('status').then(s => {
       $('#chLocal').classList.remove('hidden');
-      const p = (AI.settings.providers || []).find(p => p.name === LOCAL_NAME);
-      if (p && String(AI.settings.model || '').startsWith(p.id + '::') && s.present && s.runtime && !s.server.running) localApi('start').then(refreshLocal).catch(() => { });
+      const p = (AI.settings.providers || []).find(p => OLD_LOCAL.test(p.name || '')), m = s.models.find(x => x.id === s.active);
+      if (p && String(AI.settings.model || '').startsWith(p.id + '::') && m && m.present && !s.server.running) localApi('start', {}).then(() => refreshLocal()).catch(() => { });
       else if (s.server.running) refreshLocal();
     }).catch(() => { });
     $('#ccConnect').onclick = () => connectColab($('#ccUrl').value, true);

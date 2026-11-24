@@ -524,7 +524,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     history.push(Object.assign({ role: 'user', text, mode, checkpoint: hooks.checkpoint }, hooks.files && hooks.files.length ? { files: hooks.files } : {}));
     persist();
     controller = new AbortController();
-    const repeats = new Map(); let stuck = null;
+    const repeats = new Map(); let stuck = null, ctxSnap = null;
     await probeContext(model);
     // compact mode (small models): a part number in the request that is not in the design yet is looked up first, as a
     // normal search_parts call — the model then answers from the database instead of from memory
@@ -550,7 +550,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
           const turn = history.map(m => m.role === 'user').lastIndexOf(true);
           hooks.onInfo && hooks.onInfo('Context 80% full — compressing the conversation…');
           let did = false;
-          try { did = turn > 0 && await compress({ keepFrom: turn }); } catch (e) { if (e.name === 'AbortError') throw e; hooks.onInfo && hooks.onInfo('Auto-compress failed: ' + e.message); }
+          try { did = turn > 0 && await compress({ keepFrom: turn }); if (did) ctxSnap = null; } catch (e) { if (e.name === 'AbortError') throw e; hooks.onInfo && hooks.onInfo('Auto-compress failed: ' + e.message); }
           if (contextInfo().pct >= 80) trimToolResults(did ? 2 : turn);
           hooks.onInfo && hooks.onInfo(null);
         }
@@ -559,8 +559,12 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
           const k = await Engine.knowledgeDigest();
           if (k) know = `\n\nPROJECT KNOWLEDGE FOLDER: ${k.folder} (${k.files} files)\nFiles:\n${k.index}\n` + (k.included ? `\nIncluded documents:\n${k.included}` : '') + '\n(Use knowledge_search / knowledge_read for anything not included.)';
         } catch (e) { know = '\n\nPROJECT KNOWLEDGE FOLDER: unavailable (' + e.message + ')'; }
-        const system = lite ? Engine.LITE.system + '\n\n' + Engine.LITE.mode[mode] + (settings.includeContext ? '\n\n' + designContext() : '')
-          : BASE + '\n\n' + MODE[mode] + know + (settings.includeContext ? '\n\n' + designContext() : '');
+        // the design summary is taken once per request and kept: a system prompt that changes after every tool call
+        // makes llama.cpp / Ollama / cloud prompt caches useless (the model would re-read the tools and the whole
+        // conversation each step); the model sees later changes in the tool results
+        if (ctxSnap == null) ctxSnap = settings.includeContext ? '\n\n' + designContext() : '';
+        const system = lite ? Engine.LITE.system + '\n\n' + Engine.LITE.mode[mode] + ctxSnap
+          : BASE + '\n\n' + MODE[mode] + know + ctxSnap;
         systemChars = system.length;
         const sentLen = history.length;
         // compact mode on a self-hosted server (Ollama / llama.cpp / LM Studio): thinking off, as pcbgo models are trained

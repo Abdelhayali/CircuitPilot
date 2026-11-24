@@ -365,6 +365,9 @@
       <label class="chk"><input data-r="neckDown" type="checkbox"> Neck down when the full width does not fit</label>
       <label>Autorouter effort (max time)<input data-r="routeTime" type="number" step="5" min="5" max="1800"><span>s</span></label>
       <label>Smallest copper-pour piece kept<input data-r="pourMinArea" type="number" step="0.1" min="0"><span>mm²</span></label>
+      <label title="Solder-mask opening around each pad, per side. JLCPCB needs 0.10 mm of mask between pads (0.13 mm for black / white) and 0.09 mm from an opening to a track: lower it (e.g. 0.03) for fine pitch and tight tracks">Solder-mask opening<input data-r="maskExpansion" type="number" step="0.01" min="0"><span>mm</span></label>
+      <label title="Black and white mask need a wider mask web between pads (0.13 mm instead of 0.10 mm); DRC checks it">Solder-mask colour<select data-r="maskColor" data-kind="text"><option value="green">Green</option><option value="black">Black</option><option value="white">White</option><option value="blue">Blue</option><option value="red">Red</option><option value="yellow">Yellow</option><option value="purple">Purple</option></select></label>
+      <label title="2 oz copper needs 0.16 mm spacing at JLCPCB">Copper weight<select data-r="copperOz"><option value="1">1 oz</option><option value="2">2 oz</option></select></label>
       <label class="chk full"><input data-r="warnUnderMetal" type="checkbox"> Warn about tracks / vias under batteries, coin cells and metal parts on the same side (only solder mask insulates them)</label>
       <label class="chk full"><input data-r="smdPadRelief" type="checkbox"> SMD pads on a copper pour: a gap all round with 4 spokes (thermal relief), so every pad is its own solder spot (on by default for home etching and CNC milling)</label>
       <label class="chk full"><input data-r="noViaInPad" type="checkbox"> Never put vias on SMD pads (strict, default) — not even as the router's last resort; DRC error. Thermal vias inside a QFN / DFN exposed pad stay allowed</label>
@@ -525,7 +528,7 @@
 <script src="js/model.js?v=202611232300"></script>
 <script src="js/schematic.js?v=202611170600"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611232100"></script>
+<script src="js/pcb.js?v=202611241510"></script>
 <script src="js/cnc.js?v=202611071200"></script>
 <script src="js/pcbview.js?v=202611232300"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
@@ -542,7 +545,7 @@
 <script src="js/pcb3d.js?v=202611240100"></script>
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
-<script src="js/engine.js?v=202611241200"></script>
+<script src="js/engine.js?v=202611241500"></script>
 <script src="js/ai.js?v=202611241200"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
@@ -552,8 +555,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611241300"></script>
-<script src="js/app.js?v=202611241200"></script>
+<script src="js/welcome.js?v=202611241510"></script>
+<script src="js/app.js?v=202611241510"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

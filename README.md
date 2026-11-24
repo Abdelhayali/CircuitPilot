@@ -244,7 +244,10 @@ OpenAI-compatible API (OpenAI, Gemini, OpenRouter …) or Claude, with the compa
 <!-- BENCH:START -->
 | Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Date |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Qwen3.5-4B (base, llama.cpp) | compact, no thinking | 3 × 14 | **65.1** | 38.9 | 100 | 75.4 | 57.3 | 51.6 | 17/33 | 21/33 | 96/599 | 2026-11-24 |
 | Qwen3.5-4B (base) | compact | 3 × 14 | **60.3** | 30.4 | 100 | 65.7 | 52.7 | 45.6 | 15/33 | 19/33 | 6/520 | 2026-11-24 |
+| CircuitPilot-4B (step 25, llama.cpp) | compact, no thinking | 3 × 14 | **57** | 27.3 | 96.5 | 70.9 | 45.3 | 36.4 | 9/33 | 17/33 | 139/391 | 2026-11-24 |
+| CircuitPilot-4B (step 25) | compact | 3 × 14 | **47.3** | 24.7 | 77.5 | 53.4 | 44 | 21.2 | 3/33 | 27/33 | 18/87 | 2026-11-24 |
 
 <sub>Updated 2026-11-24 · full results: [bench/results/LEADERBOARD.md](bench/results/LEADERBOARD.md)</sub>
 <!-- BENCH:END -->
@@ -378,6 +381,8 @@ curl -H "Authorization: Bearer <password>" -X POST http://127.0.0.1:5174/tools/s
 ## Design rules (JLCPCB defaults) and DRC
 
 **PCB → ⚙ Rules** edits the project's design rules. The autorouter follows them and **DRC** checks the finished board against them.
+
+**Fab limits DRC also checks (JLCPCB, 2-layer, 1 oz):** SMD pad to SMD pad of another net ≥ 0.15 mm (solder-bridge risk; the 0.1 mm track rules do not cover it) · **solder mask** — mask web between pads ≥ 0.10 mm (0.13 mm for black / white mask) and mask opening to a track ≥ 0.09 mm, from the rule **Solder-mask opening** (default 0.05 mm per side, also used for the Gerber mask; lower it, e.g. 0.03 mm, for fine pitch) · **2 oz copper** needs 0.16 mm spacing. Track-to-track and pad-to-track at 0.10 mm are fine at JLCPCB even when EasyEDA Pro's default 6 mil (0.152 mm) rule flags them — use DRC **As EasyEDA Pro checks** to see that list.
 
 | Rule | JLCPCB standard preset | JLCPCB minimum |
 |---|---|---|

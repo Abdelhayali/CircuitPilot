@@ -120,7 +120,9 @@ const TASKS = [
     links: [['emitter on GND', () => { const q = find(null, 'npn')[0] || find(/3904|8050|2222|NPN/)[0]; return !!q && isGnd(netOf(q, 'E') || netOf(q, '2')); }], ['diode across the coil (cathode to +12V side)', () => find(null, ['diode', 'schottky']).some(d => { const k = netOf(d, 'K') || netOf(d, '1'), a = netOf(d, 'A') || netOf(d, '2'); const q = find(null, 'npn')[0]; return isSupply(k) && !!q && a === (netOf(q, 'C') || netOf(q, '3')); })]] },
   { id: 'D6', kind: 'design', setup: blank, pcb: true, prompt: 'Non-inverting op-amp amplifier with a gain of 10 on a single 5 V supply, input and output on headers, with supply decoupling. Make the PCB.',
     parts: [['op-amp', () => find(null, 'opamp').length >= 1 || find(/358|MCP60|LMV|OPA|TLV|TL07/).length >= 1], ['feedback resistors', () => find(null, 'resistor').length >= 2], ['decoupling', () => find(null, 'capacitor').length >= 1]],
-    links: [['op-amp powered (V+ on a supply, V- on GND)', () => { const u = find(null, 'opamp')[0]; return !!u && isSupply(netOf(u, '7')) && isGnd(netOf(u, '4')); }]],
+    links: [['op-amp powered (V+ on a supply, V- on GND)', () => { const u = find(null, 'opamp')[0]; // by pin name first (a real part, e.g. a SOT-23-5 op-amp, has other pin numbers), else the generic 8-pin 7 / 4
+      const pos = ['V+', 'VCC', 'VDD', 'VS+', '+VS'].map(n => netOf(u, n)).find(Boolean) || netOf(u, '7'), neg = ['V-', 'VEE', 'VSS', 'GND', 'VS-', '-VS'].map(n => netOf(u, n)).find(Boolean) || netOf(u, '4');
+      return !!u && isSupply(pos) && isGnd(neg); }]],
     values: [['gain 10 (±15 %)', () => { const r = find(null, 'resistor').map(c => val(c.value)); return r.some(a => r.some(b => a !== b && near(1 + a / b, 10, 0.15))); }]] },
   { id: 'D7', kind: 'design', setup: blank, pcb: true, prompt: 'Sensor node: 5 V in on a 2-pin header, AMS1117-3.3 regulator with capacitors, an I2C temperature sensor (SHT40 or BME280) with pull-ups and decoupling, and a status LED on 3.3 V. Board 35 x 25 mm, GND pour on both layers.',
     parts: [['regulator', () => find(/AMS1117|LDO|REG/).length >= 1], ['sensor', () => S().components.filter(c => kindOf(c) === 'part').length >= 2], ['LED', () => find(null, 'led').length >= 1], ['3+ capacitors', () => find(null, ['capacitor', 'capacitor_polarized']).length >= 3]],
@@ -191,7 +193,32 @@ async function callAnthropic(system, hist, tools) {
   const j = await r.json();
   return { text: j.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim(), usage: j.usage || {}, calls: j.content.filter(b => b.type === 'tool_use').map(b => ({ id: b.id, name: b.name, args: b.input })) };
 }
-const call = PROVIDER === 'anthropic' ? callAnthropic : callOpenAI;
+// --provider driver: an agent outside this process answers each step over http://localhost:8099 (bench/drive.mjs).
+// It gets exactly what an API model gets (system prompt with the design, the tools, the task, tool results capped at
+// 3000 characters, 24 steps); tokens are estimated from the request / reply size (characters / 3.6).
+let drvWait = null, drvObs = null, drvSeen = 0, drvSys = '';
+const est = x => Math.ceil(x.length / 3.6);
+if (PROVIDER === 'driver') {
+  const http = await import('node:http');
+  http.createServer((q, res) => { let b = ''; q.on('data', d => b += d); q.on('end', async () => {
+    const send = o => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+    if (q.url === '/intro') return send({ tools: toolList('agent').map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema })), system: Engine.LITE.system + '\n\n' + Engine.LITE.mode.agent });
+    if (q.url === '/reply' && drvWait) { const r = drvWait; drvWait = null; drvObs = null; let j; try { j = JSON.parse(b || '{}'); } catch (e) { return send({ error: 'bad JSON: ' + e.message }); } r(j); }
+    for (let i = 0; i < 6000 && !drvObs; i++) await new Promise(z => setTimeout(z, 100));
+    send(drvObs || { waiting: true });
+  }); }).listen(8099, () => console.log('driver on http://localhost:8099'));
+}
+async function callDriver(system, hist, tools) {
+  if (hist.length === 1) { drvSeen = 0; drvSys = ''; }
+  const ctxNow = system.slice(system.indexOf(Engine.LITE.mode.agent) + Engine.LITE.mode.agent.length).trim();
+  drvObs = { step: hist.filter(m => m.role === 'assistant').length, design_context: ctxNow !== drvSys ? ctxNow : undefined, messages: hist.slice(drvSeen).map(m => m.role === 'tool' ? { tool_result: m.content } : m.role === 'user' ? { user: m.content } : null).filter(Boolean) };
+  drvSys = ctxNow; drvSeen = hist.length;
+  const j = await new Promise(r => drvWait = r);
+  const calls = (j.calls || []).map((c, i) => ({ id: 'd' + Date.now() + i, name: c.name, args: c.args && typeof c.args === 'object' ? c.args : null }));
+  const req = JSON.stringify({ system, tools: tools.map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema })), hist });
+  return { text: String(j.text || ''), calls, usage: { prompt_tokens: est(req), completion_tokens: est(JSON.stringify(j)) } };
+}
+const call = PROVIDER === 'anthropic' ? callAnthropic : PROVIDER === 'driver' ? callDriver : callOpenAI;
 
 async function runTask(t) {
   await t.setup();
@@ -234,7 +261,7 @@ for (let k = 0; k < REPEAT; k++) for (const t of list) {
   const pcb = t.pcb ? ` place ${String(r.placement).padStart(4)} route ${String(r.routing).padStart(4)} drc ${String(r.drc).padStart(4)}` : ' '.repeat(36);
   console.log(`${t.id.padEnd(3)} ${String(r.total).padStart(5)}  sch ${String(r.schematic).padStart(4)}${pcb} beh ${String(r.behaviour).padStart(4)}  ${r.stats.calls} calls ${r.stats.errors + r.stats.bad} err ${r.seconds}s${r.details.failed.length ? '  ✗ ' + r.details.failed.join('; ') : ''}${(r.details.missing_connections || []).length ? '  unrouted: ' + r.details.missing_connections.join(',') : ''}`);
 }
-const summary = summarize(results, { model: LABEL, provider: PROVIDER, base: BASE, tools: TOOLSET + (THINK === 'off' ? ', no thinking' : ''), date: new Date().toISOString().slice(0, 16) });
+const summary = summarize(results, { model: LABEL, provider: PROVIDER, base: BASE, tools: TOOLSET + (THINK === 'off' ? ', no thinking' : '') + (PROVIDER === 'driver' ? ', agent driver, tokens estimated' : ''), date: new Date().toISOString().slice(0, 16) });
 console.log(JSON.stringify(summary));
 const file = path.join(RES, LABEL.replace(/[^\w.-]+/g, '_') + '__' + TOOLSET + (THINK === 'off' ? '_nothink' : '') + '.json');
 fs.writeFileSync(file, JSON.stringify({ summary, results }, null, 1));

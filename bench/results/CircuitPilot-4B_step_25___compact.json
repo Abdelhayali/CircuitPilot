@@ -16,7 +16,9 @@
   "fully_routed": "27/33",
   "tool_calls": 87,
   "tool_errors": 18,
-  "minutes": 14.4
+  "minutes": 14.4,
+  "tokens_in_task": 25976,
+  "tokens_out_task": 1769
  },
  "results": [
   {

@@ -6,17 +6,19 @@
   "tools": "compact, no thinking",
   "date": "2026-11-24T13:31",
   "tasks": 42,
-  "score": 79.3,
-  "design": 70.3,
+  "score": 80.4,
+  "design": 72.2,
   "repair": 91.4,
-  "schematic_pct": 75.1,
+  "schematic_pct": 78,
   "placement_pct": 82,
   "routing_pct": 82,
   "drc_clean": "25/33",
   "fully_routed": "32/33",
   "tool_calls": 326,
   "tool_errors": 76,
-  "minutes": 15.1
+  "minutes": 15.1,
+  "tokens_in_task": 96677,
+  "tokens_out_task": 991
  },
  "results": [
   {
@@ -1581,11 +1583,10 @@
    "id": "D6",
    "kind": "design",
    "seconds": 24,
-   "schematic": 15,
+   "schematic": 30,
    "details": {
     "erc": [],
     "failed": [
-     "op-amp powered (V+ on a supply, V- on GND)",
      "gain 10 (±15 %)"
     ],
     "placed": "5/5",
@@ -1600,7 +1601,7 @@
    "placement": 15,
    "routing": 25,
    "drc": 15,
-   "total": 80,
+   "total": 95,
    "stats": {
     "calls": 7,
     "errors": 0,
@@ -6662,11 +6663,10 @@
    "id": "D6",
    "kind": "design",
    "seconds": 23,
-   "schematic": 15,
+   "schematic": 30,
    "details": {
     "erc": [],
     "failed": [
-     "op-amp powered (V+ on a supply, V- on GND)",
      "gain 10 (±15 %)"
     ],
     "placed": "5/5",
@@ -6681,7 +6681,7 @@
    "placement": 15,
    "routing": 25,
    "drc": 15,
-   "total": 80,
+   "total": 95,
    "stats": {
     "calls": 7,
     "errors": 0,
@@ -11969,11 +11969,10 @@
    "id": "D6",
    "kind": "design",
    "seconds": 23,
-   "schematic": 15,
+   "schematic": 30,
    "details": {
     "erc": [],
     "failed": [
-     "op-amp powered (V+ on a supply, V- on GND)",
      "gain 10 (±15 %)"
     ],
     "placed": "5/5",
@@ -11988,7 +11987,7 @@
    "placement": 15,
    "routing": 25,
    "drc": 15,
-   "total": 80,
+   "total": 95,
    "stats": {
     "calls": 7,
     "errors": 0,

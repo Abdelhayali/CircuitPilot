@@ -1,0 +1,7161 @@
+{
+ "summary": {
+  "model": "Claude Opus 5.5 (agent)",
+  "provider": "driver",
+  "base": "driver",
+  "tools": "compact, agent driver, tokens estimated",
+  "date": "2026-11-24T14:43",
+  "tasks": 14,
+  "score": 99.9,
+  "design": 99.9,
+  "repair": 100,
+  "schematic_pct": 100,
+  "placement_pct": 100,
+  "routing_pct": 100,
+  "drc_clean": "11/11",
+  "fully_routed": "11/11",
+  "tokens_in_task": 21490,
+  "tokens_out_task": 270,
+  "tool_calls": 75,
+  "tool_errors": 1,
+  "minutes": 5.1
+ },
+ "results": [
+  {
+   "id": "D1",
+   "kind": "design",
+   "seconds": 67,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "3/3",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 3,
+    "drc_top": [],
+    "board": "7.9 × 7 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 5,
+    "errors": 0,
+    "bad": 0,
+    "steps": 3,
+    "finished": true,
+    "tokens_in": 20277,
+    "tokens_out": 221
+   },
+   "final": "Done: J1 (5 V in) → R1 300 Ω → D1 green LED → GND (≈10 mA). ERC clean; PCB 7.9 × 7 mm, 3/3 nets routed, DRC 0 errors (3 silkscreen warnings).",
+   "trace": [
+    "add_components {\"components\":[{\"type\":\"connector\",\"ref\":\"J1\",\"value\":\"5V IN\",\"pins\":[\"+5V\",\"GND\"],\"x\":100,\"y\":200},{\"type\":\"resistor\",\"ref\":\"R1\",\"value\":\"300\",\"footprint\":\"0603\",\"x\":240,\"y\":160},{\"type\":\"led\",\"ref\":\"D1\",\"value\":\"GREEN\" → [{\"ref\":\"J1\",\"type\":\"connector\",\"value\":\"5V IN\",\"x\":100,\"y\":200,\"sheet\":1,\"footprint\":\"PinHeader_1x2\",\"pins\":\"1:+5V 2:GND\"},{\"ref\":\"R1\",\"type\":\"resistor\",\"value\":\"300\",\"x\":240,\"y\":160,\"sheet\":1,\"footp",
+    "connect {\"connections\":[{\"net\":\"+5V\",\"pins\":[\"J1.1\",\"R1.1\"]},{\"net\":\"LED_A\",\"pins\":[\"R1.2\",\"D1.A\"]},{\"net\":\"GND\",\"pins\":[\"D1.K\",\"J1.2\"]}]} → [{\"net\":\"+5V\",\"pins\":2},{\"net\":\"LED_A\",\"pins\":2},{\"net\":\"GND\",\"pins\":2}]",
+    "run_erc {} → ERC passed: no issues",
+    "generate_pcb {} → {\"placement\":{\"board\":{\"w\":7.9,\"h\":7,\"shape\":\"rect\"},\"placed\":3,\"compacted\":6,\"fits\":true,\"seconds\":5.3},\"routing\":{\"routed\":3,\"total\":3,\"kept_tracks\":0,\"failed\":[],\"necked_down\":[],\"vias\":0,\"board\":{",
+    "run_drc {} → {\"summary\":\"0 errors, 3 warnings\",\"errors\":0,\"warnings\":3,\"by_type\":{\"silk\":3},\"violations\":[{\"type\":\"silk\",\"severity\":\"warning\",\"msg\":\"Silkscreen label of R1 covers pads (top)\",\"at\":[5.3,3.92]},{\"typ"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "5V IN",
+      "x": 100,
+      "y": 200,
+      "rot": 0,
+      "pins": [
+       "+5V",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 3.5,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "300",
+      "x": 220,
+      "y": 160,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 5.3,
+       "y": 2.2,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "GREEN",
+      "x": 380,
+      "y": 200,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 5.15,
+       "y": 5,
+       "rot": 0
+      }
+     }
+    ],
+    "nets": {
+     "+5V": [
+      "J1.1",
+      "R1.1"
+     ],
+     "LED_A": [
+      "R1.2",
+      "D1.2"
+     ],
+     "GND": [
+      "D1.1",
+      "J1.2"
+     ]
+    },
+    "board": {
+     "w": 7.9,
+     "h": 7
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         1.25,
+         2.23
+        ],
+        [
+         4.445,
+         2.23
+        ],
+        [
+         4.475,
+         2.2
+        ]
+       ]
+      },
+      {
+       "net": "LED_A",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.125,
+         2.2
+        ],
+        [
+         6.125,
+         4.85
+        ],
+        [
+         5.975,
+         5
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         1.25,
+         4.77
+        ],
+        [
+         4.095,
+         4.77
+        ],
+        [
+         4.325,
+         5
+        ]
+       ]
+      }
+     ],
+     "vias": [],
+     "routed": {
+      "+5V": true,
+      "LED_A": true,
+      "GND": true
+     },
+     "pours": [],
+     "holes": []
+    },
+    "connStyle": "auto",
+    "lib": {},
+    "edited": 1795531179.698
+   }
+  },
+  {
+   "id": "D2",
+   "kind": "design",
+   "seconds": 30,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "7/7",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "30 × 20 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 8,
+    "errors": 0,
+    "bad": 0,
+    "steps": 5,
+    "finished": true,
+    "tokens_in": 36959,
+    "tokens_out": 406
+   },
+   "final": "Done: J1 5 V → U1 AMS1117-3.3 (C6186) with C1 10 µF in, C2 22 µF out, J2 3.3 V out, power LED D1 + R1 1 kΩ (1.3 mA). ERC clean; PCB 30 × 20 mm, 4/4 nets routed, GND pour top + bottom, DRC passed.",
+   "trace": [
+    "search_parts {\"query\":\"AMS1117-3.3\",\"limit\":5} → {\"source\":\"jlcpcb+easyeda+community+open\",\"results\":[{\"lcsc\":\"C6186\",\"part\":\"AMS1117-3.3\",\"brand\":\"Advanced Monolithic Systems\",\"package\":\"SOT-223\",\"footprint\":\"SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR\",\"st",
+    "get_part {\"lcsc\":\"C6186\"} → {\"key\":\"C6186\",\"name\":\"AMS1117-3.3\",\"manufacturer\":\"Advanced Monolithic Systems\",\"mfr_part\":\"AMS1117-3.3\",\"package\":\"SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR\",\"ref_prefix\":\"U\",\"pins\":\"1:GND 2:VOUT 3:VIN 4:V",
+    "add_components {\"components\":[{\"type\":\"connector\",\"ref\":\"J1\",\"value\":\"5V IN\",\"pins\":[\"+5V\",\"GND\"],\"x\":60,\"y\":200},{\"ref\":\"U1\",\"x\":240,\"y\":200,\"part\":\"C6186\"},{\"type\":\"capacitor\",\"ref\":\"C1\",\"value\":\"10uF\",\"footprint\":\"0805\",\"x\":150,\"y\": → [{\"ref\":\"J1\",\"type\":\"connector\",\"value\":\"5V IN\",\"x\":60,\"y\":200,\"sheet\":1,\"footprint\":\"PinHeader_1x2\",\"pins\":\"1:+5V 2:GND\"},{\"ref\":\"U1\",\"type\":\"part\",\"value\":\"AMS1117-3.3\",\"x\":240,\"y\":180,\"sheet\":1,\"fo",
+    "connect {\"connections\":[{\"net\":\"+5V\",\"pins\":[\"J1.1\",\"U1.VIN\",\"C1.1\"]},{\"net\":\"+3V3\",\"pins\":[\"U1.VOUT\",\"C2.1\",\"R1.1\",\"J2.1\"]},{\"net\":\"LED_A\",\"pins\":[\"R1.2\",\"D1.A\"]},{\"net\":\"GND\",\"pins\":[\"J1.2\",\"U1.GND\",\"C1.2\",\"C2.2\",\"D1.K\",\"J2.2\" → [{\"net\":\"+5V\",\"pins\":3},{\"net\":\"+3V3\",\"pins\":4},{\"net\":\"LED_A\",\"pins\":2},{\"net\":\"GND\",\"pins\":6}]",
+    "run_erc {} → ERC passed: no issues",
+    "generate_pcb {\"board_width\":30,\"board_height\":20} → {\"placement\":{\"board\":{\"w\":30,\"h\":20,\"shape\":\"rect\"},\"kept_board\":true,\"placed\":7,\"fits\":true,\"parts_area_pct\":20,\"on_edge\":[\"J1:left\",\"J2:right\"]},\"routing\":{\"routed\":4,\"total\":4,\"kept_tracks\":0,\"fai",
+    "add_copper_pour {\"net\":\"GND\",\"layer\":\"both\"} → {\"added\":[0,1],\"pours\":2,\"islands\":[{\"index\":0,\"layer\":\"top\",\"islands\":2,\"removed\":1,\"removed_mm2\":0.72},{\"index\":1,\"layer\":\"bottom\",\"islands\":1,\"removed\":0,\"removed_mm2\":0}],\"note\":\"Pieces of copper ",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "5V IN",
+      "x": 60,
+      "y": 200,
+      "rot": 0,
+      "pins": [
+       "+5V",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 9.6,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "U1",
+      "type": "part",
+      "value": "AMS1117-3.3",
+      "x": 230,
+      "y": 180,
+      "rot": 0,
+      "lcsc": "C6186",
+      "footprint": "LCSC:C6186",
+      "pcb": {
+       "x": 13.8,
+       "y": 7.35,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "10uF",
+      "x": 150,
+      "y": 290,
+      "rot": 0,
+      "footprint": "0805",
+      "pcb": {
+       "x": 4.75,
+       "y": 9.55,
+       "rot": 90
+      }
+     },
+     {
+      "ref": "C2",
+      "type": "capacitor",
+      "value": "22uF",
+      "x": 300,
+      "y": 290,
+      "rot": 0,
+      "footprint": "0805",
+      "pcb": {
+       "x": 21.65,
+       "y": 6.9,
+       "rot": 270
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "1k",
+      "x": 440,
+      "y": 130,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 2.75,
+       "y": 4.25,
+       "rot": 270
+      }
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "GREEN",
+      "x": 430,
+      "y": 280,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 6.55,
+       "y": 3.85,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "J2",
+      "type": "connector",
+      "value": "3V3 OUT",
+      "x": 580,
+      "y": 230,
+      "rot": 0,
+      "pins": [
+       "+3V3",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 28.75,
+       "y": 10.75,
+       "rot": 0
+      }
+     }
+    ],
+    "nets": {
+     "+5V": [
+      "J1.1",
+      "U1.3",
+      "C1.1"
+     ],
+     "+3V3": [
+      "U1.2",
+      "U1.4",
+      "C2.1",
+      "R1.1",
+      "J2.1"
+     ],
+     "LED_A": [
+      "R1.2",
+      "D1.2"
+     ],
+     "GND": [
+      "J1.2",
+      "U1.1",
+      "C1.2",
+      "C2.2",
+      "D1.1",
+      "J2.2"
+     ]
+    },
+    "board": {
+     "w": 30,
+     "h": 20
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.75,
+         8.6
+        ],
+        [
+         1.52,
+         8.6
+        ],
+        [
+         1.25,
+         8.33
+        ]
+       ]
+      },
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.75,
+         8.6
+        ],
+        [
+         9.82,
+         8.6
+        ],
+        [
+         10.87,
+         9.65
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         16.81,
+         7.35
+        ],
+        [
+         21.15,
+         7.35
+        ],
+        [
+         21.65,
+         7.85
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         16.81,
+         7.35
+        ],
+        [
+         10.87,
+         7.35
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         21.65,
+         7.85
+        ],
+        [
+         27.12,
+         7.85
+        ],
+        [
+         28.75,
+         9.48
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.87,
+         7.35
+        ],
+        [
+         5.025,
+         7.35
+        ],
+        [
+         2.75,
+         5.075
+        ]
+       ]
+      },
+      {
+       "net": "LED_A",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         2.75,
+         3.425
+        ],
+        [
+         3.075,
+         3.1
+        ],
+        [
+         6.625,
+         3.1
+        ],
+        [
+         7.375,
+         3.85
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.87,
+         5.05
+        ],
+        [
+         6.925,
+         5.05
+        ],
+        [
+         5.725,
+         3.85
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.9,
+         5.05
+        ],
+        [
+         5.2,
+         6.75
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         5.2,
+         6.75
+        ],
+        [
+         5.2,
+         9.55
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         5.2,
+         9.55
+        ],
+        [
+         5.2,
+         10.05
+        ],
+        [
+         4.75,
+         10.5
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.75,
+         10.5
+        ],
+        [
+         1.62,
+         10.5
+        ],
+        [
+         1.25,
+         10.87
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.87,
+         5.05
+        ],
+        [
+         20.75,
+         5.05
+        ],
+        [
+         21.65,
+         5.95
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         21.65,
+         5.95
+        ],
+        [
+         22.3,
+         5.95
+        ],
+        [
+         23.7,
+         7.35
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         23.7,
+         7.35
+        ],
+        [
+         24.08,
+         7.35
+        ],
+        [
+         28.75,
+         12.02
+        ]
+       ]
+      }
+     ],
+     "vias": [
+      {
+       "net": "GND",
+       "x": 5.2,
+       "y": 6.75,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "GND",
+       "x": 5.2,
+       "y": 9.55,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "GND",
+       "x": 23.7,
+       "y": 7.35,
+       "d": 0.45,
+       "drill": 0.3
+      }
+     ],
+     "routed": {
+      "+5V": true,
+      "+3V3": true,
+      "LED_A": true,
+      "GND": true
+     },
+     "pours": [
+      {
+       "net": "GND",
+       "layer": "F",
+       "whole": true
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "whole": true
+      }
+     ],
+     "holes": []
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C6186": {
+      "lcsc": "C6186",
+      "name": "AMS1117-3.3",
+      "mfr_part": "AMS1117-3.3",
+      "manufacturer": "Advanced Monolithic Systems",
+      "package": "SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR",
+      "prefix": "U",
+      "value": "AMS1117-3.3",
+      "pins": [
+       {
+        "num": "1",
+        "name": "GND",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "VOUT",
+        "side": "L"
+       },
+       {
+        "num": "3",
+        "name": "VIN",
+        "side": "L"
+       },
+       {
+        "num": "4",
+        "name": "VOUT",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR",
+       "pads": [
+        {
+         "num": "1",
+         "x": 2.93,
+         "y": 2.3,
+         "w": 2.5,
+         "h": 1.1,
+         "shape": "rect"
+        },
+        {
+         "num": "2",
+         "x": 2.93,
+         "y": 0,
+         "w": 2.5,
+         "h": 1.1,
+         "shape": "rect"
+        },
+        {
+         "num": "3",
+         "x": 2.93,
+         "y": -2.3,
+         "w": 2.5,
+         "h": 1.1,
+         "shape": "rect"
+        },
+        {
+         "num": "4",
+         "x": -3.01,
+         "y": 0,
+         "w": 2.34,
+         "h": 3.6,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -4.18,
+        -3.326,
+        4.18,
+        3.326
+       ],
+       "model3d": {
+        "uuid": "e80246a9471445bfb635be848806a22e",
+        "x": -0.14,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 180,
+        "w": 7.1,
+        "h": 6.5,
+        "title": "SOT-223-4P_L6.5-W3.5-H1.6-LS7.0-P2.30"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/410724.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "588dac9f81df8f83843513972963b454",
+      "puuid": "02ae667aca734971be8a5f58143dd564",
+      "key": "C6186"
+     }
+    },
+    "edited": 1795531208.895
+   }
+  },
+  {
+   "id": "D3",
+   "kind": "design",
+   "seconds": 34,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "9/9",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "35 × 30 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 9,
+    "errors": 0,
+    "bad": 0,
+    "steps": 5,
+    "finished": true,
+    "tokens_in": 36911,
+    "tokens_out": 524
+   },
+   "final": "Done: NE555 (C5125085) astable, R1 10 kΩ, R2 68 kΩ, C1 10 µF → f = 1.44 / ((10k + 2·68k)·10 µF) ≈ 0.99 Hz; OUT → R3 680 Ω → red LED (≈8 mA); C2 10 nF on CONT, C3 100 nF decoupling, J1 9 V input. ERC clean; PCB 35 × 30 mm with 4 × M3 holes, 7/7 nets routed, DRC passed.",
+   "trace": [
+    "search_parts {\"query\":\"NE555 SOIC-8\",\"limit\":4} → {\"source\":\"jlcpcb+easyeda+community+open\",\"results\":[{\"lcsc\":\"C5125085\",\"part\":\"NE555\",\"brand\":\"IDCHIP\",\"package\":\"SOP-8\",\"footprint\":\"SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL\",\"stock\":43572,\"basic\":false,\"pri",
+    "get_part {\"lcsc\":\"C5125085\"} → {\"key\":\"C5125085\",\"name\":\"NE555_C5125085\",\"manufacturer\":\"IDCHIP(英锐芯)\",\"mfr_part\":\"NE555\",\"package\":\"SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL\",\"ref_prefix\":\"U\",\"pins\":\"1:GND 2:TRIG 3:OUT 4:RESET 8:VCC 7:DISCH ",
+    "add_components {\"components\":[{\"type\":\"connector\",\"ref\":\"J1\",\"value\":\"9V IN\",\"pins\":[\"+9V\",\"GND\"],\"x\":60,\"y\":220},{\"ref\":\"U1\",\"x\":300,\"y\":220,\"part\":\"C5125085\"},{\"type\":\"resistor\",\"ref\":\"R1\",\"value\":\"10k\",\"footprint\":\"0603\",\"x\":180,\"y\" → [{\"ref\":\"J1\",\"type\":\"connector\",\"value\":\"9V IN\",\"x\":60,\"y\":220,\"sheet\":1,\"footprint\":\"PinHeader_1x2\",\"pins\":\"1:+9V 2:GND\"},{\"ref\":\"U1\",\"type\":\"part\",\"value\":\"NE555\",\"x\":300,\"y\":220,\"sheet\":1,\"footprin",
+    "connect {\"connections\":[{\"net\":\"+9V\",\"pins\":[\"J1.1\",\"U1.VCC\",\"U1.RESET\",\"R1.1\",\"C3.1\"]},{\"net\":\"DISCH\",\"pins\":[\"R1.2\",\"U1.DISCH\",\"R2.1\"]},{\"net\":\"TIMING\",\"pins\":[\"R2.2\",\"U1.THRES\",\"U1.TRIG\",\"C1.1\"]},{\"net\":\"CONT\",\"pins\":[\"U1.CON → [{\"net\":\"+9V\",\"pins\":5},{\"net\":\"DISCH\",\"pins\":3},{\"net\":\"TIMING\",\"pins\":4},{\"net\":\"CONT\",\"pins\":2},{\"net\":\"OUT\",\"pins\":2},{\"net\":\"LED_A\",\"pins\":2},{\"net\":\"GND\",\"pins\":6}]",
+    "run_erc {} → ERC passed: no issues",
+    "generate_pcb {\"board_width\":35,\"board_height\":30,\"route\":false} → {\"placement\":{\"board\":{\"w\":35,\"h\":30,\"shape\":\"rect\"},\"kept_board\":true,\"placed\":9,\"fits\":true,\"parts_area_pct\":9,\"on_edge\":[\"J1:left\"]},\"routing\":null,\"drc\":{\"summary\":\"7 errors, 0 warnings\",\"top\":[\"N",
+    "add_mounting_holes {} → {\"holes\":[{\"x\":3.6,\"y\":3.6,\"d\":3.2,\"auto\":true},{\"x\":31.4,\"y\":3.6,\"d\":3.2,\"auto\":true},{\"x\":31.4,\"y\":26.4,\"d\":3.2,\"auto\":true},{\"x\":3.6,\"y\":26.4,\"d\":3.2,\"auto\":true}],\"skipped\":0,\"note\":\"Run route_pcb",
+    "route_pcb {} → {\"routing\":{\"routed\":7,\"total\":7,\"kept_tracks\":0,\"failed\":[],\"necked_down\":[],\"vias\":4,\"board\":{\"w\":35,\"h\":30,\"shape\":\"rect\"},\"grid_mm\":0.05,\"seconds\":2.7,\"passes\":1,\"ripup_iterations\":0,\"via_in_pad\":",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "9V IN",
+      "x": 60,
+      "y": 210,
+      "rot": 0,
+      "pins": [
+       "+9V",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 13.3,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "U1",
+      "type": "part",
+      "value": "NE555",
+      "x": 330,
+      "y": 280,
+      "rot": 0,
+      "lcsc": "C5125085",
+      "footprint": "LCSC:C5125085",
+      "pcb": {
+       "x": 9.85,
+       "y": 15.75,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "10k",
+      "x": 180,
+      "y": 100,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 10.8,
+       "y": 21.55,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "R2",
+      "type": "resistor",
+      "value": "68k",
+      "x": 180,
+      "y": 170,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 14.6,
+       "y": 21.75,
+       "rot": 270
+      }
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "10uF",
+      "x": 150,
+      "y": 310,
+      "rot": 0,
+      "footprint": "0805",
+      "pcb": {
+       "x": 16.95,
+       "y": 17.25,
+       "rot": 90
+      }
+     },
+     {
+      "ref": "C2",
+      "type": "capacitor",
+      "value": "10nF",
+      "x": 300,
+      "y": 400,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 4.25,
+       "y": 18.7,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "C3",
+      "type": "capacitor",
+      "value": "100nF",
+      "x": 420,
+      "y": 90,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 3.05,
+       "y": 21.6,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "R3",
+      "type": "resistor",
+      "value": "680",
+      "x": 440,
+      "y": 170,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 9,
+       "y": 9.15,
+       "rot": 270
+      }
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "RED",
+      "x": 540,
+      "y": 270,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 5.4,
+       "y": 9.3,
+       "rot": 0
+      }
+     }
+    ],
+    "nets": {
+     "+9V": [
+      "J1.1",
+      "U1.8",
+      "U1.4",
+      "R1.1",
+      "C3.1"
+     ],
+     "DISCH": [
+      "R1.2",
+      "U1.7",
+      "R2.1"
+     ],
+     "TIMING": [
+      "R2.2",
+      "U1.6",
+      "U1.2",
+      "C1.1"
+     ],
+     "CONT": [
+      "U1.5",
+      "C2.1"
+     ],
+     "OUT": [
+      "U1.3",
+      "R3.1"
+     ],
+     "LED_A": [
+      "R3.2",
+      "D1.2"
+     ],
+     "GND": [
+      "J1.2",
+      "U1.1",
+      "C1.2",
+      "C2.2",
+      "C3.2",
+      "D1.1"
+     ]
+    },
+    "board": {
+     "w": 35,
+     "h": 30
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "+9V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         7.945,
+         13.1501
+        ],
+        [
+         7.945,
+         13.845
+        ],
+        [
+         8.9,
+         14.8
+        ]
+       ]
+      },
+      {
+       "net": "+9V",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         8.9,
+         14.8
+        ],
+        [
+         12.35,
+         18.25
+        ]
+       ]
+      },
+      {
+       "net": "+9V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         12.35,
+         18.25
+        ],
+        [
+         11.8549,
+         18.25
+        ],
+        [
+         11.755,
+         18.3499
+        ]
+       ]
+      },
+      {
+       "net": "+9V",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         12.25,
+         18.45
+        ],
+        [
+         10,
+         20.7
+        ]
+       ]
+      },
+      {
+       "net": "+9V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10,
+         20.7
+        ],
+        [
+         10,
+         21.525
+        ],
+        [
+         9.975,
+         21.55
+        ]
+       ]
+      },
+      {
+       "net": "+9V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         7.945,
+         13.1501
+        ],
+        [
+         2.3701,
+         13.1501
+        ],
+        [
+         1.25,
+         12.03
+        ]
+       ]
+      },
+      {
+       "net": "+9V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         9.975,
+         21.55
+        ],
+        [
+         9.275,
+         20.85
+        ],
+        [
+         2.975,
+         20.85
+        ],
+        [
+         2.225,
+         21.6
+        ]
+       ]
+      },
+      {
+       "net": "DISCH",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11.625,
+         21.55
+        ],
+        [
+         13.575,
+         21.55
+        ],
+        [
+         14.6,
+         22.575
+        ]
+       ]
+      },
+      {
+       "net": "DISCH",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11.625,
+         21.55
+        ],
+        [
+         10.485,
+         20.41
+        ],
+        [
+         10.485,
+         18.3499
+        ]
+       ]
+      },
+      {
+       "net": "TIMING",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         9.215,
+         18.3499
+        ],
+        [
+         9.215,
+         15.235
+        ],
+        [
+         10.45,
+         14
+        ],
+        [
+         10.45,
+         13.1851
+        ],
+        [
+         10.485,
+         13.1501
+        ]
+       ]
+      },
+      {
+       "net": "TIMING",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         9.215,
+         18.3499
+        ],
+        [
+         9.215,
+         18.185
+        ],
+        [
+         10.25,
+         17.15
+        ],
+        [
+         12,
+         17.15
+        ],
+        [
+         14.6,
+         19.75
+        ],
+        [
+         14.6,
+         20.925
+        ]
+       ]
+      },
+      {
+       "net": "TIMING",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         14.05,
+         19.2
+        ],
+        [
+         16.95,
+         16.3
+        ]
+       ]
+      },
+      {
+       "net": "CONT",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         7.945,
+         18.3499
+        ],
+        [
+         5.4251,
+         18.3499
+        ],
+        [
+         5.075,
+         18.7
+        ]
+       ]
+      },
+      {
+       "net": "OUT",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         9.215,
+         13.1501
+        ],
+        [
+         9.215,
+         10.19
+        ],
+        [
+         9,
+         9.975
+        ]
+       ]
+      },
+      {
+       "net": "LED_A",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         9,
+         8.325
+        ],
+        [
+         7.2,
+         8.325
+        ],
+        [
+         6.225,
+         9.3
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         3.425,
+         18.7
+        ],
+        [
+         1.55,
+         20.575
+        ],
+        [
+         1.55,
+         22.2
+        ],
+        [
+         1.7,
+         22.35
+        ],
+        [
+         3.125,
+         22.35
+        ],
+        [
+         3.875,
+         21.6
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         3.425,
+         18.7
+        ],
+        [
+         3.425,
+         16.745
+        ],
+        [
+         1.25,
+         14.57
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         1.25,
+         14.57
+        ],
+        [
+         4.55,
+         11.27
+        ],
+        [
+         4.55,
+         10.85
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.55,
+         10.85
+        ],
+        [
+         4.55,
+         9.325
+        ],
+        [
+         4.575,
+         9.3
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.575,
+         9.3
+        ],
+        [
+         5.325,
+         10.05
+        ],
+        [
+         6.95,
+         10.05
+        ],
+        [
+         7.7,
+         9.3
+        ],
+        [
+         9.6,
+         9.3
+        ],
+        [
+         11.755,
+         11.455
+        ],
+        [
+         11.755,
+         13.1501
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11.755,
+         13.1501
+        ],
+        [
+         15.3501,
+         13.1501
+        ],
+        [
+         17.9,
+         15.7
+        ],
+        [
+         17.9,
+         17.25
+        ],
+        [
+         16.95,
+         18.2
+        ]
+       ]
+      }
+     ],
+     "vias": [
+      {
+       "net": "+9V",
+       "x": 8.9,
+       "y": 14.8,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "+9V",
+       "x": 12.35,
+       "y": 18.25,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "+9V",
+       "x": 10,
+       "y": 20.7,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "GND",
+       "x": 4.55,
+       "y": 10.85,
+       "d": 0.45,
+       "drill": 0.3
+      }
+     ],
+     "routed": {
+      "+9V": true,
+      "DISCH": true,
+      "TIMING": true,
+      "CONT": true,
+      "OUT": true,
+      "LED_A": true,
+      "GND": true
+     },
+     "pours": [],
+     "holes": [
+      {
+       "x": 3.6,
+       "y": 3.6,
+       "d": 3.2,
+       "auto": true
+      },
+      {
+       "x": 31.4,
+       "y": 3.6,
+       "d": 3.2,
+       "auto": true
+      },
+      {
+       "x": 31.4,
+       "y": 26.4,
+       "d": 3.2,
+       "auto": true
+      },
+      {
+       "x": 3.6,
+       "y": 26.4,
+       "d": 3.2,
+       "auto": true
+      }
+     ]
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C5125085": {
+      "lcsc": "C5125085",
+      "name": "NE555_C5125085",
+      "mfr_part": "NE555",
+      "manufacturer": "IDCHIP(英锐芯)",
+      "package": "SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL",
+      "prefix": "U",
+      "value": "NE555",
+      "pins": [
+       {
+        "num": "1",
+        "name": "GND",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "TRIG",
+        "side": "L"
+       },
+       {
+        "num": "3",
+        "name": "OUT",
+        "side": "L"
+       },
+       {
+        "num": "4",
+        "name": "RESET",
+        "side": "L"
+       },
+       {
+        "num": "8",
+        "name": "VCC",
+        "side": "R"
+       },
+       {
+        "num": "7",
+        "name": "DISCH",
+        "side": "R"
+       },
+       {
+        "num": "6",
+        "name": "THRES",
+        "side": "R"
+       },
+       {
+        "num": "5",
+        "name": "CONT",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL",
+       "pads": [
+        {
+         "num": "5",
+         "x": 1.905,
+         "y": -2.5999,
+         "w": 0.588,
+         "h": 1.8,
+         "shape": "oval"
+        },
+        {
+         "num": "6",
+         "x": 0.635,
+         "y": -2.5999,
+         "w": 0.588,
+         "h": 1.8,
+         "shape": "oval"
+        },
+        {
+         "num": "7",
+         "x": -0.635,
+         "y": -2.5999,
+         "w": 0.588,
+         "h": 1.8,
+         "shape": "oval"
+        },
+        {
+         "num": "8",
+         "x": -1.905,
+         "y": -2.5999,
+         "w": 0.588,
+         "h": 1.8,
+         "shape": "oval"
+        },
+        {
+         "num": "4",
+         "x": 1.905,
+         "y": 2.5999,
+         "w": 0.588,
+         "h": 1.8,
+         "shape": "oval"
+        },
+        {
+         "num": "3",
+         "x": 0.635,
+         "y": 2.5999,
+         "w": 0.588,
+         "h": 1.8,
+         "shape": "oval"
+        },
+        {
+         "num": "2",
+         "x": -0.635,
+         "y": 2.5999,
+         "w": 0.588,
+         "h": 1.8,
+         "shape": "oval"
+        },
+        {
+         "num": "1",
+         "x": -1.905,
+         "y": 2.5999,
+         "w": 0.588,
+         "h": 1.8,
+         "shape": "oval"
+        }
+       ],
+       "body": [
+        -2.526,
+        -3.5,
+        2.526,
+        3.5
+       ],
+       "model3d": {
+        "uuid": "ec3b9f9b31a74655be3e55848dbee9c1",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 4.9,
+        "h": 6,
+        "title": "SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27"
+       }
+      },
+      "datasheet": "https://so.szlcsc.com/global.html?c=&k=C9843",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "8d577bf860fa4a2d97f3554fd887da63",
+      "puuid": "806a55eb4d3c40ab838f70f86785d85e",
+      "key": "C5125085"
+     }
+    },
+    "edited": 1795531242.401
+   }
+  },
+  {
+   "id": "D4",
+   "kind": "design",
+   "seconds": 29,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "5/5",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "12.4 × 11.9 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 8,
+    "errors": 0,
+    "bad": 0,
+    "steps": 5,
+    "finished": true,
+    "tokens_in": 36597,
+    "tokens_out": 343
+   },
+   "final": "Done: SHT40-AD1B (C2848306, EP to GND) with C1 100 nF, R1/R2 4.7 kΩ pull-ups on SDA/SCL, J1 4-pin header (3V3, GND, SDA, SCL) on the left board edge. ERC clean; PCB 12.4 × 11.9 mm, 4/4 nets routed, DRC passed.",
+   "trace": [
+    "search_parts {\"query\":\"SHT40\",\"limit\":3} → {\"source\":\"jlcpcb+easyeda+community+open\",\"results\":[{\"lcsc\":\"C2848306\",\"part\":\"SHT40-AD1B-R3\",\"brand\":\"Sensirion\",\"package\":\"DFN-4-EP(1.5x1.5)\",\"footprint\":\"DFN-4_L1.5-W1.5-P0.8-TL-EP\",\"stock\":11817,",
+    "get_part {\"lcsc\":\"C2848306\"} → {\"key\":\"C2848306\",\"name\":\"SHT40-AD1B-R3\",\"manufacturer\":\"Sensirion(瑞士盛思锐)\",\"mfr_part\":\"SHT40-AD1B-R3\",\"package\":\"DFN-4_L1.5-W1.5-P0.8-TL-EP\",\"ref_prefix\":\"U\",\"pins\":\"1:SDA 2:SCL 4:VSS 3:VDD 5:EP\",\"foo",
+    "add_components {\"components\":[{\"ref\":\"U1\",\"x\":300,\"y\":200,\"part\":\"C2848306\"},{\"type\":\"capacitor\",\"ref\":\"C1\",\"value\":\"100nF\",\"footprint\":\"0603\",\"x\":420,\"y\":260},{\"type\":\"resistor\",\"ref\":\"R1\",\"value\":\"4.7k\",\"footprint\":\"0603\",\"x\":180,\"y\" → [{\"ref\":\"U1\",\"type\":\"part\",\"value\":\"SHT40-AD1B-R3\",\"x\":300,\"y\":210,\"sheet\":1,\"footprint\":\"LCSC:C2848306\",\"pins\":\"1:SDA 2:SCL 4:VSS 3:VDD 5:EP\"},{\"ref\":\"C1\",\"type\":\"capacitor\",\"value\":\"100nF\",\"x\":420,\"",
+    "connect {\"connections\":[{\"net\":\"+3V3\",\"pins\":[\"J1.1\",\"U1.VDD\",\"C1.1\",\"R1.1\",\"R2.1\"]},{\"net\":\"GND\",\"pins\":[\"J1.2\",\"U1.VSS\",\"U1.EP\",\"C1.2\"]},{\"net\":\"SDA\",\"pins\":[\"J1.3\",\"U1.SDA\",\"R1.2\"]},{\"net\":\"SCL\",\"pins\":[\"J1.4\",\"U1.SCL\",\"R2.2\" → [{\"net\":\"+3V3\",\"pins\":5},{\"net\":\"GND\",\"pins\":4},{\"net\":\"SDA\",\"pins\":3},{\"net\":\"SCL\",\"pins\":3}]",
+    "run_erc {} → ERC passed: no issues",
+    "generate_pcb {} → {\"placement\":{\"board\":{\"w\":12.4,\"h\":11.9,\"shape\":\"rect\"},\"placed\":5,\"compacted\":5,\"fits\":true,\"seconds\":5.1},\"routing\":{\"routed\":4,\"total\":4,\"kept_tracks\":0,\"failed\":[],\"necked_down\":[],\"vias\":3,\"boar",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}",
+    "get_pcb_layout {\"fields\":[\"x\",\"y\",\"rot\",\"size\",\"edge\"]} → {\"board\":{\"w\":12.4,\"h\":11.9,\"shape\":\"rect\"},\"footprints\":[{\"ref\":\"U1\",\"x\":10.15,\"y\":4.25,\"rot\":0,\"size\":[2.46,2.25],\"edge\":null},{\"ref\":\"C1\",\"x\":6.9,\"y\":4,\"rot\":90,\"size\":[1.75,3.25],\"edge\":null},{\"re"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "U1",
+      "type": "part",
+      "value": "SHT40-AD1B-R3",
+      "x": 300,
+      "y": 200,
+      "rot": 0,
+      "lcsc": "C2848306",
+      "footprint": "LCSC:C2848306",
+      "pcb": {
+       "x": 10.15,
+       "y": 4.25,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "100nF",
+      "x": 420,
+      "y": 300,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 6.9,
+       "y": 4,
+       "rot": 90
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "4.7k",
+      "x": 150,
+      "y": 90,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 5.25,
+       "y": 8.35,
+       "rot": 90
+      }
+     },
+     {
+      "ref": "R2",
+      "type": "resistor",
+      "value": "4.7k",
+      "x": 310,
+      "y": 100,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 8.4,
+       "y": 8.8,
+       "rot": 90
+      }
+     },
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "I2C",
+      "x": 60,
+      "y": 210,
+      "rot": 0,
+      "pins": [
+       "3V3",
+       "GND",
+       "SDA",
+       "SCL"
+      ],
+      "footprint": "PinHeader_1x4",
+      "pcb": {
+       "x": 1.25,
+       "y": 6.05,
+       "rot": 0
+      }
+     }
+    ],
+    "nets": {
+     "+3V3": [
+      "J1.1",
+      "U1.3",
+      "C1.1",
+      "R1.1",
+      "R2.1"
+     ],
+     "GND": [
+      "J1.2",
+      "U1.4",
+      "U1.5",
+      "C1.2"
+     ],
+     "SDA": [
+      "J1.3",
+      "U1.1",
+      "R1.2"
+     ],
+     "SCL": [
+      "J1.4",
+      "U1.2",
+      "R2.2"
+     ]
+    },
+    "board": {
+     "w": 12.4,
+     "h": 11.9
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.9,
+         3.175
+        ],
+        [
+         11.025,
+         3.175
+        ],
+        [
+         11.35,
+         3.5
+        ],
+        [
+         11.35,
+         4.2
+        ],
+        [
+         11.2,
+         4.35
+        ],
+        [
+         11.1274,
+         4.35
+        ],
+        [
+         10.8274,
+         4.65
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.8274,
+         4.65
+        ],
+        [
+         10.8274,
+         5.5476
+        ],
+        [
+         8.4,
+         7.975
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         8.4,
+         7.975
+        ],
+        [
+         5.7,
+         7.975
+        ],
+        [
+         5.25,
+         7.525
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.9,
+         3.175
+        ],
+        [
+         2.185,
+         3.175
+        ],
+        [
+         1.25,
+         2.24
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.9,
+         4.825
+        ],
+        [
+         7.225,
+         5.15
+        ],
+        [
+         9.85,
+         5.15
+        ],
+        [
+         10,
+         5
+        ],
+        [
+         10,
+         4.4
+        ],
+        [
+         10.15,
+         4.25
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.15,
+         4.25
+        ],
+        [
+         10.55,
+         3.85
+        ],
+        [
+         10.8274,
+         3.85
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.9,
+         4.825
+        ],
+        [
+         1.295,
+         4.825
+        ],
+        [
+         1.25,
+         4.78
+        ]
+       ]
+      },
+      {
+       "net": "SDA",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         5.25,
+         9.175
+        ],
+        [
+         3.105,
+         9.175
+        ],
+        [
+         1.25,
+         7.32
+        ]
+       ]
+      },
+      {
+       "net": "SDA",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         1.25,
+         7.32
+        ],
+        [
+         1.78,
+         7.32
+        ],
+        [
+         5.25,
+         3.85
+        ]
+       ]
+      },
+      {
+       "net": "SDA",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         5.25,
+         3.85
+        ],
+        [
+         9.4726,
+         3.85
+        ]
+       ]
+      },
+      {
+       "net": "SCL",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         8.4,
+         9.625
+        ],
+        [
+         8.4,
+         9.25
+        ],
+        [
+         8.85,
+         8.8
+        ]
+       ]
+      },
+      {
+       "net": "SCL",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         8.85,
+         8.8
+        ],
+        [
+         8.85,
+         4.7
+        ],
+        [
+         8.9,
+         4.65
+        ]
+       ]
+      },
+      {
+       "net": "SCL",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         8.9,
+         4.65
+        ],
+        [
+         9.4726,
+         4.65
+        ]
+       ]
+      },
+      {
+       "net": "SCL",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         8.4,
+         9.625
+        ],
+        [
+         8.165,
+         9.86
+        ],
+        [
+         1.25,
+         9.86
+        ]
+       ]
+      }
+     ],
+     "vias": [
+      {
+       "net": "SDA",
+       "x": 5.25,
+       "y": 3.85,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "SCL",
+       "x": 8.85,
+       "y": 8.8,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "SCL",
+       "x": 8.9,
+       "y": 4.65,
+       "d": 0.45,
+       "drill": 0.3
+      }
+     ],
+     "routed": {
+      "+3V3": true,
+      "GND": true,
+      "SDA": true,
+      "SCL": true
+     },
+     "pours": [],
+     "holes": []
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C2848306": {
+      "lcsc": "C2848306",
+      "name": "SHT40-AD1B-R3",
+      "mfr_part": "SHT40-AD1B-R3",
+      "manufacturer": "Sensirion(瑞士盛思锐)",
+      "package": "DFN-4_L1.5-W1.5-P0.8-TL-EP",
+      "prefix": "U",
+      "value": "SHT40-AD1B-R3",
+      "pins": [
+       {
+        "num": "1",
+        "name": "SDA",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "SCL",
+        "side": "L"
+       },
+       {
+        "num": "4",
+        "name": "VSS",
+        "side": "R"
+       },
+       {
+        "num": "3",
+        "name": "VDD",
+        "side": "R"
+       },
+       {
+        "num": "5",
+        "name": "EP",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "DFN-4_L1.5-W1.5-P0.8-TL-EP",
+       "pads": [
+        {
+         "num": "1",
+         "x": -0.6774,
+         "y": -0.4,
+         "w": 0.505,
+         "h": 0.42,
+         "shape": "rect"
+        },
+        {
+         "num": "2",
+         "x": -0.6774,
+         "y": 0.4,
+         "w": 0.505,
+         "h": 0.42,
+         "shape": "rect"
+        },
+        {
+         "num": "3",
+         "x": 0.6774,
+         "y": 0.4,
+         "w": 0.505,
+         "h": 0.42,
+         "shape": "rect"
+        },
+        {
+         "num": "4",
+         "x": 0.6774,
+         "y": -0.4,
+         "w": 0.505,
+         "h": 0.42,
+         "shape": "rect"
+        },
+        {
+         "num": "5",
+         "x": 0,
+         "y": 0,
+         "w": 0.4,
+         "h": 1.1,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -0.93,
+        -0.826,
+        0.93,
+        0.826
+       ],
+       "model3d": {
+        "uuid": "09d63d3bb21a495aa100cde68133c9fa",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.52,
+        "h": 1.52,
+        "title": "DFN-4_L1.5-W1.5-P0.8"
+       }
+      },
+      "datasheet": "https://atta.szlcsc.com/upload/public/pdf/source/20210720/C2848306_34971E33C77B50764797513792751601.pdf",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "71ae7ece1de940128deca001fdf3e666",
+      "puuid": "d243d258368c4d11b605e1b814b0df31",
+      "key": "C2848306"
+     }
+    },
+    "edited": 1795531268.107
+   }
+  },
+  {
+   "id": "D5",
+   "kind": "design",
+   "seconds": 21,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "7/7",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "18.3 × 14 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 5,
+    "errors": 0,
+    "bad": 0,
+    "steps": 2,
+    "finished": true,
+    "tokens_in": 13810,
+    "tokens_out": 369
+   },
+   "final": "Done: GPIO (J1) → R1 470 Ω → Q1 MMBT3904 base (R2 10 kΩ pull-down); collector switches the coil low side (J3), D1 1N4148W flyback across the coil (K to +12 V), 12 V in on J2. ERC clean; PCB 18.3 × 14 mm, 5/5 nets routed, DRC passed.",
+   "trace": [
+    "add_components {\"components\":[{\"type\":\"connector\",\"ref\":\"J1\",\"value\":\"GPIO\",\"pins\":[\"GPIO\",\"GND\"],\"x\":60,\"y\":260},{\"type\":\"resistor\",\"ref\":\"R1\",\"value\":\"470\",\"footprint\":\"0603\",\"x\":180,\"y\":260},{\"type\":\"resistor\",\"ref\":\"R2\",\"value\":\"10 → [{\"ref\":\"J1\",\"type\":\"connector\",\"value\":\"GPIO\",\"x\":60,\"y\":260,\"sheet\":1,\"footprint\":\"PinHeader_1x2\",\"pins\":\"1:GPIO 2:GND\"},{\"ref\":\"R1\",\"type\":\"resistor\",\"value\":\"470\",\"x\":180,\"y\":260,\"sheet\":1,\"footpr",
+    "connect {\"connections\":[{\"net\":\"GPIO\",\"pins\":[\"J1.1\",\"R1.1\"]},{\"net\":\"BASE\",\"pins\":[\"R1.2\",\"Q1.B\",\"R2.1\"]},{\"net\":\"GND\",\"pins\":[\"J1.2\",\"R2.2\",\"Q1.E\",\"J2.2\"]},{\"net\":\"+12V\",\"pins\":[\"J2.1\",\"J3.1\",\"D1.K\"]},{\"net\":\"COIL-\",\"pins\":[\"J → [{\"net\":\"GPIO\",\"pins\":2},{\"net\":\"BASE\",\"pins\":3},{\"net\":\"GND\",\"pins\":4},{\"net\":\"+12V\",\"pins\":3},{\"net\":\"COIL-\",\"pins\":3}]",
+    "run_erc {} → ERC passed: no issues",
+    "generate_pcb {} → {\"placement\":{\"board\":{\"w\":18.3,\"h\":14,\"shape\":\"rect\"},\"placed\":7,\"compacted\":5,\"fits\":true,\"seconds\":5.1},\"routing\":{\"routed\":5,\"total\":5,\"kept_tracks\":0,\"failed\":[],\"necked_down\":[],\"vias\":1,\"board\"",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "GPIO",
+      "x": 40,
+      "y": 260,
+      "rot": 0,
+      "pins": [
+       "GPIO",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 9.6,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "470",
+      "x": 170,
+      "y": 260,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 10.05,
+       "y": 10.35,
+       "rot": 90
+      }
+     },
+     {
+      "ref": "R2",
+      "type": "resistor",
+      "value": "10k",
+      "x": 240,
+      "y": 350,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 13.9,
+       "y": 12.15,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "Q1",
+      "type": "npn",
+      "value": "MMBT3904",
+      "x": 330,
+      "y": 250,
+      "rot": 0,
+      "footprint": "SOT23",
+      "pcb": {
+       "x": 5.7,
+       "y": 8.25,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "D1",
+      "type": "diode",
+      "value": "1N4148W",
+      "x": 370,
+      "y": 140,
+      "rot": 0,
+      "footprint": "SOD123",
+      "pcb": {
+       "x": 11,
+       "y": 5.15,
+       "rot": 90
+      }
+     },
+     {
+      "ref": "J2",
+      "type": "connector",
+      "value": "12V IN",
+      "x": 60,
+      "y": 120,
+      "rot": 0,
+      "pins": [
+       "+12V",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 3.5,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "J3",
+      "type": "connector",
+      "value": "COIL",
+      "x": 530,
+      "y": 180,
+      "rot": 0,
+      "pins": [
+       "COIL+",
+       "COIL-"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 17.05,
+       "y": 7.7,
+       "rot": 0
+      }
+     }
+    ],
+    "nets": {
+     "GPIO": [
+      "J1.1",
+      "R1.1"
+     ],
+     "BASE": [
+      "R1.2",
+      "Q1.1",
+      "R2.1"
+     ],
+     "GND": [
+      "J1.2",
+      "R2.2",
+      "Q1.2",
+      "J2.2"
+     ],
+     "+12V": [
+      "J2.1",
+      "J3.1",
+      "D1.1"
+     ],
+     "COIL-": [
+      "J3.2",
+      "Q1.3",
+      "D1.2"
+     ]
+    },
+    "board": {
+     "w": 18.3,
+     "h": 14
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "GPIO",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         1.25,
+         8.33
+        ],
+        [
+         8.855,
+         8.33
+        ],
+        [
+         10.05,
+         9.525
+        ]
+       ]
+      },
+      {
+       "net": "BASE",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.05,
+         11.175
+        ],
+        [
+         12.1,
+         11.175
+        ],
+        [
+         13.075,
+         12.15
+        ]
+       ]
+      },
+      {
+       "net": "BASE",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.05,
+         11.175
+        ],
+        [
+         6.675,
+         11.175
+        ],
+        [
+         4.75,
+         9.25
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.65,
+         9.25
+        ],
+        [
+         6.4,
+         9.25
+        ],
+        [
+         5.95,
+         9.7
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         5.95,
+         9.7
+        ],
+        [
+         2.42,
+         9.7
+        ],
+        [
+         1.25,
+         10.87
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         2.4,
+         9.7
+        ],
+        [
+         2.4,
+         5.92
+        ],
+        [
+         1.25,
+         4.77
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.65,
+         9.25
+        ],
+        [
+         7.9,
+         10.5
+        ],
+        [
+         13.075,
+         10.5
+        ],
+        [
+         14.725,
+         12.15
+        ]
+       ]
+      },
+      {
+       "net": "+12V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11,
+         3.5
+        ],
+        [
+         14.12,
+         3.5
+        ],
+        [
+         17.05,
+         6.43
+        ]
+       ]
+      },
+      {
+       "net": "+12V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11,
+         3.5
+        ],
+        [
+         2.52,
+         3.5
+        ],
+        [
+         1.25,
+         2.23
+        ]
+       ]
+      },
+      {
+       "net": "COIL-",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11,
+         6.8
+        ],
+        [
+         6.15,
+         6.8
+        ],
+        [
+         5.7,
+         7.25
+        ]
+       ]
+      },
+      {
+       "net": "COIL-",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11,
+         6.8
+        ],
+        [
+         14.88,
+         6.8
+        ],
+        [
+         17.05,
+         8.97
+        ]
+       ]
+      }
+     ],
+     "vias": [
+      {
+       "net": "GND",
+       "x": 5.95,
+       "y": 9.7,
+       "d": 0.45,
+       "drill": 0.3
+      }
+     ],
+     "routed": {
+      "GPIO": true,
+      "BASE": true,
+      "GND": true,
+      "+12V": true,
+      "COIL-": true
+     },
+     "pours": [],
+     "holes": []
+    },
+    "connStyle": "auto",
+    "lib": {},
+    "edited": 1795531292.138
+   }
+  },
+  {
+   "id": "D6",
+   "kind": "design",
+   "seconds": 28,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "9/9",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "19.6 × 16.9 mm"
+   },
+   "behaviour": 9,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 99,
+   "stats": {
+    "calls": 7,
+    "errors": 1,
+    "bad": 0,
+    "steps": 3,
+    "finished": true,
+    "tokens_in": 22778,
+    "tokens_out": 519
+   },
+   "final": "Done: OPA340 (C7972, SOT-23-5) non-inverting, R2 91 kΩ / R1 10 kΩ → gain 10.1; R3 100 kΩ input bias to GND, C1 100 nF + C2 10 µF on +5 V; IN (J1), OUT (J2), 5 V (J3) headers. ERC clean; PCB 19.6 × 16.9 mm, 5/5 nets routed, DRC passed.",
+   "trace": [
+    "add_components {\"components\":[{\"type\":\"connector\",\"ref\":\"J1\",\"value\":\"IN\",\"pins\":[\"IN\",\"GND\"],\"x\":60,\"y\":240},{\"type\":\"resistor\",\"ref\":\"R3\",\"value\":\"100k\",\"footprint\":\"0603\",\"x\":150,\"y\":320},{\"type\":\"opamp\",\"ref\":\"U1\",\"value\":\"OPA340\", → [{\"ref\":\"J1\",\"type\":\"connector\",\"value\":\"IN\",\"x\":60,\"y\":240,\"sheet\":1,\"footprint\":\"PinHeader_1x2\",\"pins\":\"1:IN 2:GND\"},{\"ref\":\"R3\",\"type\":\"resistor\",\"value\":\"100k\",\"x\":140,\"y\":320,\"sheet\":1,\"footprint",
+    "connect {\"connections\":[{\"net\":\"IN\",\"pins\":[\"J1.1\",\"U1.3\",\"R3.1\"]},{\"net\":\"FB\",\"pins\":[\"U1.2\",\"R1.1\",\"R2.1\"]},{\"net\":\"OUT\",\"pins\":[\"U1.6\",\"R2.2\",\"J2.1\"]},{\"net\":\"+5V\",\"pins\":[\"J3.1\",\"U1.7\",\"C1.1\",\"C2.1\"]},{\"net\":\"GND\",\"pins\":[\"J → Error: U1 has no pin \"6\". Pins: 3:IN-, 1:IN+, 4:OUT, 5:V+, 2:V-",
+    "run_erc {} → [{\"level\":\"warn\",\"msg\":\"J1.1 (IN) is unconnected\"},{\"level\":\"warn\",\"msg\":\"J1.2 (GND) is unconnected\"},{\"level\":\"warn\",\"msg\":\"R3.1 (1) is unconnected\"},{\"level\":\"warn\",\"msg\":\"R3.2 (2) is unconnected\"},",
+    "connect {\"connections\":[{\"net\":\"IN\",\"pins\":[\"J1.1\",\"U1.IN+\",\"R3.1\"]},{\"net\":\"FB\",\"pins\":[\"U1.IN-\",\"R1.1\",\"R2.1\"]},{\"net\":\"OUT\",\"pins\":[\"U1.OUT\",\"R2.2\",\"J2.1\"]},{\"net\":\"+5V\",\"pins\":[\"J3.1\",\"U1.V+\",\"C1.1\",\"C2.1\"]},{\"net\":\"GND\",\"pi → [{\"net\":\"IN\",\"pins\":3},{\"net\":\"FB\",\"pins\":3},{\"net\":\"OUT\",\"pins\":3},{\"net\":\"+5V\",\"pins\":4},{\"net\":\"GND\",\"pins\":8}]",
+    "run_erc {} → ERC passed: no issues",
+    "generate_pcb {} → {\"placement\":{\"board\":{\"w\":19.6,\"h\":16.9,\"shape\":\"rect\"},\"placed\":9,\"compacted\":5,\"fits\":true,\"seconds\":5.1},\"routing\":{\"routed\":5,\"total\":5,\"kept_tracks\":0,\"failed\":[],\"necked_down\":[],\"vias\":5,\"boar",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "IN",
+      "x": 60,
+      "y": 230,
+      "rot": 0,
+      "pins": [
+       "IN",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 9.8,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "R3",
+      "type": "resistor",
+      "value": "100k",
+      "x": 100,
+      "y": 330,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 13.55,
+       "y": 15.05,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "U1",
+      "type": "opamp",
+      "value": "OPA340",
+      "x": 300,
+      "y": 240,
+      "rot": 0,
+      "footprint": "LCSC:C7972",
+      "pinMap": {
+       "2": "3",
+       "3": "1",
+       "4": "2",
+       "6": "4",
+       "7": "5"
+      },
+      "dbfp": "C7972",
+      "lcscPart": "C7972",
+      "pcb": {
+       "x": 11.7,
+       "y": 8.85,
+       "rot": 270
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "10k",
+      "x": 230,
+      "y": 360,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 5.2,
+       "y": 5.45,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "R2",
+      "type": "resistor",
+      "value": "91k",
+      "x": 360,
+      "y": 360,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 9.65,
+       "y": 4.55,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "100nF",
+      "x": 400,
+      "y": 120,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 5.5,
+       "y": 1.7,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "C2",
+      "type": "capacitor",
+      "value": "10uF",
+      "x": 520,
+      "y": 120,
+      "rot": 0,
+      "footprint": "0805",
+      "pcb": {
+       "x": 6.05,
+       "y": 10.25,
+       "rot": 90
+      }
+     },
+     {
+      "ref": "J2",
+      "type": "connector",
+      "value": "OUT",
+      "x": 540,
+      "y": 240,
+      "rot": 0,
+      "pins": [
+       "OUT",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 18.35,
+       "y": 10.05,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "J3",
+      "type": "connector",
+      "value": "5V IN",
+      "x": 60,
+      "y": 100,
+      "rot": 0,
+      "pins": [
+       "+5V",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 3.65,
+       "rot": 0
+      }
+     }
+    ],
+    "nets": {
+     "IN": [
+      "J1.1",
+      "U1.1",
+      "R3.1"
+     ],
+     "FB": [
+      "U1.3",
+      "R1.1",
+      "R2.1"
+     ],
+     "OUT": [
+      "U1.4",
+      "R2.2",
+      "J2.1"
+     ],
+     "+5V": [
+      "J3.1",
+      "U1.5",
+      "C1.1",
+      "C2.1"
+     ],
+     "GND": [
+      "J1.2",
+      "R3.2",
+      "R1.2",
+      "U1.2",
+      "C1.2",
+      "C2.2",
+      "J2.2",
+      "J3.2"
+     ]
+    },
+    "board": {
+     "w": 19.6,
+     "h": 16.9
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "IN",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         12.65,
+         7.5499
+        ],
+        [
+         12.65,
+         8.05
+        ],
+        [
+         12.3,
+         8.4
+        ]
+       ]
+      },
+      {
+       "net": "IN",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         12.3,
+         8.4
+        ],
+        [
+         14.35,
+         10.45
+        ]
+       ]
+      },
+      {
+       "net": "IN",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         14.35,
+         10.45
+        ],
+        [
+         14.35,
+         15.025
+        ],
+        [
+         14.375,
+         15.05
+        ]
+       ]
+      },
+      {
+       "net": "IN",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         12.1,
+         8.5
+        ],
+        [
+         1.28,
+         8.5
+        ],
+        [
+         1.25,
+         8.53
+        ]
+       ]
+      },
+      {
+       "net": "FB",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.475,
+         4.55
+        ],
+        [
+         10.475,
+         7.2749
+        ],
+        [
+         10.75,
+         7.5499
+        ]
+       ]
+      },
+      {
+       "net": "FB",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.475,
+         4.55
+        ],
+        [
+         9.575,
+         5.45
+        ],
+        [
+         6.025,
+         5.45
+        ]
+       ]
+      },
+      {
+       "net": "OUT",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         10.75,
+         10.1501
+        ],
+        [
+         11.2999,
+         10.1501
+        ],
+        [
+         13.25,
+         8.2
+        ],
+        [
+         13.25,
+         6.05
+        ],
+        [
+         11,
+         3.8
+        ],
+        [
+         9.575,
+         3.8
+        ],
+        [
+         8.825,
+         4.55
+        ]
+       ]
+      },
+      {
+       "net": "OUT",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         13.25,
+         8.2
+        ],
+        [
+         17.77,
+         8.2
+        ],
+        [
+         18.35,
+         8.78
+        ]
+       ]
+      },
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.05,
+         9.3
+        ],
+        [
+         7.75,
+         11
+        ],
+        [
+         11.8001,
+         11
+        ],
+        [
+         12.65,
+         10.1501
+        ]
+       ]
+      },
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.05,
+         9.3
+        ],
+        [
+         5.35,
+         8.6
+        ],
+        [
+         5.35,
+         2.675
+        ],
+        [
+         6.325,
+         1.7
+        ]
+       ]
+      },
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         5.35,
+         2.65
+        ],
+        [
+         1.52,
+         2.65
+        ],
+        [
+         1.25,
+         2.38
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.05,
+         11.2
+        ],
+        [
+         1.38,
+         11.2
+        ],
+        [
+         1.25,
+         11.07
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.05,
+         11.2
+        ],
+        [
+         4.375,
+         9.525
+        ],
+        [
+         4.375,
+         5.45
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.375,
+         5.45
+        ],
+        [
+         1.78,
+         5.45
+        ],
+        [
+         1.25,
+         4.92
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         1.25,
+         4.92
+        ],
+        [
+         1.25,
+         4.8
+        ],
+        [
+         3.95,
+         2.1
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         3.95,
+         2.1
+        ],
+        [
+         4.275,
+         2.1
+        ],
+        [
+         4.675,
+         1.7
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.05,
+         11.2
+        ],
+        [
+         6.8,
+         11.2
+        ],
+        [
+         7,
+         11
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         7,
+         11
+        ],
+        [
+         9,
+         9
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         9,
+         9
+        ],
+        [
+         10.55,
+         9
+        ],
+        [
+         11.35,
+         8.2
+        ],
+        [
+         11.35,
+         7.8999
+        ],
+        [
+         11.7,
+         7.5499
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         7.2,
+         11.1
+        ],
+        [
+         11.15,
+         15.05
+        ],
+        [
+         12.725,
+         15.05
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         12.725,
+         15.05
+        ],
+        [
+         13.475,
+         15.8
+        ],
+        [
+         14.9,
+         15.8
+        ],
+        [
+         15.05,
+         15.65
+        ],
+        [
+         15.05,
+         14.62
+        ],
+        [
+         18.35,
+         11.32
+        ]
+       ]
+      }
+     ],
+     "vias": [
+      {
+       "net": "IN",
+       "x": 12.3,
+       "y": 8.4,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "IN",
+       "x": 14.35,
+       "y": 10.45,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "GND",
+       "x": 3.95,
+       "y": 2.1,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "GND",
+       "x": 7,
+       "y": 11,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "GND",
+       "x": 9,
+       "y": 9,
+       "d": 0.45,
+       "drill": 0.3
+      }
+     ],
+     "routed": {
+      "IN": true,
+      "FB": true,
+      "OUT": true,
+      "+5V": true,
+      "GND": true
+     },
+     "pours": [],
+     "holes": []
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C7972": {
+      "lcsc": "C7972",
+      "name": "LMV321IDBVR",
+      "mfr_part": "LMV321IDBVR",
+      "manufacturer": "TI(德州仪器)",
+      "package": "SOT-23-5_L3.0-W1.7-P0.95-LS2.8-BR",
+      "prefix": "U",
+      "value": "LMV321IDBVR",
+      "pins": [
+       {
+        "num": "1",
+        "name": "+",
+        "side": "L"
+       },
+       {
+        "num": "3",
+        "name": "-",
+        "side": "L"
+       },
+       {
+        "num": "5",
+        "name": "V+",
+        "side": "T"
+       },
+       {
+        "num": "4",
+        "name": "OUT",
+        "side": "R"
+       },
+       {
+        "num": "2",
+        "name": "GND",
+        "side": "B"
+       }
+      ],
+      "footprint": {
+       "name": "SOT-23-5_L3.0-W1.7-P0.95-LS2.8-BR",
+       "pads": [
+        {
+         "num": "5",
+         "x": -1.3001,
+         "y": 0.95,
+         "w": 1.1,
+         "h": 0.6,
+         "shape": "rect"
+        },
+        {
+         "num": "4",
+         "x": -1.3001,
+         "y": -0.95,
+         "w": 1.1,
+         "h": 0.6,
+         "shape": "rect"
+        },
+        {
+         "num": "3",
+         "x": 1.3001,
+         "y": -0.95,
+         "w": 1.1,
+         "h": 0.6,
+         "shape": "rect"
+        },
+        {
+         "num": "2",
+         "x": 1.3001,
+         "y": 0,
+         "w": 1.1,
+         "h": 0.6,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": 1.3001,
+         "y": 0.95,
+         "w": 1.1,
+         "h": 0.6,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.85,
+        -1.55,
+        1.85,
+        1.55
+       ],
+       "model3d": {
+        "uuid": "460193f9bf2d42e58cf3c2f675b07dc6",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 180,
+        "w": 3.02,
+        "h": 2.9,
+        "title": "SOT-23-5_L2.9-W1.6-H1.1-LS2.8-P0.95"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/236104.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "2b1f70f1b7fa4135813d5b1daaed2882",
+      "puuid": "e7f085e4f71344109c090040716070ab",
+      "key": "C7972"
+     }
+    },
+    "edited": 1795531319.98
+   }
+  },
+  {
+   "id": "D7",
+   "kind": "design",
+   "seconds": 22,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "11/11",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "35 × 25 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 6,
+    "errors": 0,
+    "bad": 0,
+    "steps": 2,
+    "finished": true,
+    "tokens_in": 14364,
+    "tokens_out": 498
+   },
+   "final": "Done: 5 V (J1) → AMS1117-3.3 (C6186, 10 µF in / 22 µF out) → SHT40 (C2848306) with 100 nF, 4.7 kΩ SDA/SCL pull-ups, I2C on J2, green status LED with 1 kΩ on 3.3 V. ERC clean; PCB 35 × 25 mm, 6/6 nets routed, GND pour both layers, DRC passed.",
+   "trace": [
+    "add_components {\"components\":[{\"type\":\"connector\",\"ref\":\"J1\",\"value\":\"5V IN\",\"pins\":[\"+5V\",\"GND\"],\"x\":60,\"y\":200},{\"ref\":\"U1\",\"x\":200,\"y\":200,\"part\":\"C6186\"},{\"type\":\"capacitor\",\"ref\":\"C1\",\"value\":\"10uF\",\"footprint\":\"0805\",\"x\":130,\"y\": → [{\"ref\":\"J1\",\"type\":\"connector\",\"value\":\"5V IN\",\"x\":60,\"y\":200,\"sheet\":1,\"footprint\":\"PinHeader_1x2\",\"pins\":\"1:+5V 2:GND\"},{\"ref\":\"U1\",\"type\":\"part\",\"value\":\"AMS1117-3.3\",\"x\":200,\"y\":190,\"sheet\":1,\"fo",
+    "connect {\"connections\":[{\"net\":\"+5V\",\"pins\":[\"J1.1\",\"U1.VIN\",\"C1.1\"]},{\"net\":\"+3V3\",\"pins\":[\"U1.VOUT\",\"C2.1\",\"U2.VDD\",\"C3.1\",\"R1.1\",\"R2.1\",\"R3.1\",\"J2.1\"]},{\"net\":\"SDA\",\"pins\":[\"U2.SDA\",\"R1.2\",\"J2.3\"]},{\"net\":\"SCL\",\"pins\":[\"U2.SC → [{\"net\":\"+5V\",\"pins\":3},{\"net\":\"+3V3\",\"pins\":8},{\"net\":\"SDA\",\"pins\":3},{\"net\":\"SCL\",\"pins\":3},{\"net\":\"LED_A\",\"pins\":2},{\"net\":\"GND\",\"pins\":9}]",
+    "run_erc {} → ERC passed: no issues",
+    "generate_pcb {\"board_width\":35,\"board_height\":25} → {\"placement\":{\"board\":{\"w\":35,\"h\":25,\"shape\":\"rect\"},\"kept_board\":true,\"placed\":11,\"fits\":true,\"parts_area_pct\":17,\"on_edge\":[\"J1:left\",\"J2:right\"]},\"routing\":{\"routed\":6,\"total\":6,\"kept_tracks\":0,\"fa",
+    "add_copper_pour {\"net\":\"GND\",\"layer\":\"both\"} → {\"added\":[0,1],\"pours\":2,\"islands\":[{\"index\":0,\"layer\":\"top\",\"islands\":4,\"removed\":1,\"removed_mm2\":0.72},{\"index\":1,\"layer\":\"bottom\",\"islands\":1,\"removed\":0,\"removed_mm2\":0}],\"note\":\"Pieces of copper ",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "5V IN",
+      "x": 50,
+      "y": 200,
+      "rot": 0,
+      "pins": [
+       "+5V",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 10.2,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "U1",
+      "type": "part",
+      "value": "AMS1117-3.3",
+      "x": 200,
+      "y": 190,
+      "rot": 0,
+      "lcsc": "C6186",
+      "footprint": "LCSC:C6186",
+      "pcb": {
+       "x": 14.85,
+       "y": 6.5,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "10uF",
+      "x": 120,
+      "y": 300,
+      "rot": 0,
+      "footprint": "0805",
+      "pcb": {
+       "x": 5.65,
+       "y": 8.8,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "C2",
+      "type": "capacitor",
+      "value": "22uF",
+      "x": 250,
+      "y": 290,
+      "rot": 0,
+      "footprint": "0805",
+      "pcb": {
+       "x": 19.8,
+       "y": 13.15,
+       "rot": 270
+      }
+     },
+     {
+      "ref": "U2",
+      "type": "part",
+      "value": "SHT40-AD1B-R3",
+      "x": 420,
+      "y": 200,
+      "rot": 0,
+      "lcsc": "C2848306",
+      "footprint": "LCSC:C2848306",
+      "pcb": {
+       "x": 27.05,
+       "y": 11.1,
+       "rot": 270
+      }
+     },
+     {
+      "ref": "C3",
+      "type": "capacitor",
+      "value": "100nF",
+      "x": 520,
+      "y": 310,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 8.8,
+       "y": 12.2,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "4.7k",
+      "x": 330,
+      "y": 90,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 30.4,
+       "y": 7.5,
+       "rot": 90
+      }
+     },
+     {
+      "ref": "R2",
+      "type": "resistor",
+      "value": "4.7k",
+      "x": 490,
+      "y": 90,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 29.7,
+       "y": 14.3,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "R3",
+      "type": "resistor",
+      "value": "1k",
+      "x": 300,
+      "y": 420,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 8.4,
+       "y": 4.35,
+       "rot": 270
+      }
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "GREEN",
+      "x": 390,
+      "y": 340,
+      "rot": 0,
+      "footprint": "0603",
+      "pcb": {
+       "x": 5.6,
+       "y": 4.65,
+       "rot": 270
+      }
+     },
+     {
+      "ref": "J2",
+      "type": "connector",
+      "value": "I2C",
+      "x": 610,
+      "y": 200,
+      "rot": 0,
+      "pins": [
+       "3V3",
+       "GND",
+       "SDA",
+       "SCL"
+      ],
+      "footprint": "PinHeader_1x4",
+      "pcb": {
+       "x": 33.75,
+       "y": 10.2,
+       "rot": 0
+      }
+     }
+    ],
+    "nets": {
+     "+5V": [
+      "J1.1",
+      "U1.3",
+      "C1.1"
+     ],
+     "+3V3": [
+      "U1.2",
+      "U1.4",
+      "C2.1",
+      "U2.3",
+      "C3.1",
+      "R1.1",
+      "R2.1",
+      "R3.1",
+      "J2.1"
+     ],
+     "SDA": [
+      "U2.1",
+      "R1.2",
+      "J2.3"
+     ],
+     "SCL": [
+      "U2.2",
+      "R2.2",
+      "J2.4"
+     ],
+     "LED_A": [
+      "R3.2",
+      "D1.2"
+     ],
+     "GND": [
+      "J1.2",
+      "U1.1",
+      "C1.2",
+      "C2.2",
+      "U2.4",
+      "U2.5",
+      "C3.2",
+      "D1.1",
+      "J2.2"
+     ]
+    },
+    "board": {
+     "w": 35,
+     "h": 25
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.6,
+         8.8
+        ],
+        [
+         11.92,
+         8.8
+        ]
+       ]
+      },
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         6.6,
+         8.8
+        ],
+        [
+         5.65,
+         9.75
+        ],
+        [
+         2.07,
+         9.75
+        ],
+        [
+         1.25,
+         8.93
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         17.86,
+         6.5
+        ],
+        [
+         11.92,
+         6.5
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11.92,
+         6.5
+        ],
+        [
+         9.725,
+         6.5
+        ],
+        [
+         8.4,
+         5.175
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11.92,
+         6.5
+        ],
+        [
+         13.45,
+         8.03
+        ],
+        [
+         13.45,
+         9.5
+        ],
+        [
+         10.75,
+         12.2
+        ],
+        [
+         9.625,
+         12.2
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         17.86,
+         6.5
+        ],
+        [
+         17.86,
+         12.16
+        ],
+        [
+         19.8,
+         14.1
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         19.8,
+         14.1
+        ],
+        [
+         22,
+         14.1
+        ],
+        [
+         25.65,
+         10.45
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         25.65,
+         10.45
+        ],
+        [
+         26.6,
+         10.45
+        ],
+        [
+         27.15,
+         9.9
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         27.15,
+         9.9
+        ],
+        [
+         27.15,
+         10.1226
+        ],
+        [
+         27.45,
+         10.4226
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         25.75,
+         10.65
+        ],
+        [
+         25.75,
+         11.75
+        ],
+        [
+         26.3,
+         12.3
+        ],
+        [
+         26.875,
+         12.3
+        ],
+        [
+         28.875,
+         14.3
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         25.75,
+         10.25
+        ],
+        [
+         25.75,
+         10
+        ],
+        [
+         27.8,
+         7.95
+        ],
+        [
+         29.125,
+         7.95
+        ],
+        [
+         30.4,
+         6.675
+        ]
+       ]
+      },
+      {
+       "net": "+3V3",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         30.4,
+         6.675
+        ],
+        [
+         33.465,
+         6.675
+        ],
+        [
+         33.75,
+         6.39
+        ]
+       ]
+      },
+      {
+       "net": "SDA",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         30.4,
+         8.325
+        ],
+        [
+         30.605,
+         8.325
+        ],
+        [
+         33.75,
+         11.47
+        ]
+       ]
+      },
+      {
+       "net": "SDA",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         30.4,
+         8.325
+        ],
+        [
+         27.875,
+         8.325
+        ],
+        [
+         26.15,
+         10.05
+        ],
+        [
+         26.15,
+         11.35
+        ],
+        [
+         26.4,
+         11.6
+        ],
+        [
+         26.4726,
+         11.6
+        ],
+        [
+         26.65,
+         11.7774
+        ]
+       ]
+      },
+      {
+       "net": "SCL",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         30.525,
+         14.3
+        ],
+        [
+         33.46,
+         14.3
+        ],
+        [
+         33.75,
+         14.01
+        ]
+       ]
+      },
+      {
+       "net": "SCL",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         30.525,
+         14.3
+        ],
+        [
+         28.0024,
+         11.7774
+        ],
+        [
+         27.45,
+         11.7774
+        ]
+       ]
+      },
+      {
+       "net": "LED_A",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         8.4,
+         3.525
+        ],
+        [
+         5.9,
+         3.525
+        ],
+        [
+         5.6,
+         3.825
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         19.8,
+         12.2
+        ],
+        [
+         23.15,
+         12.2
+        ],
+        [
+         23.95,
+         11.4
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         23.95,
+         11.4
+        ],
+        [
+         27.5,
+         11.4
+        ],
+        [
+         27.9,
+         11
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         27.9,
+         11
+        ],
+        [
+         27.15,
+         11
+        ],
+        [
+         26.65,
+         10.5
+        ],
+        [
+         26.65,
+         10.4226
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         28.1,
+         10.9
+        ],
+        [
+         31.78,
+         10.9
+        ],
+        [
+         33.75,
+         8.93
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         19.8,
+         12.2
+        ],
+        [
+         19.8,
+         5.05
+        ],
+        [
+         18.95,
+         4.2
+        ],
+        [
+         11.92,
+         4.2
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         11.92,
+         4.2
+        ],
+        [
+         6.875,
+         4.2
+        ],
+        [
+         5.6,
+         5.475
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         5.6,
+         5.475
+        ],
+        [
+         5.6,
+         7.9
+        ],
+        [
+         4.7,
+         8.8
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         8.8
+        ],
+        [
+         4.35,
+         8.8
+        ],
+        [
+         3.9,
+         9.25
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "w": 0.2,
+       "pts": [
+        [
+         3.9,
+         9.25
+        ],
+        [
+         3.47,
+         9.25
+        ],
+        [
+         1.25,
+         11.47
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         1.25,
+         11.47
+        ],
+        [
+         7.245,
+         11.47
+        ],
+        [
+         7.975,
+         12.2
+        ]
+       ]
+      }
+     ],
+     "vias": [
+      {
+       "net": "+3V3",
+       "x": 25.65,
+       "y": 10.45,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "+3V3",
+       "x": 27.15,
+       "y": 9.9,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "GND",
+       "x": 23.95,
+       "y": 11.4,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "GND",
+       "x": 27.9,
+       "y": 11,
+       "d": 0.45,
+       "drill": 0.3
+      },
+      {
+       "net": "GND",
+       "x": 3.9,
+       "y": 9.25,
+       "d": 0.45,
+       "drill": 0.3
+      }
+     ],
+     "routed": {
+      "+5V": true,
+      "+3V3": true,
+      "SDA": true,
+      "SCL": true,
+      "LED_A": true,
+      "GND": true
+     },
+     "pours": [
+      {
+       "net": "GND",
+       "layer": "F",
+       "whole": true
+      },
+      {
+       "net": "GND",
+       "layer": "B",
+       "whole": true
+      }
+     ],
+     "holes": []
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C6186": {
+      "lcsc": "C6186",
+      "name": "AMS1117-3.3",
+      "mfr_part": "AMS1117-3.3",
+      "manufacturer": "Advanced Monolithic Systems",
+      "package": "SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR",
+      "prefix": "U",
+      "value": "AMS1117-3.3",
+      "pins": [
+       {
+        "num": "1",
+        "name": "GND",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "VOUT",
+        "side": "L"
+       },
+       {
+        "num": "3",
+        "name": "VIN",
+        "side": "L"
+       },
+       {
+        "num": "4",
+        "name": "VOUT",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR",
+       "pads": [
+        {
+         "num": "1",
+         "x": 2.93,
+         "y": 2.3,
+         "w": 2.5,
+         "h": 1.1,
+         "shape": "rect"
+        },
+        {
+         "num": "2",
+         "x": 2.93,
+         "y": 0,
+         "w": 2.5,
+         "h": 1.1,
+         "shape": "rect"
+        },
+        {
+         "num": "3",
+         "x": 2.93,
+         "y": -2.3,
+         "w": 2.5,
+         "h": 1.1,
+         "shape": "rect"
+        },
+        {
+         "num": "4",
+         "x": -3.01,
+         "y": 0,
+         "w": 2.34,
+         "h": 3.6,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -4.18,
+        -3.326,
+        4.18,
+        3.326
+       ],
+       "model3d": {
+        "uuid": "e80246a9471445bfb635be848806a22e",
+        "x": -0.14,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 180,
+        "w": 7.1,
+        "h": 6.5,
+        "title": "SOT-223-4P_L6.5-W3.5-H1.6-LS7.0-P2.30"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/410724.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "588dac9f81df8f83843513972963b454",
+      "puuid": "02ae667aca734971be8a5f58143dd564",
+      "key": "C6186"
+     },
+     "C2848306": {
+      "lcsc": "C2848306",
+      "name": "SHT40-AD1B-R3",
+      "mfr_part": "SHT40-AD1B-R3",
+      "manufacturer": "Sensirion(瑞士盛思锐)",
+      "package": "DFN-4_L1.5-W1.5-P0.8-TL-EP",
+      "prefix": "U",
+      "value": "SHT40-AD1B-R3",
+      "pins": [
+       {
+        "num": "1",
+        "name": "SDA",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "SCL",
+        "side": "L"
+       },
+       {
+        "num": "4",
+        "name": "VSS",
+        "side": "R"
+       },
+       {
+        "num": "3",
+        "name": "VDD",
+        "side": "R"
+       },
+       {
+        "num": "5",
+        "name": "EP",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "DFN-4_L1.5-W1.5-P0.8-TL-EP",
+       "pads": [
+        {
+         "num": "1",
+         "x": -0.6774,
+         "y": -0.4,
+         "w": 0.505,
+         "h": 0.42,
+         "shape": "rect"
+        },
+        {
+         "num": "2",
+         "x": -0.6774,
+         "y": 0.4,
+         "w": 0.505,
+         "h": 0.42,
+         "shape": "rect"
+        },
+        {
+         "num": "3",
+         "x": 0.6774,
+         "y": 0.4,
+         "w": 0.505,
+         "h": 0.42,
+         "shape": "rect"
+        },
+        {
+         "num": "4",
+         "x": 0.6774,
+         "y": -0.4,
+         "w": 0.505,
+         "h": 0.42,
+         "shape": "rect"
+        },
+        {
+         "num": "5",
+         "x": 0,
+         "y": 0,
+         "w": 0.4,
+         "h": 1.1,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -0.93,
+        -0.826,
+        0.93,
+        0.826
+       ],
+       "model3d": {
+        "uuid": "09d63d3bb21a495aa100cde68133c9fa",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.52,
+        "h": 1.52,
+        "title": "DFN-4_L1.5-W1.5-P0.8"
+       }
+      },
+      "datasheet": "https://atta.szlcsc.com/upload/public/pdf/source/20210720/C2848306_34971E33C77B50764797513792751601.pdf",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "71ae7ece1de940128deca001fdf3e666",
+      "puuid": "d243d258368c4d11b605e1b814b0df31",
+      "key": "C2848306"
+     }
+    },
+    "edited": 1795531341.853
+   }
+  },
+  {
+   "id": "D8",
+   "kind": "design",
+   "seconds": 14,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": []
+   },
+   "behaviour": 10,
+   "total": 100,
+   "stats": {
+    "calls": 3,
+    "errors": 0,
+    "bad": 0,
+    "steps": 2,
+    "finished": true,
+    "tokens_in": 13388,
+    "tokens_out": 312
+   },
+   "final": "Done (schematic only): J1 12 V → R1 30 kΩ / R2 10 kΩ divider (3.0 V) → R3 10 kΩ + C1 100 nF low-pass (≈91 Hz including the 7.5 kΩ divider source) → OUT on J2 for the ADC. ERC clean.",
+   "trace": [
+    "add_components {\"components\":[{\"type\":\"connector\",\"ref\":\"J1\",\"value\":\"12V IN\",\"pins\":[\"VIN\",\"GND\"],\"x\":60,\"y\":200},{\"type\":\"resistor\",\"ref\":\"R1\",\"value\":\"30k\",\"footprint\":\"0603\",\"x\":180,\"y\":140},{\"type\":\"resistor\",\"ref\":\"R2\",\"value\":\"1 → [{\"ref\":\"J1\",\"type\":\"connector\",\"value\":\"12V IN\",\"x\":60,\"y\":200,\"sheet\":1,\"footprint\":\"PinHeader_1x2\",\"pins\":\"1:VIN 2:GND\"},{\"ref\":\"R1\",\"type\":\"resistor\",\"value\":\"30k\",\"x\":180,\"y\":140,\"sheet\":1,\"footp",
+    "connect {\"connections\":[{\"net\":\"VIN\",\"pins\":[\"J1.1\",\"R1.1\"]},{\"net\":\"DIV\",\"pins\":[\"R1.2\",\"R2.1\",\"R3.1\"]},{\"net\":\"OUT\",\"pins\":[\"R3.2\",\"C1.1\",\"J2.1\"]},{\"net\":\"GND\",\"pins\":[\"J1.2\",\"R2.2\",\"C1.2\",\"J2.2\"]}]} → [{\"net\":\"VIN\",\"pins\":2},{\"net\":\"DIV\",\"pins\":3},{\"net\":\"OUT\",\"pins\":3},{\"net\":\"GND\",\"pins\":4}]",
+    "run_erc {} → ERC passed: no issues"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "12V IN",
+      "x": 60,
+      "y": 200,
+      "rot": 0,
+      "pins": [
+       "VIN",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2"
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "30k",
+      "x": 180,
+      "y": 130,
+      "rot": 0,
+      "footprint": "0603"
+     },
+     {
+      "ref": "R2",
+      "type": "resistor",
+      "value": "10k",
+      "x": 180,
+      "y": 280,
+      "rot": 0,
+      "footprint": "0603"
+     },
+     {
+      "ref": "R3",
+      "type": "resistor",
+      "value": "10k",
+      "x": 300,
+      "y": 200,
+      "rot": 0,
+      "footprint": "0603"
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "100nF",
+      "x": 400,
+      "y": 290,
+      "rot": 0,
+      "footprint": "0603"
+     },
+     {
+      "ref": "J2",
+      "type": "connector",
+      "value": "ADC",
+      "x": 520,
+      "y": 200,
+      "rot": 0,
+      "pins": [
+       "OUT",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2"
+     }
+    ],
+    "nets": {
+     "VIN": [
+      "J1.1",
+      "R1.1"
+     ],
+     "DIV": [
+      "R1.2",
+      "R2.1",
+      "R3.1"
+     ],
+     "OUT": [
+      "R3.2",
+      "C1.1",
+      "J2.1"
+     ],
+     "GND": [
+      "J1.2",
+      "R2.2",
+      "C1.2",
+      "J2.2"
+     ]
+    },
+    "board": {
+     "w": 0,
+     "h": 0
+    },
+    "pcb": {
+     "traces": [],
+     "vias": [],
+     "routed": {}
+    },
+    "connStyle": "auto",
+    "lib": {},
+    "edited": 1795531355.664
+   }
+  },
+  {
+   "id": "R1",
+   "kind": "repair",
+   "seconds": 7,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": []
+   },
+   "behaviour": 10,
+   "total": 100,
+   "stats": {
+    "calls": 3,
+    "errors": 0,
+    "bad": 0,
+    "steps": 2,
+    "finished": true,
+    "tokens_in": 12971,
+    "tokens_out": 85
+   },
+   "final": "Fixed: D1 anode (pin 1, A) was not connected — LED_A had only R1.2. Connected D1.A to LED_A: +5V → R1 330 Ω → D1 → GND (≈9 mA). ERC passes.",
+   "trace": [
+    "run_erc {} → [{\"level\":\"warn\",\"msg\":\"D1.1 (A) is unconnected\"},{\"level\":\"error\",\"msg\":\"Net LED_A has only one pin (R1.2)\"}]",
+    "connect {\"connections\":[{\"net\":\"LED_A\",\"pins\":[\"R1.2\",\"D1.A\"]}]} → [{\"net\":\"LED_A\",\"pins\":2}]",
+    "run_erc {} → ERC passed: no issues"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "PWR",
+      "x": 100,
+      "y": 100,
+      "rot": 0,
+      "pins": [
+       "VIN",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2"
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "330",
+      "x": 240,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C25804",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C25804",
+      "lcscPart": "C25804"
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "RED",
+      "x": 410,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C2286",
+      "pinMap": {
+       "1": "2",
+       "2": "1"
+      },
+      "dbfp": "C2286",
+      "lcscPart": "C2286"
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "100n",
+      "x": 250,
+      "y": 220,
+      "rot": 0,
+      "footprint": "LCSC:C14663",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C14663",
+      "lcscPart": "C14663"
+     }
+    ],
+    "nets": {
+     "+5V": [
+      "J1.1",
+      "R1.1",
+      "C1.1"
+     ],
+     "LED_A": [
+      "R1.2",
+      "D1.1"
+     ],
+     "GND": [
+      "D1.2",
+      "J1.2",
+      "C1.2"
+     ]
+    },
+    "board": {
+     "w": 0,
+     "h": 0
+    },
+    "pcb": {
+     "traces": [],
+     "vias": [],
+     "routed": {}
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C25804": {
+      "lcsc": "C25804",
+      "name": "0603WAF1002T5E",
+      "mfr_part": "0603WAF1002T5E",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "package": "R0603",
+      "prefix": "R",
+      "value": "10kΩ",
+      "pins": [
+       {
+        "num": "1",
+        "name": "1",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "2",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "R0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.385,
+        -0.661,
+        1.385,
+        0.661
+       ],
+       "model3d": {
+        "uuid": "6bd5cd867e9542ebae21caaf5d2d4c4d",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 90,
+        "w": 1.62,
+        "h": 0.81,
+        "title": "R0603"
+       }
+      },
+      "datasheet": "https://www.mouser.in/datasheet/2/447/PYu_RT_1_to_0_01_RoHS_L_11-1669912.pdf",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "b210af5a1436310a86e8b108e2e5a90b",
+      "puuid": "398691f1f785460098bbe5ee6590333c",
+      "key": "C25804"
+     },
+     "C2286": {
+      "lcsc": "C2286",
+      "name": "KT-0603R",
+      "mfr_part": "KT-0603R",
+      "manufacturer": "KENTO",
+      "package": "LED-SMD_L1.6-W0.8-R-RD",
+      "prefix": "LED",
+      "value": "KT-0603R",
+      "pins": [
+       {
+        "num": "2",
+        "name": "K",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "A",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "LED-SMD_L1.6-W0.8-R-RD",
+       "pads": [
+        {
+         "num": "2",
+         "x": -0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": 0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.7,
+        -0.701,
+        1.471,
+        0.701
+       ],
+       "model3d": {
+        "uuid": "0da0275bf7a84667bce8747a921fb9e3",
+        "x": -0.0001,
+        "y": -0.0001,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.62,
+        "h": 0.8,
+        "title": "LED0603_L1.6-W0.8-H0.6"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/347796.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "0806368f73e1232ca543f14a515367b4",
+      "puuid": "5294e4298d7a4d9d966148b3893abd7c",
+      "key": "C2286"
+     },
+     "C14663": {
+      "lcsc": "C14663",
+      "name": "CC0603KRX7R9BB104",
+      "mfr_part": "CC0603KRX7R9BB104",
+      "manufacturer": "YAGEO(国巨)",
+      "package": "C0603",
+      "prefix": "C",
+      "value": "100nF",
+      "pins": [
+       {
+        "num": "2",
+        "name": "2",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "1",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "C0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.39,
+        -0.71,
+        1.39,
+        0.71
+       ],
+       "model3d": {
+        "uuid": "ac9b32e974bc448eab36b1293f859dcb",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.6,
+        "h": 0.8,
+        "title": "C0603_L1.6-W0.8-H0.8"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/362304.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "154b66255b01a09bf1c88bb1ea89be78",
+      "puuid": "f8151fdc728a41ebbc304e11d39e5437",
+      "key": "C14663"
+     }
+    },
+    "edited": 1795531363.401
+   }
+  },
+  {
+   "id": "R2",
+   "kind": "repair",
+   "seconds": 6,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "4/4",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "25 × 20 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 2,
+    "errors": 0,
+    "bad": 0,
+    "steps": 2,
+    "finished": true,
+    "tokens_in": 13075,
+    "tokens_out": 42
+   },
+   "final": "Done: re-routed the board — 3/3 nets routed, no vias, DRC passed.",
+   "trace": [
+    "route_pcb {} → {\"routing\":{\"routed\":3,\"total\":3,\"kept_tracks\":0,\"failed\":[],\"necked_down\":[],\"vias\":0,\"board\":{\"w\":25,\"h\":20,\"shape\":\"rect\"},\"grid_mm\":0.05,\"seconds\":0.6,\"passes\":1,\"ripup_iterations\":0,\"via_in_pad\":",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "PWR",
+      "x": 100,
+      "y": 100,
+      "rot": 0,
+      "pins": [
+       "VIN",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 6.85,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "330",
+      "x": 240,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C25804",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C25804",
+      "lcscPart": "C25804",
+      "pcb": {
+       "x": 8.65,
+       "y": 4.85,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "RED",
+      "x": 410,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C2286",
+      "pinMap": {
+       "1": "2",
+       "2": "1"
+      },
+      "dbfp": "C2286",
+      "lcscPart": "C2286",
+      "pcb": {
+       "x": 9.6,
+       "y": 8.25,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "100n",
+      "x": 250,
+      "y": 220,
+      "rot": 0,
+      "footprint": "LCSC:C14663",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C14663",
+      "lcscPart": "C14663",
+      "pcb": {
+       "x": 4.7,
+       "y": 6.35,
+       "rot": 90
+      }
+     }
+    ],
+    "nets": {
+     "+5V": [
+      "J1.1",
+      "R1.1",
+      "C1.1"
+     ],
+     "LED_A": [
+      "R1.2",
+      "D1.1"
+     ],
+     "GND": [
+      "D1.2",
+      "J1.2",
+      "C1.2"
+     ]
+    },
+    "board": {
+     "w": 25,
+     "h": 20
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         5.65
+        ],
+        [
+         7.0966,
+         5.65
+        ],
+        [
+         7.8966,
+         4.85
+        ]
+       ]
+      },
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         5.65
+        ],
+        [
+         1.32,
+         5.65
+        ],
+        [
+         1.25,
+         5.58
+        ]
+       ]
+      },
+      {
+       "net": "LED_A",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         9.4034,
+         4.85
+        ],
+        [
+         9.4034,
+         7.6965
+        ],
+        [
+         8.8499,
+         8.25
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         7.05
+        ],
+        [
+         2.32,
+         7.05
+        ],
+        [
+         1.25,
+         8.12
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         7.05
+        ],
+        [
+         6.6,
+         8.95
+        ],
+        [
+         9.6501,
+         8.95
+        ],
+        [
+         10.3501,
+         8.25
+        ]
+       ]
+      }
+     ],
+     "vias": [],
+     "routed": {
+      "+5V": true,
+      "LED_A": true,
+      "GND": true
+     },
+     "pours": [],
+     "holes": [],
+     "nextId": 6
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C25804": {
+      "lcsc": "C25804",
+      "name": "0603WAF1002T5E",
+      "mfr_part": "0603WAF1002T5E",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "package": "R0603",
+      "prefix": "R",
+      "value": "10kΩ",
+      "pins": [
+       {
+        "num": "1",
+        "name": "1",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "2",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "R0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.385,
+        -0.661,
+        1.385,
+        0.661
+       ],
+       "model3d": {
+        "uuid": "6bd5cd867e9542ebae21caaf5d2d4c4d",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 90,
+        "w": 1.62,
+        "h": 0.81,
+        "title": "R0603"
+       }
+      },
+      "datasheet": "https://www.mouser.in/datasheet/2/447/PYu_RT_1_to_0_01_RoHS_L_11-1669912.pdf",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "b210af5a1436310a86e8b108e2e5a90b",
+      "puuid": "398691f1f785460098bbe5ee6590333c",
+      "key": "C25804"
+     },
+     "C2286": {
+      "lcsc": "C2286",
+      "name": "KT-0603R",
+      "mfr_part": "KT-0603R",
+      "manufacturer": "KENTO",
+      "package": "LED-SMD_L1.6-W0.8-R-RD",
+      "prefix": "LED",
+      "value": "KT-0603R",
+      "pins": [
+       {
+        "num": "2",
+        "name": "K",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "A",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "LED-SMD_L1.6-W0.8-R-RD",
+       "pads": [
+        {
+         "num": "2",
+         "x": -0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": 0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.7,
+        -0.701,
+        1.471,
+        0.701
+       ],
+       "model3d": {
+        "uuid": "0da0275bf7a84667bce8747a921fb9e3",
+        "x": -0.0001,
+        "y": -0.0001,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.62,
+        "h": 0.8,
+        "title": "LED0603_L1.6-W0.8-H0.6"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/347796.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "0806368f73e1232ca543f14a515367b4",
+      "puuid": "5294e4298d7a4d9d966148b3893abd7c",
+      "key": "C2286"
+     },
+     "C14663": {
+      "lcsc": "C14663",
+      "name": "CC0603KRX7R9BB104",
+      "mfr_part": "CC0603KRX7R9BB104",
+      "manufacturer": "YAGEO(国巨)",
+      "package": "C0603",
+      "prefix": "C",
+      "value": "100nF",
+      "pins": [
+       {
+        "num": "2",
+        "name": "2",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "1",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "C0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.39,
+        -0.71,
+        1.39,
+        0.71
+       ],
+       "model3d": {
+        "uuid": "ac9b32e974bc448eab36b1293f859dcb",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.6,
+        "h": 0.8,
+        "title": "C0603_L1.6-W0.8-H0.8"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/362304.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "154b66255b01a09bf1c88bb1ea89be78",
+      "puuid": "f8151fdc728a41ebbc304e11d39e5437",
+      "key": "C14663"
+     }
+    },
+    "edited": 1795531371.054
+   }
+  },
+  {
+   "id": "R3",
+   "kind": "repair",
+   "seconds": 10,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "4/4",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "25 × 20 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 6,
+    "errors": 0,
+    "bad": 0,
+    "steps": 3,
+    "finished": true,
+    "tokens_in": 20218,
+    "tokens_out": 117
+   },
+   "final": "Fixed: D1 overlapped R1 (pads touching); moved D1 to (15, 8.25). No overlaps left, 3/3 nets routed, DRC passed.",
+   "trace": [
+    "check_placement {} → {\"ok\":false,\"problems\":[{\"type\":\"overlap\",\"parts\":[\"R1\",\"D1\"],\"overlap_mm\":1.32,\"pads_gap_mm\":0,\"pads_clear\":false,\"msg\":\"R1 overlaps D1 by 1.32 mm — PADS TOUCH (rule 0.105)\"}]}",
+    "get_pcb_layout {\"fields\":[\"x\",\"y\",\"rot\",\"size\"]} → {\"board\":{\"w\":25,\"h\":20,\"shape\":\"rect\"},\"footprints\":[{\"ref\":\"J1\",\"x\":1.25,\"y\":6.85,\"rot\":0,\"size\":[2.5,5.04]},{\"ref\":\"R1\",\"x\":9.9,\"y\":8.25,\"rot\":0,\"size\":[3.37,1.92]},{\"ref\":\"D1\",\"x\":9.6,\"y\":8.25,\"ro",
+    "place_footprint {\"ref\":\"D1\",\"x\":15,\"y\":8.25,\"rot\":180} → {\"ref\":\"D1\",\"x\":15,\"y\":8.25,\"rot\":180,\"side\":\"top\",\"edge\":null,\"outside_board\":false,\"note\":\"Tracks are kept; run route_pcb to connect anything left unrouted.\"}",
+    "check_placement {} → {\"ok\":true,\"problems\":[]}",
+    "route_pcb {} → {\"routing\":{\"routed\":3,\"total\":3,\"kept_tracks\":0,\"failed\":[],\"necked_down\":[],\"vias\":0,\"board\":{\"w\":25,\"h\":20,\"shape\":\"rect\"},\"grid_mm\":0.05,\"seconds\":0.5,\"passes\":1,\"ripup_iterations\":0,\"via_in_pad\":",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "PWR",
+      "x": 100,
+      "y": 100,
+      "rot": 0,
+      "pins": [
+       "VIN",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 6.85,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "330",
+      "x": 240,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C25804",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C25804",
+      "lcscPart": "C25804",
+      "pcb": {
+       "x": 9.9,
+       "y": 8.25,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "RED",
+      "x": 410,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C2286",
+      "pinMap": {
+       "1": "2",
+       "2": "1"
+      },
+      "dbfp": "C2286",
+      "lcscPart": "C2286",
+      "pcb": {
+       "x": 15,
+       "y": 8.25,
+       "rot": 180,
+       "free": true
+      }
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "100n",
+      "x": 250,
+      "y": 220,
+      "rot": 0,
+      "footprint": "LCSC:C14663",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C14663",
+      "lcscPart": "C14663",
+      "pcb": {
+       "x": 4.7,
+       "y": 6.35,
+       "rot": 90
+      }
+     }
+    ],
+    "nets": {
+     "+5V": [
+      "J1.1",
+      "R1.1",
+      "C1.1"
+     ],
+     "LED_A": [
+      "R1.2",
+      "D1.1"
+     ],
+     "GND": [
+      "D1.2",
+      "J1.2",
+      "C1.2"
+     ]
+    },
+    "board": {
+     "w": 25,
+     "h": 20
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         5.65
+        ],
+        [
+         1.32,
+         5.65
+        ],
+        [
+         1.25,
+         5.58
+        ]
+       ]
+      },
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         5.65
+        ],
+        [
+         6.5466,
+         5.65
+        ],
+        [
+         9.1466,
+         8.25
+        ]
+       ]
+      },
+      {
+       "net": "LED_A",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         14.2499,
+         8.25
+        ],
+        [
+         10.6534,
+         8.25
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         7.05
+        ],
+        [
+         2.32,
+         7.05
+        ],
+        [
+         1.25,
+         8.12
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         7.05
+        ],
+        [
+         6.65,
+         9
+        ],
+        [
+         15.0001,
+         9
+        ],
+        [
+         15.7501,
+         8.25
+        ]
+       ]
+      }
+     ],
+     "vias": [],
+     "routed": {
+      "+5V": true,
+      "LED_A": true,
+      "GND": true
+     },
+     "pours": [],
+     "holes": []
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C25804": {
+      "lcsc": "C25804",
+      "name": "0603WAF1002T5E",
+      "mfr_part": "0603WAF1002T5E",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "package": "R0603",
+      "prefix": "R",
+      "value": "10kΩ",
+      "pins": [
+       {
+        "num": "1",
+        "name": "1",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "2",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "R0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.385,
+        -0.661,
+        1.385,
+        0.661
+       ],
+       "model3d": {
+        "uuid": "6bd5cd867e9542ebae21caaf5d2d4c4d",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 90,
+        "w": 1.62,
+        "h": 0.81,
+        "title": "R0603"
+       }
+      },
+      "datasheet": "https://www.mouser.in/datasheet/2/447/PYu_RT_1_to_0_01_RoHS_L_11-1669912.pdf",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "b210af5a1436310a86e8b108e2e5a90b",
+      "puuid": "398691f1f785460098bbe5ee6590333c",
+      "key": "C25804"
+     },
+     "C2286": {
+      "lcsc": "C2286",
+      "name": "KT-0603R",
+      "mfr_part": "KT-0603R",
+      "manufacturer": "KENTO",
+      "package": "LED-SMD_L1.6-W0.8-R-RD",
+      "prefix": "LED",
+      "value": "KT-0603R",
+      "pins": [
+       {
+        "num": "2",
+        "name": "K",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "A",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "LED-SMD_L1.6-W0.8-R-RD",
+       "pads": [
+        {
+         "num": "2",
+         "x": -0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": 0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.7,
+        -0.701,
+        1.471,
+        0.701
+       ],
+       "model3d": {
+        "uuid": "0da0275bf7a84667bce8747a921fb9e3",
+        "x": -0.0001,
+        "y": -0.0001,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.62,
+        "h": 0.8,
+        "title": "LED0603_L1.6-W0.8-H0.6"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/347796.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "0806368f73e1232ca543f14a515367b4",
+      "puuid": "5294e4298d7a4d9d966148b3893abd7c",
+      "key": "C2286"
+     },
+     "C14663": {
+      "lcsc": "C14663",
+      "name": "CC0603KRX7R9BB104",
+      "mfr_part": "CC0603KRX7R9BB104",
+      "manufacturer": "YAGEO(国巨)",
+      "package": "C0603",
+      "prefix": "C",
+      "value": "100nF",
+      "pins": [
+       {
+        "num": "2",
+        "name": "2",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "1",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "C0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.39,
+        -0.71,
+        1.39,
+        0.71
+       ],
+       "model3d": {
+        "uuid": "ac9b32e974bc448eab36b1293f859dcb",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.6,
+        "h": 0.8,
+        "title": "C0603_L1.6-W0.8-H0.8"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/362304.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "154b66255b01a09bf1c88bb1ea89be78",
+      "puuid": "f8151fdc728a41ebbc304e11d39e5437",
+      "key": "C14663"
+     }
+    },
+    "edited": 1795531383.361
+   }
+  },
+  {
+   "id": "R4",
+   "kind": "repair",
+   "seconds": 9,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "4/4",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "25 × 20 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 4,
+    "errors": 0,
+    "bad": 0,
+    "steps": 3,
+    "finished": true,
+    "tokens_in": 19990,
+    "tokens_out": 101
+   },
+   "final": "Fixed: a GND track crossed D1 pad 1 and R1 pad 2 (2 shorts + a clearance error). Removed the 3 GND tracks and re-routed GND around them; all nets routed, DRC passed.",
+   "trace": [
+    "run_drc {\"full\":true} → {\"summary\":\"3 errors, 0 warnings\",\"errors\":3,\"warnings\":0,\"by_type\":{\"short\":2,\"clearance\":1},\"violations\":[{\"type\":\"short\",\"severity\":\"error\",\"msg\":\"Short between pad D1.1 and trace GND (rule 0.16)\",",
+    "remove_tracks {\"net\":\"GND\"} → {\"removed_tracks\":3,\"removed_vias\":0,\"removed\":{\"tracks\":[{\"id\":\"t4\",\"net\":\"GND\",\"layer\":\"top\"},{\"id\":\"t5\",\"net\":\"GND\",\"layer\":\"top\"},{\"id\":\"t6\",\"net\":\"GND\",\"layer\":\"top\"}],\"vias\":[]},\"nets\":[\"GND\"],\"",
+    "route_pcb {\"nets\":[\"GND\"]} → {\"routing\":{\"routed\":1,\"total\":1,\"kept_tracks\":3,\"failed\":[],\"necked_down\":[],\"vias\":0,\"board\":{\"w\":25,\"h\":20,\"shape\":\"rect\"},\"grid_mm\":0.05,\"seconds\":0.2,\"passes\":1,\"ripup_iterations\":0,\"via_in_pad\":",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "PWR",
+      "x": 100,
+      "y": 100,
+      "rot": 0,
+      "pins": [
+       "VIN",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 6.85,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "330",
+      "x": 240,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C25804",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C25804",
+      "lcscPart": "C25804",
+      "pcb": {
+       "x": 8.65,
+       "y": 4.85,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "RED",
+      "x": 410,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C2286",
+      "pinMap": {
+       "1": "2",
+       "2": "1"
+      },
+      "dbfp": "C2286",
+      "lcscPart": "C2286",
+      "pcb": {
+       "x": 9.6,
+       "y": 8.25,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "100n",
+      "x": 250,
+      "y": 220,
+      "rot": 0,
+      "footprint": "LCSC:C14663",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C14663",
+      "lcscPart": "C14663",
+      "pcb": {
+       "x": 4.7,
+       "y": 6.35,
+       "rot": 90
+      }
+     }
+    ],
+    "nets": {
+     "+5V": [
+      "J1.1",
+      "R1.1",
+      "C1.1"
+     ],
+     "LED_A": [
+      "R1.2",
+      "D1.1"
+     ],
+     "GND": [
+      "D1.2",
+      "J1.2",
+      "C1.2"
+     ]
+    },
+    "board": {
+     "w": 25,
+     "h": 20
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         5.65
+        ],
+        [
+         7.0966,
+         5.65
+        ],
+        [
+         7.8966,
+         4.85
+        ]
+       ],
+       "id": "t1"
+      },
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         5.65
+        ],
+        [
+         1.32,
+         5.65
+        ],
+        [
+         1.25,
+         5.58
+        ]
+       ],
+       "id": "t2"
+      },
+      {
+       "net": "LED_A",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         9.4034,
+         4.85
+        ],
+        [
+         9.4034,
+         7.6965
+        ],
+        [
+         8.8499,
+         8.25
+        ]
+       ],
+       "id": "t3"
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         7.05
+        ],
+        [
+         2.32,
+         7.05
+        ],
+        [
+         1.25,
+         8.12
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         7.05
+        ],
+        [
+         6.6,
+         8.95
+        ],
+        [
+         9.6501,
+         8.95
+        ],
+        [
+         10.3501,
+         8.25
+        ]
+       ]
+      }
+     ],
+     "vias": [],
+     "routed": {
+      "GND": true
+     },
+     "pours": [],
+     "holes": [],
+     "nextId": 7
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C25804": {
+      "lcsc": "C25804",
+      "name": "0603WAF1002T5E",
+      "mfr_part": "0603WAF1002T5E",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "package": "R0603",
+      "prefix": "R",
+      "value": "10kΩ",
+      "pins": [
+       {
+        "num": "1",
+        "name": "1",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "2",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "R0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.385,
+        -0.661,
+        1.385,
+        0.661
+       ],
+       "model3d": {
+        "uuid": "6bd5cd867e9542ebae21caaf5d2d4c4d",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 90,
+        "w": 1.62,
+        "h": 0.81,
+        "title": "R0603"
+       }
+      },
+      "datasheet": "https://www.mouser.in/datasheet/2/447/PYu_RT_1_to_0_01_RoHS_L_11-1669912.pdf",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "b210af5a1436310a86e8b108e2e5a90b",
+      "puuid": "398691f1f785460098bbe5ee6590333c",
+      "key": "C25804"
+     },
+     "C2286": {
+      "lcsc": "C2286",
+      "name": "KT-0603R",
+      "mfr_part": "KT-0603R",
+      "manufacturer": "KENTO",
+      "package": "LED-SMD_L1.6-W0.8-R-RD",
+      "prefix": "LED",
+      "value": "KT-0603R",
+      "pins": [
+       {
+        "num": "2",
+        "name": "K",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "A",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "LED-SMD_L1.6-W0.8-R-RD",
+       "pads": [
+        {
+         "num": "2",
+         "x": -0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": 0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.7,
+        -0.701,
+        1.471,
+        0.701
+       ],
+       "model3d": {
+        "uuid": "0da0275bf7a84667bce8747a921fb9e3",
+        "x": -0.0001,
+        "y": -0.0001,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.62,
+        "h": 0.8,
+        "title": "LED0603_L1.6-W0.8-H0.6"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/347796.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "0806368f73e1232ca543f14a515367b4",
+      "puuid": "5294e4298d7a4d9d966148b3893abd7c",
+      "key": "C2286"
+     },
+     "C14663": {
+      "lcsc": "C14663",
+      "name": "CC0603KRX7R9BB104",
+      "mfr_part": "CC0603KRX7R9BB104",
+      "manufacturer": "YAGEO(国巨)",
+      "package": "C0603",
+      "prefix": "C",
+      "value": "100nF",
+      "pins": [
+       {
+        "num": "2",
+        "name": "2",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "1",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "C0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.39,
+        -0.71,
+        1.39,
+        0.71
+       ],
+       "model3d": {
+        "uuid": "ac9b32e974bc448eab36b1293f859dcb",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.6,
+        "h": 0.8,
+        "title": "C0603_L1.6-W0.8-H0.8"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/362304.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "154b66255b01a09bf1c88bb1ea89be78",
+      "puuid": "f8151fdc728a41ebbc304e11d39e5437",
+      "key": "C14663"
+     }
+    },
+    "edited": 1795531393.48
+   }
+  },
+  {
+   "id": "R5",
+   "kind": "repair",
+   "seconds": 18,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": []
+   },
+   "behaviour": 10,
+   "total": 100,
+   "stats": {
+    "calls": 4,
+    "errors": 0,
+    "bad": 0,
+    "steps": 3,
+    "finished": true,
+    "tokens_in": 19736,
+    "tokens_out": 145
+   },
+   "final": "Fixed: R1 was 10 Ω (≈300 mA through the LED — it overheats and degrades). Changed R1 to 300 Ω → (5 - 2.0)/300 = 10 mA, and its BOM part to C23025 (300 Ω 0603, basic). ERC passes.",
+   "trace": [
+    "update_component {\"ref\":\"R1\",\"value\":\"300\"} → {\"ok\":true,\"ref\":\"R1\",\"lcsc\":\"C25804\"}",
+    "run_erc {} → ERC passed: no issues",
+    "update_component {\"ref\":\"R1\",\"lcsc_part\":\"\"} → {\"ok\":true,\"ref\":\"R1\"}",
+    "match_jlcpcb_parts {} → {\"matched\":3,\"total\":4,\"missing\":[\"J1\"],\"parts\":[{\"ref\":\"J1\",\"value\":\"PWR\",\"lcsc\":null,\"source\":\"no LCSC part with exactly this part number — choose it (search_parts) and set it with update_component "
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "PWR",
+      "x": 100,
+      "y": 100,
+      "rot": 0,
+      "pins": [
+       "VIN",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2"
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "300",
+      "x": 240,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C25804",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C25804",
+      "lcscPart": "C23025"
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "RED",
+      "x": 410,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C2286",
+      "pinMap": {
+       "1": "2",
+       "2": "1"
+      },
+      "dbfp": "C2286",
+      "lcscPart": "C2286"
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "100n",
+      "x": 250,
+      "y": 220,
+      "rot": 0,
+      "footprint": "LCSC:C14663",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C14663",
+      "lcscPart": "C14663"
+     }
+    ],
+    "nets": {
+     "+5V": [
+      "J1.1",
+      "R1.1",
+      "C1.1"
+     ],
+     "LED_A": [
+      "R1.2",
+      "D1.1"
+     ],
+     "GND": [
+      "D1.2",
+      "J1.2",
+      "C1.2"
+     ]
+    },
+    "board": {
+     "w": 0,
+     "h": 0
+    },
+    "pcb": {
+     "traces": [],
+     "vias": [],
+     "routed": {}
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C25804": {
+      "lcsc": "C25804",
+      "name": "0603WAF1002T5E",
+      "mfr_part": "0603WAF1002T5E",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "package": "R0603",
+      "prefix": "R",
+      "value": "10kΩ",
+      "pins": [
+       {
+        "num": "1",
+        "name": "1",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "2",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "R0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.385,
+        -0.661,
+        1.385,
+        0.661
+       ],
+       "model3d": {
+        "uuid": "6bd5cd867e9542ebae21caaf5d2d4c4d",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 90,
+        "w": 1.62,
+        "h": 0.81,
+        "title": "R0603"
+       }
+      },
+      "datasheet": "https://www.mouser.in/datasheet/2/447/PYu_RT_1_to_0_01_RoHS_L_11-1669912.pdf",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "b210af5a1436310a86e8b108e2e5a90b",
+      "puuid": "398691f1f785460098bbe5ee6590333c",
+      "key": "C25804"
+     },
+     "C2286": {
+      "lcsc": "C2286",
+      "name": "KT-0603R",
+      "mfr_part": "KT-0603R",
+      "manufacturer": "KENTO",
+      "package": "LED-SMD_L1.6-W0.8-R-RD",
+      "prefix": "LED",
+      "value": "KT-0603R",
+      "pins": [
+       {
+        "num": "2",
+        "name": "K",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "A",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "LED-SMD_L1.6-W0.8-R-RD",
+       "pads": [
+        {
+         "num": "2",
+         "x": -0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": 0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.7,
+        -0.701,
+        1.471,
+        0.701
+       ],
+       "model3d": {
+        "uuid": "0da0275bf7a84667bce8747a921fb9e3",
+        "x": -0.0001,
+        "y": -0.0001,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.62,
+        "h": 0.8,
+        "title": "LED0603_L1.6-W0.8-H0.6"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/347796.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "0806368f73e1232ca543f14a515367b4",
+      "puuid": "5294e4298d7a4d9d966148b3893abd7c",
+      "key": "C2286"
+     },
+     "C14663": {
+      "lcsc": "C14663",
+      "name": "CC0603KRX7R9BB104",
+      "mfr_part": "CC0603KRX7R9BB104",
+      "manufacturer": "YAGEO(国巨)",
+      "package": "C0603",
+      "prefix": "C",
+      "value": "100nF",
+      "pins": [
+       {
+        "num": "2",
+        "name": "2",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "1",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "C0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.39,
+        -0.71,
+        1.39,
+        0.71
+       ],
+       "model3d": {
+        "uuid": "ac9b32e974bc448eab36b1293f859dcb",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.6,
+        "h": 0.8,
+        "title": "C0603_L1.6-W0.8-H0.8"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/362304.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "154b66255b01a09bf1c88bb1ea89be78",
+      "puuid": "f8151fdc728a41ebbc304e11d39e5437",
+      "key": "C14663"
+     }
+    },
+    "edited": 1795531410.482
+   }
+  },
+  {
+   "id": "R6",
+   "kind": "repair",
+   "seconds": 10,
+   "schematic": 35,
+   "details": {
+    "erc": [],
+    "failed": [],
+    "placed": "4/4",
+    "placement_problems": [],
+    "missing_connections": [],
+    "drc_errors": 0,
+    "drc_warnings": 0,
+    "drc_top": [],
+    "board": "25 × 20 mm"
+   },
+   "behaviour": 10,
+   "placement": 15,
+   "routing": 25,
+   "drc": 15,
+   "total": 100,
+   "stats": {
+    "calls": 5,
+    "errors": 0,
+    "bad": 0,
+    "steps": 3,
+    "finished": true,
+    "tokens_in": 19780,
+    "tokens_out": 100
+   },
+   "final": "Fixed: J1 was 5 mm outside the outline; moved it onto the left board edge. No placement problems, 3/3 nets routed, DRC passed.",
+   "trace": [
+    "check_placement {} → {\"ok\":false,\"problems\":[{\"type\":\"outside\",\"parts\":[\"J1\"],\"copper_mm\":-5.15,\"body_mm\":-7.25,\"msg\":\"J1: copper 5.15 mm outside the outline\"}]}",
+    "place_footprint {\"ref\":\"J1\",\"edge\":\"left\"} → {\"ref\":\"J1\",\"x\":1.25,\"y\":6.85,\"rot\":0,\"side\":\"top\",\"edge\":\"left\",\"outside_board\":false,\"note\":\"Tracks are kept; run route_pcb to connect anything left unrouted.\"}",
+    "check_placement {} → {\"ok\":true,\"problems\":[]}",
+    "route_pcb {} → {\"routing\":{\"routed\":3,\"total\":3,\"kept_tracks\":0,\"failed\":[],\"necked_down\":[],\"vias\":0,\"board\":{\"w\":25,\"h\":20,\"shape\":\"rect\"},\"grid_mm\":0.05,\"seconds\":0.6,\"passes\":1,\"ripup_iterations\":0,\"via_in_pad\":",
+    "run_drc {} → {\"summary\":\"DRC passed\",\"errors\":0,\"warnings\":0,\"by_type\":{},\"violations\":[]}"
+   ],
+   "design": {
+    "name": "Untitled",
+    "components": [
+     {
+      "ref": "J1",
+      "type": "connector",
+      "value": "PWR",
+      "x": 100,
+      "y": 100,
+      "rot": 0,
+      "pins": [
+       "VIN",
+       "GND"
+      ],
+      "footprint": "PinHeader_1x2",
+      "pcb": {
+       "x": 1.25,
+       "y": 6.85,
+       "rot": 0
+      },
+      "pcbEdge": "left"
+     },
+     {
+      "ref": "R1",
+      "type": "resistor",
+      "value": "330",
+      "x": 240,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C25804",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C25804",
+      "lcscPart": "C25804",
+      "pcb": {
+       "x": 8.65,
+       "y": 4.85,
+       "rot": 0
+      }
+     },
+     {
+      "ref": "D1",
+      "type": "led",
+      "value": "RED",
+      "x": 410,
+      "y": 100,
+      "rot": 0,
+      "footprint": "LCSC:C2286",
+      "pinMap": {
+       "1": "2",
+       "2": "1"
+      },
+      "dbfp": "C2286",
+      "lcscPart": "C2286",
+      "pcb": {
+       "x": 9.6,
+       "y": 8.25,
+       "rot": 180
+      }
+     },
+     {
+      "ref": "C1",
+      "type": "capacitor",
+      "value": "100n",
+      "x": 250,
+      "y": 220,
+      "rot": 0,
+      "footprint": "LCSC:C14663",
+      "pinMap": {
+       "1": "1",
+       "2": "2"
+      },
+      "dbfp": "C14663",
+      "lcscPart": "C14663",
+      "pcb": {
+       "x": 4.7,
+       "y": 6.35,
+       "rot": 90
+      }
+     }
+    ],
+    "nets": {
+     "+5V": [
+      "J1.1",
+      "R1.1",
+      "C1.1"
+     ],
+     "LED_A": [
+      "R1.2",
+      "D1.1"
+     ],
+     "GND": [
+      "D1.2",
+      "J1.2",
+      "C1.2"
+     ]
+    },
+    "board": {
+     "w": 25,
+     "h": 20
+    },
+    "pcb": {
+     "traces": [
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         5.65
+        ],
+        [
+         7.0966,
+         5.65
+        ],
+        [
+         7.8966,
+         4.85
+        ]
+       ]
+      },
+      {
+       "net": "+5V",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         5.65
+        ],
+        [
+         1.32,
+         5.65
+        ],
+        [
+         1.25,
+         5.58
+        ]
+       ]
+      },
+      {
+       "net": "LED_A",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         9.4034,
+         4.85
+        ],
+        [
+         9.4034,
+         7.6965
+        ],
+        [
+         8.8499,
+         8.25
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         7.05
+        ],
+        [
+         2.32,
+         7.05
+        ],
+        [
+         1.25,
+         8.12
+        ]
+       ]
+      },
+      {
+       "net": "GND",
+       "layer": "F",
+       "w": 0.2,
+       "pts": [
+        [
+         4.7,
+         7.05
+        ],
+        [
+         6.6,
+         8.95
+        ],
+        [
+         9.6501,
+         8.95
+        ],
+        [
+         10.3501,
+         8.25
+        ]
+       ]
+      }
+     ],
+     "vias": [],
+     "routed": {
+      "+5V": true,
+      "LED_A": true,
+      "GND": true
+     },
+     "pours": [],
+     "holes": []
+    },
+    "connStyle": "auto",
+    "lib": {
+     "C25804": {
+      "lcsc": "C25804",
+      "name": "0603WAF1002T5E",
+      "mfr_part": "0603WAF1002T5E",
+      "manufacturer": "UNI-ROYAL(厚声)",
+      "package": "R0603",
+      "prefix": "R",
+      "value": "10kΩ",
+      "pins": [
+       {
+        "num": "1",
+        "name": "1",
+        "side": "L"
+       },
+       {
+        "num": "2",
+        "name": "2",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "R0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7534,
+         "y": 0,
+         "w": 0.8065,
+         "h": 0.864,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.385,
+        -0.661,
+        1.385,
+        0.661
+       ],
+       "model3d": {
+        "uuid": "6bd5cd867e9542ebae21caaf5d2d4c4d",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 90,
+        "w": 1.62,
+        "h": 0.81,
+        "title": "R0603"
+       }
+      },
+      "datasheet": "https://www.mouser.in/datasheet/2/447/PYu_RT_1_to_0_01_RoHS_L_11-1669912.pdf",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "b210af5a1436310a86e8b108e2e5a90b",
+      "puuid": "398691f1f785460098bbe5ee6590333c",
+      "key": "C25804"
+     },
+     "C2286": {
+      "lcsc": "C2286",
+      "name": "KT-0603R",
+      "mfr_part": "KT-0603R",
+      "manufacturer": "KENTO",
+      "package": "LED-SMD_L1.6-W0.8-R-RD",
+      "prefix": "LED",
+      "value": "KT-0603R",
+      "pins": [
+       {
+        "num": "2",
+        "name": "K",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "A",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "LED-SMD_L1.6-W0.8-R-RD",
+       "pads": [
+        {
+         "num": "2",
+         "x": -0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": 0.7501,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.8,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.7,
+        -0.701,
+        1.471,
+        0.701
+       ],
+       "model3d": {
+        "uuid": "0da0275bf7a84667bce8747a921fb9e3",
+        "x": -0.0001,
+        "y": -0.0001,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.62,
+        "h": 0.8,
+        "title": "LED0603_L1.6-W0.8-H0.6"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/347796.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "0806368f73e1232ca543f14a515367b4",
+      "puuid": "5294e4298d7a4d9d966148b3893abd7c",
+      "key": "C2286"
+     },
+     "C14663": {
+      "lcsc": "C14663",
+      "name": "CC0603KRX7R9BB104",
+      "mfr_part": "CC0603KRX7R9BB104",
+      "manufacturer": "YAGEO(国巨)",
+      "package": "C0603",
+      "prefix": "C",
+      "value": "100nF",
+      "pins": [
+       {
+        "num": "2",
+        "name": "2",
+        "side": "L"
+       },
+       {
+        "num": "1",
+        "name": "1",
+        "side": "R"
+       }
+      ],
+      "footprint": {
+       "name": "C0603",
+       "pads": [
+        {
+         "num": "2",
+         "x": 0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        },
+        {
+         "num": "1",
+         "x": -0.7,
+         "y": 0,
+         "w": 0.8,
+         "h": 0.9,
+         "shape": "rect"
+        }
+       ],
+       "body": [
+        -1.39,
+        -0.71,
+        1.39,
+        0.71
+       ],
+       "model3d": {
+        "uuid": "ac9b32e974bc448eab36b1293f859dcb",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "rx": 0,
+        "ry": 0,
+        "rz": 0,
+        "w": 1.6,
+        "h": 0.8,
+        "title": "C0603_L1.6-W0.8-H0.8"
+       }
+      },
+      "datasheet": "https://item.szlcsc.com/362304.html",
+      "source": "JLCPCB/LCSC catalogue · symbols & footprints: JLCEDA/EasyEDA official library (easyeda.com, lceda.cn)",
+      "uuid": "154b66255b01a09bf1c88bb1ea89be78",
+      "puuid": "f8151fdc728a41ebbc304e11d39e5437",
+      "key": "C14663"
+     }
+    },
+    "edited": 1795531422.382
+   }
+  }
+ ]
+}

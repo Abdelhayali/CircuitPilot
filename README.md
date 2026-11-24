@@ -263,7 +263,14 @@ is rewritten after every run. Send a pull request with your model's results file
 
 ## pcbgo v1 (CircuitPilot-4B) — a small model fine-tuned for CircuitPilot
 
-**Download: [huggingface.co/abdelhayali91/pcbgo-v1](https://huggingface.co/abdelhayali91/pcbgo-v1)** (Q4_K_M GGUF, 2.8 GB, Apache-2.0). In pcbgo.site: **🔑 Connect AI → Run pcbgo-v1 free on Google Colab** opens the notebook; press *Run all* and its last cell sends you back to pcbgo.site already connected (the link carries the Colab's Cloudflare address; the site asks before connecting). Or use it or with Ollama on your PC (`ollama create pcbgo-v1 -f Modelfile`) and model name `pcbgo-v1` in **🔑 Connect AI → Use your own API**; CircuitPilot switches to compact tools and thinking off for it by itself.
+![pcbgo v1: a small AI that designs circuit boards](docs/media/pcbgo-v1-banner.png)
+
+**The whole flow, free:** pcbgo.site → Connect AI → *Run pcbgo-v1 free on Google Colab* → Run all → paste the address
+→ ask for a board → schematic, routed PCB, DRC and a 3D-printable case:
+
+![pcbgo-v1 on Google Colab with pcbgo.site: from opening the site to a routed PCB in its enclosure](docs/media/pcbgo-v1-colab-demo.gif)
+
+**Download: [huggingface.co/abdelhayali91/pcbgo-v1](https://huggingface.co/abdelhayali91/pcbgo-v1)** (Q4_K_M GGUF, 2.8 GB, Apache-2.0). In pcbgo.site: **🔑 Connect AI → Run pcbgo-v1 free on Google Colab** opens the notebook; press *Run all* and its last cell sends you back to pcbgo.site already connected (the link carries the Colab's Cloudflare address; the site asks before connecting). Or use it with Ollama on your PC (`ollama create pcbgo-v1 -f Modelfile`) and model name `pcbgo-v1` in **🔑 Connect AI → Use your own API**; CircuitPilot switches to compact tools and thinking off for it by itself.
 
 [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) fine-tuned with LoRA to design with CircuitPilot's
 tools, small enough for a laptop GPU, Ollama on any PC or a **free Google Colab** GPU. Everything is in

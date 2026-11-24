@@ -241,6 +241,8 @@ filter). **6 repair tasks** start from a broken board (missing connection, unrou
 wrong resistor value, part outside the outline). Any model can be tested: Ollama / llama.cpp / LM Studio, any
 OpenAI-compatible API (OpenAI, Gemini, OpenRouter …) or Claude, with the compact or the full tool set.
 
+![PCB Bench: pcbgo v1 against Qwen3.8-27B, Qwen3.6-27B and its base, per measure](docs/media/pcb-bench-chart.png)
+
 <!-- BENCH:START -->
 | Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Tokens / task (in · out) | Date |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|

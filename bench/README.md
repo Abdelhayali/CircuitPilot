@@ -4,6 +4,10 @@ How well can an AI model design and repair circuit boards **with CircuitPilot's 
 ("make a 3.3 V supply on a 30 × 20 mm board with a GND pour"), works in the same agent loop as the app's AI Copilot
 — CircuitPilot's real engine runs its tool calls — and the **design it leaves behind** is scored, not its words.
 
+![PCB Bench results per measure](../docs/media/pcb-bench-chart.png)
+
+(`python bench/chart.py` redraws it from `bench/results/`.)
+
 ## Score (0–100 per task)
 | Part | Points | What is checked |
 |---|---|---|

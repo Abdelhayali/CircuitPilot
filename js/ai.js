@@ -117,6 +117,14 @@ const AI = (() => {
     // the local proxy reaches any port on this PC only for CircuitPilot's own page (this header proves it)
     if (resolved.includes('/llm-proxy/')) opts = Object.assign({}, opts, { headers: Object.assign({}, opts.headers, { 'X-CircuitPilot-App': '1' }) });
     if (direct && viaProxy.has(host) && !web) return fetch(extBase(base) + path, opts);
+    // a base URL without a path (http://127.0.0.1:8899): servers like Maya / vLLM answer /models there but chat only
+    // under /v1 — on a 404, use /v1
+    let noPath = false; try { noPath = /^\/?$/.test(new URL(base).pathname); } catch (e) { }
+    if (noPath) {
+      const r = await fetch(resolved + path, opts).catch(() => null);
+      if (r && r.status !== 404) return r;
+      return llmFetch(base + '/v1', path, opts);
+    }
     try { return await fetch(resolved + path, opts); }
     catch (e) {
       if (!direct || e.name === 'AbortError' || e.name === 'TimeoutError' || (opts.signal && opts.signal.aborted)) throw e;

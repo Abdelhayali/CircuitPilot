@@ -39,7 +39,7 @@ assert shutil.which('ollama'), 'Ollama did not install - see the messages above,
     code("""
 # 2. start Ollama in the background; CircuitPilot on pcbgo.site calls it straight from your browser, so allow any origin
 import subprocess, os, time
-env = dict(os.environ, OLLAMA_HOST='0.0.0.0:11434', OLLAMA_ORIGINS='*', OLLAMA_CONTEXT_LENGTH='16384', OLLAMA_KEEP_ALIVE='24h', OLLAMA_FLASH_ATTENTION='1')
+env = dict(os.environ, OLLAMA_HOST='0.0.0.0:11434', OLLAMA_ORIGINS='*', OLLAMA_CONTEXT_LENGTH='65536', OLLAMA_KEEP_ALIVE='24h', OLLAMA_FLASH_ATTENTION='1')
 import shutil
 ollama = subprocess.Popen([shutil.which('ollama') or '/usr/local/bin/ollama', 'serve'], env=env, stdout=open('ollama.log', 'w'), stderr=subprocess.STDOUT)
 time.sleep(5); print(open('ollama.log').read()[-500:])
@@ -50,7 +50,7 @@ open('Modelfile', 'w').write('''FROM hf.co/{a.repo}:{a.quant}
 RENDERER qwen3.5
 PARSER qwen3.5
 PARAMETER temperature 0.3
-PARAMETER num_ctx 16384
+PARAMETER num_ctx 65536
 ''')
 !ollama create pcbgo-v1 -f Modelfile
 !ollama list
@@ -67,7 +67,7 @@ print(f'ready in {time.time() - t0:.0f} s:', json.loads(r.read())['choices'][0][
 """),
     code("""
 # 5. a public HTTPS address for CircuitPilot (Cloudflare quick tunnel, no account needed)
-!wget -q -O cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 && chmod +x cloudflared
+![ -x cloudflared ] || wget -q -O cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 && chmod +x cloudflared
 import re
 tun = subprocess.Popen(['./cloudflared', 'tunnel', '--url', 'http://localhost:11434', '--http-host-header', 'localhost:11434', '--no-autoupdate'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 for line in tun.stdout:

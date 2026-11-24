@@ -164,7 +164,7 @@ def _log_tail():
         return ""
 
 
-def start(ctx=32768):
+def start(ctx=65536):
     with _lock:
         p = _srv["proc"]
         if p and p.poll() is None:

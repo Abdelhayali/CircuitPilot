@@ -161,7 +161,14 @@ const Engine = (() => {
     const mine = env.myLib().find(p => p.key === raw || p.key === up);
     if (mine) return mine;
     if (typeof OpenLib !== 'undefined' && OpenLib.isKey(raw)) { if (!partCache[raw]) partCache[raw] = await OpenLib.load(raw).catch(e => { throw e; }); return partCache[raw]; }
-    if (!/^(C\d+|EE-[0-9A-F]{32})$/.test(up)) throw new Error(`Unknown part "${raw}" — use an LCSC code (C1234), an EasyEDA community key (EE-…), an open-library key (OL:…) or a My Library key`);
+    if (!/^(C\d+|EE-[0-9A-F]{32})$/.test(up)) {
+      // a mistyped / invented key: name the closest My Library and design parts, so the model can correct itself
+      const words = s => new Set(String(s || '').toUpperCase().split(/[^A-Z0-9]+/).filter(w => w.length > 1 && w !== 'LIB'));
+      const want = words(raw), cands = [...env.myLib().map(p => ({ key: p.key, name: p.name })), ...Object.entries(Model.S.lib || {}).map(([key, p]) => ({ key, name: p && p.name }))];
+      const near = cands.map(c => { const w = words(c.key + ' ' + (c.name || '')); let k = 0; for (const x of want) if (w.has(x)) k++; return Object.assign(c, { k }); })
+        .filter(c => c.k > 0).sort((a, b) => b.k - a.k).filter((c, i, A) => A.findIndex(x => x.key === c.key) === i).slice(0, 3);
+      throw new Error(`Unknown part "${raw}"` + (near.length ? ` — closest parts you have: ${near.map(c => `"${c.key}"${c.name ? ' (' + c.name + ')' : ''}`).join(', ')}; use one of these keys exactly as "lcsc"` : ' — no My Library part matches') + `, or find the part with search_parts (LCSC code C1234) / list_my_parts`);
+    }
     if (!partCache[up]) {
       try { partCache[up] = await partsApi('get/' + encodeURIComponent(up)); }
       catch (e) {
@@ -380,12 +387,26 @@ const Engine = (() => {
       case 'remove_pcb_text': return Model.mutate(() => Pcb.removeText(+input.index));
       case 'add_components': {
         const list = Array.isArray(input.components) ? input.components : [input];
-        const libs = {};
+        const libs = {}, notes = [];
+        // simple built-in parts (their pins do not depend on the part number): a wrong "lcsc" must not block them —
+        // small models put values (104 = 100 nF) or references (C1) there
+        const SIMPLE = ['resistor', 'capacitor', 'capacitor_polarized', 'inductor', 'potentiometer', 'fuse', 'crystal', 'diode', 'schottky', 'zener', 'led', 'npn', 'pnp', 'nmos', 'pmos', 'switch', 'battery', 'buzzer'];
+        for (const s of list) if (s.lcsc || s.part) {
+          const code = String(s.lcsc || s.part).trim(), simple = SIMPLE.includes(s.type) && s.value;
+          if (simple && (/^[A-Z]{1,2}\d{1,3}$/i.test(code) || code.toUpperCase() === String(s.ref || '').toUpperCase())) {
+            notes.push(`${s.ref || s.type} ${s.value}: ignored "${code}" — that is a value code or a reference, not an LCSC part number; added a built-in ${s.type}`);
+            delete s.lcsc; delete s.part; continue;
+          }
+          try { const m = await loadPart(code); libs[keyOf(m)] = m; s.part = keyOf(m); delete s.lcsc; }
+          catch (e) {
+            if (simple) { notes.push(`${s.ref || s.type} ${s.value}: could not load "${code}" — added a built-in ${s.type} instead`); delete s.lcsc; delete s.part; continue; }
+            throw new Error(e.message + '. For simple parts give {"type": "capacitor", "value": "100n"} without lcsc: lcsc is only a real LCSC number from search_parts (e.g. C14663), never a value (104) or a reference (C1)');
+          }
+        }
         // built-in symbols get the real JLCPCB part behind them (unless a footprint was given)
         for (const s of list) if (s.type && !s.lcsc && !s.part && !s.footprint && Lib.dbDefault(s.type, s.value)) {
           try { s.dbPart = await loadPart(Lib.dbDefault(s.type, s.value).lcsc); } catch (e) { /* database unavailable → generated footprint */ }
         }
-        for (const s of list) if (s.lcsc || s.part) { const m = await loadPart(s.lcsc || s.part); libs[keyOf(m)] = m; s.part = keyOf(m); delete s.lcsc; }
         // sheet numbers are 1-based for the AI; sheets are created on demand
         for (const s of list) if (s.sheet != null) { const n = Math.max(1, Math.round(+s.sheet) || 1); s.sheet = n - 1; }
         return Model.mutate(() => {
@@ -394,7 +415,8 @@ const Engine = (() => {
           for (const [k, m] of Object.entries(libs)) if (!Model.S.lib[k]) Model.setLibPart(k, m);
           const added = list.map(s => Model.addComponent(s));
           Model.spaceOut();   // keep room for net labels between parts, whatever coordinates were asked for
-          return added.map(c => ({ ref: c.ref, type: c.type, value: c.value, x: c.x, y: c.y, sheet: Model.sheetOf(c) + 1, footprint: c.footprint, pins: Lib.type(c.type).pins(c).map(p => p.num + ':' + p.name).join(' ') }));
+          const out = added.map(c => ({ ref: c.ref, type: c.type, value: c.value, x: c.x, y: c.y, sheet: Model.sheetOf(c) + 1, footprint: c.footprint, pins: Lib.type(c.type).pins(c).map(p => p.num + ':' + p.name).join(' ') }));
+          return notes.length ? out.concat([{ note: notes.join('; ') }]) : out;
         });
       }
       case 'update_component': return Model.mutate(() => {
@@ -981,7 +1003,7 @@ const Engine = (() => {
   const LITE_NAMES = ['search_parts', 'get_part', 'get_design', 'add_components', 'update_component', 'remove_components', 'connect', 'disconnect', 'rename_net',
     'add_sheet', 'organize_schematic', 'run_erc', 'generate_pcb', 'route_pcb', 'optimize_pcb', 'pcb_status', 'run_drc', 'get_pcb_layout', 'place_footprint',
     'place_in_free_area', 'check_placement', 'set_board_shape', 'add_mounting_holes', 'add_copper_pour', 'add_track', 'add_via', 'remove_tracks',
-    'get_design_rules', 'set_design_rules', 'match_jlcpcb_parts'];
+    'get_design_rules', 'set_design_rules', 'match_jlcpcb_parts', 'web_search'];
   const LITE_SYSTEM = `You are CircuitPilot, an electronics engineer inside a schematic + PCB design app. You change the design only by calling tools.
 - Pins are "REF.PIN" with the pin number or name ("R1.1", "Q1.B", "U1.VCC"). Built-in pin numbers: resistor / capacitor / inductor 1, 2; LED / diode 1 = K (cathode), 2 = A (anode); electrolytic 1 = +, 2 = -; npn / pnp 1 = B, 2 = E, 3 = C; nmos / pmos 1 = G, 2 = S, 3 = D; regulator 1 = IN, 2 = GND, 3 = OUT; opamp 2 = IN-, 3 = IN+, 4 = V-, 6 = OUT, 7 = V+; battery 1 = +, 2 = -; potentiometer 1, 2 = wiper, 3.
 - Ground is the net GND; supplies are +3V3, +5V, +12V, VIN, VBAT. Give important signals clear names (OUT, LED_A, SDA, SCL).
@@ -989,6 +1011,7 @@ const Engine = (() => {
 - Build in this order: add every part in ONE add_components call, connect every net in ONE connect call, then run_erc and fix what it reports.
 - PCB: generate_pcb, then run_drc. If nets stay unrouted, optimize_pcb.
 - When a tool returns an error, read it and call again with the fix; do not repeat the same call.
+- Questions about a chip, module or part number: answer only from what search_parts / get_part (or web_search) returned — never from memory. If they found nothing, say so.
 - Use real values and show the key calculation in one line (e.g. R = (5 - 2.0) / 0.01 = 300 → 330 Ω). Keep replies short.`;
   const LITE_MODE = {
     agent: 'MODE: AGENT — you may change the design.',

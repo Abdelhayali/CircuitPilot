@@ -453,7 +453,25 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     history.push(Object.assign({ role: 'user', text, mode, checkpoint: hooks.checkpoint }, hooks.files && hooks.files.length ? { files: hooks.files } : {}));
     persist();
     controller = new AbortController();
+    const repeats = new Map(); let stuck = null;
     await probeContext(model);
+    // compact mode (small models): a part number in the request that is not in the design yet is looked up first, as a
+    // normal search_parts call — the model then answers from the database instead of from memory
+    if (lite) {
+      const inDesign = new Set(); for (const c of Model.S.components) { inDesign.add(String(c.value || '').toUpperCase()); inDesign.add(String(c.ref || '').toUpperCase()); }
+      const pkg = /^(SOT|SOD|SOIC|SOP|TSSOP|SSOP|MSOP|QFN|DFN|LQFP|TQFP|DIP|TO|SMA|SMB|SMC|SC|M|USB|JST|PH|XH|LED|ESP|R|C|L|D|Q|U|J)\d{1,3}$|^\d+(\.\d+)?[A-ZµΩ]{0,3}\d*$|^[0-9]+V[0-9]*$/i;
+      const words = [...new Set((String(text).match(/[A-Za-z0-9][A-Za-z0-9.\-]{3,}/g) || []).map(w => w.replace(/[.\-]+$/, '')))]
+        .filter(w => /[A-Za-z]{2}/.test(w) && /\d{2}/.test(w) && !pkg.test(w) && !inDesign.has(w.toUpperCase())).slice(0, 2);
+      for (const w of words) {
+        let content; try { const out = await execTool('search_parts', { query: w, limit: 3 }, mode); content = typeof out === 'string' ? out : JSON.stringify(out); } catch (e) { continue; }
+        if (content.length > 1500) content = content.slice(0, 1500) + ' …(cut)';
+        const tc = { id: 'look' + Date.now().toString(36) + w.length, name: 'search_parts', input: { query: w, limit: 3 } };
+        const am = { role: 'assistant', text: '', toolCalls: [tc], model: model.label, mode };
+        history.push(am); hooks.onAssistant(am, null);
+        history.push({ role: 'tool', results: [{ id: tc.id, name: tc.name, content, error: false }] }); hooks.onTool(tc, content, false);
+        persist();
+      }
+    }
     try {
       for (let step = 0; step < 40; step++) {
         // auto-compress when the context is 80% full: summarise everything before this turn, then trim this turn's tool output
@@ -490,6 +508,17 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
             else content = typeof out === 'string' ? out : JSON.stringify(out);
           } catch (e) { content = 'Error: ' + e.message; error = true; }
           if (lite && content.length > 3000) content = content.slice(0, 3000) + ' …(cut)';   // as in the fine-tune data
+          // loop guard (small models can repeat a failing call many times): the same call or the same error again → say
+          // so in the result; the 4th time the run stops and the user is told
+          {
+            let a = ''; try { a = JSON.stringify(tc.input || {}); } catch (e2) { }
+            const sig = error ? tc.name + '|E|' + content.slice(0, 160) : tc.name + '|' + a, n = (repeats.get(sig) || 0) + 1;
+            repeats.set(sig, n);
+            if (n >= 2) content += error
+              ? `\n\nThis same error happened ${n} times. Do NOT repeat the call: change the arguments as the error says, use another tool (search_parts, get_part, get_design), or tell the user what is missing.`
+              : `\n\nYou already made this exact call ${n} times; the result does not change. Use the result above and continue with the next step.`;
+            if (n >= 4) stuck = `${tc.name}${error ? ': ' + content.slice(7, 160).split('\n')[0] : ' with the same arguments'}`;
+          }
           results.push(Object.assign({ id: tc.id, name: tc.name, content, error }, image ? { image } : {}));
           hooks.onTool(tc, content, error);
           if (controller.signal.aborted) break;
@@ -497,6 +526,11 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         for (const tc of r.toolCalls) if (!results.find(x => x.id === tc.id)) results.push({ id: tc.id, name: tc.name, content: 'Cancelled by user', error: true });
         history.push({ role: 'tool', results }); persist();
         if (controller.signal.aborted) break;
+        if (stuck) {
+          const m = { role: 'assistant', text: `⚠ Stopped: the AI repeated the same tool call 4 times without progress (${stuck}). Try saying it differently, add that part yourself (Parts panel), or use a larger model for this step.`, toolCalls: [], model: 'CircuitPilot', mode };
+          history.push(m); persist(); hooks.onAssistant(m, null);
+          break;
+        }
       }
     } catch (e) {
       if (e.name === 'AbortError') hooks.onError('Stopped.');

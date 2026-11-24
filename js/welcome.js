@@ -9,6 +9,9 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.24', date: '2026-11-24', items: [
+      'Windows app: Connect AI → Run pcbgo-v1 on this PC — download our design AI once (2.8 GB) and it runs offline on your graphics card (NVIDIA, AMD, Intel) or processor',
+      'Small models: a part number you ask about is looked up in the parts database first (no answers from memory), and a tool call that fails the same way 4 times stops the run instead of looping',
+      'add_components: a value code or reference in lcsc (C104, C1) no longer blocks a resistor / capacitor — the built-in part is added and the model is told why',
       'CircuitPilot PCB Bench: AI models design and repair boards with CircuitPilot’s tools; schematic, placement, routing, DRC and behaviour are scored (see the README leaderboard)',
       'Compact tools for small local models (Settings): 30 core tools and a short prompt, so 2–8B models on Ollama or Colab can design boards',
       'CircuitPilot-4B: a small model being fine-tuned to use the tools (training data from the real engine, free Colab notebook)',

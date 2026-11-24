@@ -1982,7 +1982,7 @@ const App = (() => {
     // the own-key form lives in this same dialog (the "Use your own API" panel)
     function showOwnPanel() { $('#chPicks').classList.add('hidden'); $('#chOwnPanel').classList.remove('hidden'); $('#chooseModal').classList.remove('hidden'); }
     function chooseOpen(title, sub) {
-      $('#chPicks').classList.remove('hidden'); $('#chOwnPanel').classList.add('hidden'); $('#chColabPanel').classList.add('hidden');
+      $('#chPicks').classList.remove('hidden'); $('#chOwnPanel').classList.add('hidden'); $('#chColabPanel').classList.add('hidden'); $('#chLocalPanel').classList.add('hidden');
       if (title) $('#chTitle').textContent = title;
       if (sub) $('#chSub').textContent = sub;
       $('#chooseModal').classList.remove('hidden');
@@ -2044,6 +2044,58 @@ const App = (() => {
     }
     $('#chColab').onclick = showColabPanel;
     $('#ccBack').onclick = () => { $('#chColabPanel').classList.add('hidden'); $('#chPicks').classList.remove('hidden'); };
+    // ---- pcbgo-v1 on this PC (Windows app / server.py): downloaded once, then served by llama.cpp on 127.0.0.1 — offline
+    const LOCAL_NAME = 'pcbgo-v1 on this PC', GB = b => (b / 1e9).toFixed(2) + ' GB';
+    let localPoll = null;
+    async function localApi(op) {
+      const r = await fetch('/api/localai/' + op, op === 'status' ? { cache: 'no-store' } : { method: 'POST' });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j;
+    }
+    function connectLocal(url) {
+      const cur = (AI.settings.providers || []).find(p => p.name === LOCAL_NAME);
+      if (cur && cur.base === url && AI.settings.model === cur.id + '::pcbgo-v1') return;
+      for (const p of (AI.settings.providers || []).filter(p => p.name === LOCAL_NAME)) AI.removeProvider(p.id);
+      const pid = AI.saveProvider({ name: LOCAL_NAME, base: url, key: 'local', models: ['pcbgo-v1'] });
+      AI.saveSettings({ model: pid + '::pcbgo-v1' });
+      renderModels(); renderChat(); AI.probeContext().then(updateCtx);
+      toast('🖥 AI: pcbgo-v1 on this PC (offline)', 6000);
+    }
+    async function refreshLocal() {
+      clearTimeout(localPoll);
+      const st = $('#clStatus'), show = (id, on) => $(id).classList.toggle('hidden', !on);
+      let s; try { s = await localApi('status'); } catch (e) { st.className = 'bad small'; st.textContent = '✗ ' + e.message; return; }
+      const d = s.download, sv = s.server;
+      show('#clDownload', s.runtime && !s.present && !d.active); show('#clCancel', d.active && d.phase !== 'checking');
+      show('#clStart', s.runtime && s.present && !sv.running); show('#clStop', sv.running); show('#clDelete', s.present && !sv.running && !d.active);
+      $('#clDownload').textContent = s.partial ? `Resume download (${GB(s.partial)} of ${GB(s.size)})` : `Download pcbgo-v1 (${GB(s.size)})`;
+      show('#clBar', d.active); if (d.active) $('#clBar').value = d.total ? d.bytes / d.total : 0;
+      st.className = 'small';
+      if (!s.runtime) { st.className = 'bad small'; st.textContent = 'This copy of CircuitPilot has no model runtime. Use the Windows app (CircuitPilot.exe from pcbgo.site), or set CP_LLAMA_SERVER to a llama-server.exe.'; }
+      else if (d.active) st.textContent = d.phase === 'checking' ? 'Checking the downloaded file (SHA-256)…' : `Downloading… ${GB(d.bytes)} of ${GB(d.total)}${d.speed ? ' · ' + (d.speed / 1e6).toFixed(1) + ' MB/s' : ''}`;
+      else if (d.error) { st.className = 'bad small'; st.textContent = '✗ ' + d.error; }
+      else if (sv.ready) { st.className = 'good small'; st.textContent = '✓ pcbgo-v1 is running on this PC — the copilot uses it, no internet needed.'; connectLocal(sv.url); }
+      else if (sv.running) st.textContent = 'Starting pcbgo-v1 (loading 2.8 GB into the graphics card or memory, up to a minute)…';
+      else if (sv.error) { st.className = 'bad small'; st.textContent = '✗ ' + sv.error; }
+      else if (s.present) st.textContent = 'pcbgo-v1 is on this PC (' + s.folder + '). Click Start.';
+      else st.textContent = 'Not downloaded yet: one download of ' + GB(s.size) + ', then it works offline.';
+      if (d.active || (sv.running && !sv.ready)) localPoll = setTimeout(refreshLocal, 1000);
+    }
+    function showLocalPanel() { for (const id of ['#chPicks', '#chOwnPanel', '#chColabPanel']) $(id).classList.add('hidden'); $('#chLocalPanel').classList.remove('hidden'); $('#chooseModal').classList.remove('hidden'); refreshLocal(); }
+    const localDo = op => localApi(op).then(refreshLocal).catch(e => { $('#clStatus').className = 'bad small'; $('#clStatus').textContent = '✗ ' + e.message; });
+    $('#chLocal').onclick = showLocalPanel;
+    $('#clBack').onclick = () => { $('#chLocalPanel').classList.add('hidden'); $('#chPicks').classList.remove('hidden'); };
+    $('#clDownload').onclick = () => localDo('download');
+    $('#clCancel').onclick = () => localDo('cancel');
+    $('#clStart').onclick = () => localDo('start');
+    $('#clStop').onclick = () => localDo('stop');
+    $('#clDelete').onclick = () => { if (confirm('Delete pcbgo-v1 (2.8 GB) from this PC? You can download it again later.')) localDo('delete'); };
+    // only where CircuitPilot's own server runs (not pcbgo.site); start the model by itself when it is the selected AI
+    localApi('status').then(s => {
+      $('#chLocal').classList.remove('hidden');
+      const p = (AI.settings.providers || []).find(p => p.name === LOCAL_NAME);
+      if (p && String(AI.settings.model || '').startsWith(p.id + '::') && s.present && s.runtime && !s.server.running) localApi('start').then(refreshLocal).catch(() => { });
+      else if (s.server.running) refreshLocal();
+    }).catch(() => { });
     $('#ccConnect').onclick = () => connectColab($('#ccUrl').value, true);
     $('#ccUrl').onkeydown = e => { if (e.key === 'Enter') connectColab($('#ccUrl').value, true); };
     // the link from the notebook: https://pcbgo.site/#colab=<tunnel address>

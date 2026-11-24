@@ -6,6 +6,7 @@ Needs: Python 3.10+ with PyInstaller and Pillow (pip install pyinstaller pillow)
 The folder holds:
     CircuitPilot.exe     the app: server + its own window (Microsoft Edge app mode)
     node/node.exe        Node.js (official build, LTS) — runs the Claude Desktop connection (MCP server)
+    llama/               llama.cpp's server (official Vulkan build): runs pcbgo-v1 on this PC once the user downloads it
     _internal/           Python runtime, the web app (index.html, js/, data/), the MCP server (mcp/)
 User data goes to %LOCALAPPDATA%\\CircuitPilot, so the folder can live anywhere (also read-only).
 """
@@ -60,6 +61,34 @@ def node_exe():
     return exe, ver
 
 
+# llama.cpp server for pcbgo-v1 on this PC: the official Windows Vulkan build (NVIDIA / AMD / Intel GPUs, CPU fallback),
+# pinned to the version the model was benchmarked with and checked against the release's published SHA-256
+LLAMA_BUILD = "b12670"
+LLAMA_ZIP = f"llama-{LLAMA_BUILD}-bin-win-vulkan-x64.zip"
+LLAMA_SHA256 = "4cc0590e8c25cac5e88f6d0c15288da02e87012d3c6811ccace31c4e366787e3"
+
+
+def llama_runtime():
+    out = os.path.join(BUILD, "llama", LLAMA_BUILD)
+    if os.path.isfile(os.path.join(out, "llama-server.exe")):
+        return out
+    print("downloading", LLAMA_ZIP)
+    data = get(f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_BUILD}/{LLAMA_ZIP}")
+    if hashlib.sha256(data).hexdigest() != LLAMA_SHA256:
+        raise SystemExit("llama.cpp download does not match its published checksum")
+    os.makedirs(out, exist_ok=True)
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        for n in z.namelist():   # the server, its DLLs and the licence; not the other tools
+            b = os.path.basename(n)
+            if b and (b.lower().endswith(".dll") or b in ("llama-server.exe", "LICENSE")):
+                with z.open(n) as src, open(os.path.join(out, b), "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+    if not os.path.isfile(os.path.join(out, "LICENSE")):   # the release zip has none: llama.cpp's MIT licence at that tag
+        with open(os.path.join(out, "LICENSE"), "wb") as f:
+            f.write(get(f"https://raw.githubusercontent.com/ggml-org/llama.cpp/{LLAMA_BUILD}/LICENSE"))
+    return out
+
+
 def icon():
     """CircuitPilot icon (the waveform logo) as .ico"""
     from PIL import Image, ImageDraw
@@ -83,7 +112,7 @@ def main():
     data = [("index.html", "."), ("styles.css", "."), ("js", "js"), ("data", "data"), ("mcp", "mcp"), ("LICENSE", "."), ("NOTICE", ".")]
     args = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--name", "CircuitPilot", "--icon", ico,
             "--distpath", DIST, "--workpath", os.path.join(BUILD, "pyinstaller"), "--specpath", BUILD, "--paths", ROOT,
-            "--hidden-import", "server", "--hidden-import", "desktop_link", "--hidden-import", "jlcapi"]
+            "--hidden-import", "server", "--hidden-import", "desktop_link", "--hidden-import", "jlcapi", "--hidden-import", "localai"]
     # packages on the build PC that CircuitPilot does not use (pypdf / python-docx / lxml / cryptography stay: datasheets)
     for mod in ("numpy", "PIL", "pygame", "matplotlib", "scipy", "pandas", "tkinter", "IPython", "jupyter"):
         args += ["--exclude-module", mod]
@@ -94,6 +123,8 @@ def main():
     args.append(os.path.join(ROOT, "desktop", "circuitpilot_app.py"))
     print(" ".join(args))
     subprocess.check_call(args)
+    llama = llama_runtime()
+    shutil.copytree(llama, os.path.join(APP, "llama"), dirs_exist_ok=True)
     os.makedirs(os.path.join(APP, "node"), exist_ok=True)
     shutil.copy2(node, os.path.join(APP, "node", "node.exe"))
     lic = os.path.join(os.path.dirname(node), "LICENSE")
@@ -103,7 +134,10 @@ def main():
         f.write("CircuitPilot for Windows\n\nDouble-click CircuitPilot.exe. Your projects are kept in %LOCALAPPDATA%\\CircuitPilot.\n"
                 "Claude Desktop: in CircuitPilot open Settings -> Claude Desktop -> Connect (or run CircuitPilot.exe --connect-claude),\n"
                 "then quit Claude Desktop completely and open it again.\n\n"
-                f"Includes Node.js {ver} (MIT licence, node/LICENSE) to run the Claude Desktop connection.\n")
+                "pcbgo-v1 on this PC (offline AI): Connect AI -> Run pcbgo-v1 on this PC -> Download (2.8 GB, once) -> Start.\n"
+                "The model is kept in %LOCALAPPDATA%\\CircuitPilot\\models.\n\n"
+                f"Includes Node.js {ver} (MIT licence, node/LICENSE) to run the Claude Desktop connection,\n"
+                f"and llama.cpp {LLAMA_BUILD} (MIT licence, llama/LICENSE) to run pcbgo-v1.\n")
     zp = os.path.join(DIST, "CircuitPilot-Windows.zip")
     if os.path.exists(zp):
         os.remove(zp)

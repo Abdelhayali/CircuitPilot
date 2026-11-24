@@ -270,7 +270,26 @@
         <b>Run pcbgo-v1 free on Google Colab</b>
         <span class="small">Our own small AI, trained to design with CircuitPilot's tools. It runs on a free Google Colab GPU in your Google account: open Colab, press <b>Run all</b>, and it sends you back here connected. No key, no limit; smaller than the big models, so check its work.</span>
       </button>
+      <button class="choose-card wide hidden" id="chLocal">
+        <span class="choose-ico">🖥</span>
+        <b>Run pcbgo-v1 on this PC — offline</b>
+        <span class="small">Download our small design AI once (2.8 GB) and it runs on this computer: no internet, no key, no limit, your designs never leave the PC. Uses your graphics card when there is one (NVIDIA, AMD or Intel), else the processor (slower).</span>
+      </button>
     </div>
+    </div>
+    <div id="chLocalPanel" class="hidden">
+      <div class="row" style="gap:8px;align-items:center;margin-top:10px"><button id="clBack">← Back</button><h2 style="margin:0">pcbgo-v1 on this PC</h2></div>
+      <p class="small" style="margin:10px 0 6px">The model is downloaded once from Hugging Face (abdelhayali91/pcbgo-v1, checked with its SHA-256) and kept in your CircuitPilot folder. After that everything runs on this computer, also without internet.</p>
+      <progress id="clBar" class="hidden" max="1" value="0" style="width:100%;height:14px"></progress>
+      <p id="clStatus" class="small" style="min-height:1.2em;margin:8px 0"></p>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button id="clDownload" class="primary hidden">Download pcbgo-v1</button>
+        <button id="clCancel" class="hidden">Pause download</button>
+        <button id="clStart" class="primary hidden">Start and connect</button>
+        <button id="clStop" class="hidden">Stop the model</button>
+        <button id="clDelete" class="hidden" title="Remove the 2.8 GB model file from this PC">Delete the model</button>
+      </div>
+      <p class="muted small" style="margin-top:10px">It starts by itself when you open CircuitPilot with this AI selected. Small model: check its work with ERC / DRC. Part searches still use the internet when it is there (the parts archive in Settings works offline).</p>
     </div>
     <div id="chColabPanel" class="hidden">
       <div class="row" style="gap:8px;align-items:center;margin-top:10px"><button id="ccBack">← Back</button><h2 style="margin:0">pcbgo-v1 on Google Colab</h2></div>
@@ -562,8 +581,8 @@
 <script src="js/pcb3d.js?v=202611240100"></script>
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
-<script src="js/engine.js?v=202611241500"></script>
-<script src="js/ai.js?v=202611241800"></script>
+<script src="js/engine.js?v=202611242000"></script>
+<script src="js/ai.js?v=202611242000"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202611231900"></script>
@@ -572,8 +591,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611241900"></script>
-<script src="js/app.js?v=202611241900"></script>
+<script src="js/welcome.js?v=202611242000"></script>
+<script src="js/app.js?v=202611242000"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

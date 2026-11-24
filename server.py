@@ -292,6 +292,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             files = ["index.html", "styles.css"] + ["js/" + f for f in os.listdir("js") if f.endswith(".js")]
             v = max(os.path.getmtime(f) for f in files if os.path.exists(f))
             return self._send(200, json.dumps({"version": str(int(v)), "data_dir": os.path.dirname(store.DB_PATH)}).encode(), "application/json")
+        if path == "/api/localai/status":   # pcbgo-v1 on this PC (Windows app): model file, download, server
+            import localai
+            return self._send(200, json.dumps(localai.status()).encode(), "application/json")
         if path.startswith("/api/parts/"):
             return self._parts(path)
         if path.startswith(("/api/projects", "/api/library")):
@@ -347,6 +350,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             import desktop_link
             try:
                 return self._send(200, json.dumps(desktop_link.connect()).encode(), "application/json")
+            except Exception as e:
+                return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
+        if path.startswith("/api/localai/") and path.rsplit("/", 1)[1] in ("download", "cancel", "start", "stop", "delete"):
+            if not self._authed():
+                return self._send(401, b'{"error":"login required"}', "application/json")
+            import localai
+            try:
+                return self._send(200, json.dumps(getattr(localai, path.rsplit("/", 1)[1])()).encode(), "application/json")
             except Exception as e:
                 return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
         if path == "/api/parts/archive/download":   # start downloading a parts archive (progress: GET /api/parts/archive)
@@ -551,7 +562,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def _proxy(self):
         path, _, query = self.path.partition("?")
         port, rest = PROXY_RE.match(path).groups()
-        if int(port) not in ALLOWED_PORTS:
+        local_ai = sys.modules.get("localai")   # pcbgo-v1 on this PC: the port its model server runs on
+        if int(port) not in ALLOWED_PORTS and not (local_ai and local_ai._srv.get("port") == int(port)):
             msg = (f'{{"error":{{"message":"Port {port} is not allowed by the proxy. '
                    f'Restart server.py with --allow-ports {port}"}}}}').encode()
             return self._send(403, msg, "application/json")
@@ -589,6 +601,7 @@ def run(port=5173, allow_ports="8080", password=None, bind="", ready=None):
     global ALLOWED_PORTS, PASSWORD
     ALLOWED_PORTS = {int(p) for p in str(allow_ports).split(",") if str(p).strip()}
     PASSWORD = password or None
+    os.environ.setdefault("CP_PORT", str(port))   # localai: the model server only accepts this app's own pages
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     srv = _Server((bind, port), Handler)
     print(f"CircuitPilot on http://{bind or '0.0.0.0'}:{port}  proxy ports: {sorted(ALLOWED_PORTS)}  "

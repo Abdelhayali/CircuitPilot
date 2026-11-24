@@ -5,7 +5,7 @@ the tool; use the GIF). Post the GIF as the first image; the banner works as a t
 
 ---
 
-**Title:** I fine-tuned a 4B model to design PCBs with real EDA tools: on my PCB benchmark it matches Qwen3.8-27B (80 vs 79), up from 65 for its base. It runs free on Colab or offline on your PC.
+**Title:** New 4B model for PCB design: pcbgo v1 matches Qwen3.8-27B on my PCB benchmark and runs offline
 
 **Body:**
 

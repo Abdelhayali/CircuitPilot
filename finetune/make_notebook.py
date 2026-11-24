@@ -28,14 +28,20 @@ Model: [{a.repo}](https://huggingface.co/{a.repo}) · base model Qwen3.5-4B (Apa
 """),
     code("""
 # 1. Ollama (serves the model with an OpenAI-compatible API)
-!curl -fsSL https://ollama.com/install.sh | sh > /dev/null
+# (the installer needs zstd to unpack, which Colab does not have)
+!apt-get -qq update > /dev/null && apt-get -qq install -y zstd pciutils lshw > /dev/null
+!curl -fsSL https://ollama.com/install.sh | sh 2>&1 | tail -3
+import shutil
+assert shutil.which('ollama'), 'Ollama did not install - see the messages above, then run this cell again'
+!ollama --version
 !nvidia-smi --query-gpu=name,memory.total --format=csv
 """),
     code("""
 # 2. start Ollama in the background; CircuitPilot on pcbgo.site calls it straight from your browser, so allow any origin
 import subprocess, os, time
 env = dict(os.environ, OLLAMA_HOST='0.0.0.0:11434', OLLAMA_ORIGINS='*', OLLAMA_CONTEXT_LENGTH='16384', OLLAMA_KEEP_ALIVE='24h', OLLAMA_FLASH_ATTENTION='1')
-ollama = subprocess.Popen(['ollama', 'serve'], env=env, stdout=open('ollama.log', 'w'), stderr=subprocess.STDOUT)
+import shutil
+ollama = subprocess.Popen([shutil.which('ollama') or '/usr/local/bin/ollama', 'serve'], env=env, stdout=open('ollama.log', 'w'), stderr=subprocess.STDOUT)
 time.sleep(5); print(open('ollama.log').read()[-500:])
 """),
     code(f"""

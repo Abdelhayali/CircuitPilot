@@ -8,3 +8,5 @@ data_try/
 load_test.py
 tools-llama.cpp-ollama/
 tools-llama.cpp-bin/
+tools-llama.cpp-cuda/
+tools-cloudflared/

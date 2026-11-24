@@ -695,6 +695,9 @@ body.web .as-tabs .tag.webonly { display: inline; }
 .choose-card:hover, .choose-card:focus-visible { border-color: var(--accent, #2d6cdf); }
 .choose-ico { font-size: 34px; line-height: 1; }
 .choose-card b { font-size: 17px; }
+.choose-card.wide { grid-column: 1 / -1; min-height: 0; }
+.cc-steps { padding-left: 20px; margin: 10px 0; } .cc-steps li { margin: 8px 0; }
+.cc-steps a.btn { display: inline-block; padding: 6px 12px; border-radius: 6px; text-decoration: none; }
 @media (max-width: 640px) { .choose-grid { grid-template-columns: 1fr; } .choose-card { min-height: 0; } }
 
 /* model-quality note in the AI chooser */

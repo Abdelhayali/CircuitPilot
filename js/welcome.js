@@ -12,6 +12,7 @@ const Welcome = (() => {
       'CircuitPilot PCB Bench: AI models design and repair boards with CircuitPilot’s tools; schematic, placement, routing, DRC and behaviour are scored (see the README leaderboard)',
       'Compact tools for small local models (Settings): 30 core tools and a short prompt, so 2–8B models on Ollama or Colab can design boards',
       'CircuitPilot-4B: a small model being fine-tuned to use the tools (training data from the real engine, free Colab notebook)',
+      'pcbgo-v1: our own small AI, free on your Google Colab — Connect AI → Run pcbgo-v1 on Colab, press Run all, and Colab sends you back connected',
       'DRC checks JLCPCB solder-mask limits (mask web between pads, mask opening to tracks; black / white mask), new rules: solder-mask opening, mask colour, copper weight'] },
     { v: '2026.11.23', date: '2026-11-23', items: [
       'Board code + revision printed on every PCB (e.g. CP-K7Q2M R2): search it in Projects to find the schematic a board was made from',

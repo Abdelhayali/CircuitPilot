@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611231750">
+<link rel="stylesheet" href="styles.css?v=202611241900">
 </head>
 <body>
 <header id="top">
@@ -247,7 +247,7 @@
 <div id="chooseModal" class="hidden modal">
   <div class="dlg choose-dlg">
     <div class="row-h"><h2 id="chTitle">Choose how the AI answers</h2><button id="chClose" title="Close">✕</button></div>
-    <p class="muted" id="chSub" style="margin:4px 0 0">Two ways to use the copilot. You can change this any time with 🔑 AI keys.</p>
+    <p class="muted" id="chSub" style="margin:4px 0 0">Three ways to use the copilot. You can change this any time with 🔑 AI keys.</p>
     <div id="chPicks">
     <div class="choose-note small">
       <b>Design quality depends on the model you choose.</b> Larger models give the best results. Smaller models may not complete the job, so check their work.
@@ -265,7 +265,23 @@
         <b>Use your own API</b>
         <span class="small">Google Gemini, Ollama Cloud, Claude, OpenAI or any provider. No limit from us. Your key stays in this browser tab only, unless you tick "Remember".</span>
       </button>
+      <button class="choose-card wide" id="chColab">
+        <span class="choose-ico">🧪</span>
+        <b>Run pcbgo-v1 free on Google Colab</b>
+        <span class="small">Our own small AI, trained to design with CircuitPilot's tools. It runs on a free Google Colab GPU in your Google account: open Colab, press <b>Run all</b>, and it sends you back here connected. No key, no limit; smaller than the big models, so check its work.</span>
+      </button>
     </div>
+    </div>
+    <div id="chColabPanel" class="hidden">
+      <div class="row" style="gap:8px;align-items:center;margin-top:10px"><button id="ccBack">← Back</button><h2 style="margin:0">pcbgo-v1 on Google Colab</h2></div>
+      <ol class="cc-steps">
+        <li><a id="ccOpen" class="btn primary" target="_blank" rel="noopener">Open the notebook in Google Colab ↗</a> <span class="muted small">(sign in with your Google account)</span></li>
+        <li>In Colab: <b>Runtime → Change runtime type → T4 GPU</b>, then <b>Runtime → Run all</b>. It takes about 3–5 minutes (Ollama + the 2.8 GB model).</li>
+        <li>At the end, click <b>Open pcbgo.site connected</b> in the last cell — this page connects by itself. Or paste the address it prints here:</li>
+      </ol>
+      <div class="row" style="gap:8px"><input id="ccUrl" placeholder="https://….trycloudflare.com" style="flex:1" spellcheck="false" autocomplete="off"><button id="ccConnect" class="primary">Connect</button></div>
+      <p id="ccStatus" class="small" style="min-height:1.2em;margin:8px 0 0"></p>
+      <p class="muted small">Keep the Colab tab open while you design: free Colab sessions stop after some idle time (then run it again — the address changes). Your designs go only to your own Colab session.</p>
     </div>
     <div id="chOwnPanel" class="hidden">
       <div class="row-h"><div class="row" style="gap:8px;align-items:center"><button id="asBack" title="Back to the two choices: CircuitPilot's free AI or your own API">← Back</button><h2 style="margin:0">Use your own API</h2></div><button id="asClose" title="Close">✕</button></div>
@@ -556,8 +572,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611241510"></script>
-<script src="js/app.js?v=202611241510"></script>
+<script src="js/welcome.js?v=202611241900"></script>
+<script src="js/app.js?v=202611241900"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

@@ -1982,7 +1982,7 @@ const App = (() => {
     // the own-key form lives in this same dialog (the "Use your own API" panel)
     function showOwnPanel() { $('#chPicks').classList.add('hidden'); $('#chOwnPanel').classList.remove('hidden'); $('#chooseModal').classList.remove('hidden'); }
     function chooseOpen(title, sub) {
-      $('#chPicks').classList.remove('hidden'); $('#chOwnPanel').classList.add('hidden');
+      $('#chPicks').classList.remove('hidden'); $('#chOwnPanel').classList.add('hidden'); $('#chColabPanel').classList.add('hidden');
       if (title) $('#chTitle').textContent = title;
       if (sub) $('#chSub').textContent = sub;
       $('#chooseModal').classList.remove('hidden');
@@ -2015,6 +2015,40 @@ const App = (() => {
     }
     $('#chShared').onclick = chooseShared;
     $('#chOwn').onclick = () => openSetup('gemini');
+    // ---- pcbgo-v1 on the user's own Google Colab: the notebook serves it through a Cloudflare tunnel and links back here
+    const COLAB_NB = 'https://colab.research.google.com/github/Abdelhayali/CircuitPilot/blob/main/finetune/CircuitPilot_4B_Colab.ipynb';
+    function showColabPanel() { $('#chPicks').classList.add('hidden'); $('#chOwnPanel').classList.add('hidden'); $('#chColabPanel').classList.remove('hidden'); $('#chooseModal').classList.remove('hidden'); $('#ccOpen').href = COLAB_NB; }
+    async function connectColab(raw, asked) {
+      const st = $('#ccStatus');
+      let u; try { u = new URL(String(raw || '').trim()); } catch (e) { st.className = 'bad'; st.textContent = 'That is not a web address — paste the https://….trycloudflare.com address from Colab.'; return false; }
+      const tunnel = u.protocol === 'https:' && /(^|\.)trycloudflare\.com$/.test(u.hostname), local = /^(localhost|127\.0\.0\.1)$/.test(u.hostname);
+      if (!tunnel && !local) { st.className = 'bad'; st.textContent = 'Only the address the CircuitPilot Colab notebook prints (https://….trycloudflare.com) can be connected here. For other servers use "Use your own API".'; return false; }
+      const base = u.origin + '/v1';
+      if (!asked && !confirm('Connect the AI copilot to pcbgo-v1 running in your Google Colab?\n\n' + u.origin + '\n\nYour chats and design go to that Colab session.')) return false;
+      st.className = 'muted'; st.textContent = 'Checking your Colab…';
+      try {
+        const r = await fetch(base + '/models', { headers: { authorization: 'Bearer ollama' }, signal: AbortSignal.timeout(20000) });
+        const j = await r.json().catch(() => ({}));
+        const ids = (j.data || []).map(m => m.id);
+        if (!r.ok || !ids.some(id => /^pcbgo/.test(id))) throw new Error(r.ok ? 'the Colab answers, but pcbgo-v1 is not loaded yet — wait for the notebook to finish' : 'no answer (HTTP ' + r.status + ')');
+        // one Colab entry: the address changes every run, so the old one goes
+        for (const p of (AI.settings.providers || []).filter(p => /^pcbgo-v1 on Colab/.test(p.name || ''))) AI.removeProvider(p.id);
+        const model = ids.find(id => /^pcbgo/.test(id)), pid = AI.saveProvider({ name: 'pcbgo-v1 on Colab', base, key: 'ollama', models: [model] });
+        AI.saveSettings({ model: pid + '::' + model });
+        renderModels(); renderChat(); AI.probeContext().then(updateCtx);
+        st.className = 'good'; st.textContent = '✓ Connected: the copilot now uses pcbgo-v1 on your Colab (compact tools, thinking off).';
+        toast('🧪 AI: pcbgo-v1 on your Google Colab', 6000);
+        setTimeout(() => $('#chooseModal').classList.add('hidden'), 2200);
+        return true;
+      } catch (e) { st.className = 'bad'; st.textContent = '✗ Could not reach the model: ' + e.message + '. Is the Colab notebook still running?'; return false; }
+    }
+    $('#chColab').onclick = showColabPanel;
+    $('#ccBack').onclick = () => { $('#chColabPanel').classList.add('hidden'); $('#chPicks').classList.remove('hidden'); };
+    $('#ccConnect').onclick = () => connectColab($('#ccUrl').value, true);
+    $('#ccUrl').onkeydown = e => { if (e.key === 'Enter') connectColab($('#ccUrl').value, true); };
+    // the link from the notebook: https://pcbgo.site/#colab=<tunnel address>
+    const colabLink = (() => { const m = /[#&]colab=([^&]+)/.exec(location.hash); return m ? decodeURIComponent(m[1]) : null; })();
+    if (colabLink) { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { } }
     // once per GitHub account: a welcome that offers both choices
     // every visitor sees it once per browser (a guest), and once more after each GitHub sign-in
     function maybeAnnounce() {
@@ -2025,9 +2059,9 @@ const App = (() => {
       if (signed) chooseOpen('Welcome! You are signed in with GitHub', 'You can now use CircuitPilot\'s free AI with a limit per person, or your own API key. Choose one; you can change it any time with 🔑 AI keys.');
       else chooseOpen('Welcome to CircuitPilot', 'Use CircuitPilot\'s free AI with a limit per person (sign in with GitHub, no key needed), or your own API key. You can change it any time with 🔑 AI keys.');
     }
-    // first visit: the welcome (3D demo, what's new, tour), then the AI chooser
-    if (window.Welcome) { Welcome.init(); setTimeout(() => Welcome.start(maybeAnnounce), 1200); } else setTimeout(maybeAnnounce, 1500);
-    setTimeout(maybeAnnounce, 4000);
+    // first visit: the welcome (3D demo, what's new, tour), then the AI chooser — skipped when Colab sent the user here
+    if (colabLink) { if (window.Welcome) Welcome.init(); try { localStorage.setItem('cp.announced', GitHub.getIdToken() ? (GitHub.account() || 'github') : 'guest'); } catch (e) { } setTimeout(() => { showColabPanel(); $('#ccUrl').value = colabLink; connectColab(colabLink, false); }, 900); }
+    else { if (window.Welcome) { Welcome.init(); setTimeout(() => Welcome.start(maybeAnnounce), 1200); } else setTimeout(maybeAnnounce, 1500); setTimeout(maybeAnnounce, 4000); }
     // record the signed-in user for the shared AI admin page (one quiet check per page load)
     if (GitHub.getIdToken()) fetch(CP_CONFIG.relay + '/pool/status', { headers: { authorization: 'Bearer ' + GitHub.getIdToken() } }).catch(() => { });
     $('#asClose').onclick = () => $('#chooseModal').classList.add('hidden');

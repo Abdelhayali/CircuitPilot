@@ -28,6 +28,10 @@ Model: [{a.repo}](https://huggingface.co/{a.repo}) · base model Qwen3.5-4B (Apa
 """),
     code("""
 # 1. Ollama (serves the model with an OpenAI-compatible API)
+import shutil
+if not shutil.which('nvidia-smi'):
+    raise RuntimeError('No GPU in this Colab session. Runtime -> Change runtime type -> T4 GPU -> Save, then Runtime -> Run all. '
+                     '(If T4 is not offered, the free GPU quota is used up for now: try again later.)')
 # (the installer needs zstd to unpack, which Colab does not have)
 !apt-get -qq update > /dev/null && apt-get -qq install -y zstd pciutils lshw > /dev/null
 !curl -fsSL https://ollama.com/install.sh | sh 2>&1 | tail -3

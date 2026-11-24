@@ -27,7 +27,7 @@ const has = k => process.argv.includes('--' + k);
 const PROVIDER = arg('provider', 'openai'), BASE = arg('base', PROVIDER === 'anthropic' ? 'https://api.anthropic.com' : 'http://localhost:11434/v1');
 const MODEL = arg('model', 'qwen3.5:4b'), KEY = arg('key', process.env.BENCH_KEY || ''), TOOLSET = arg('tools', 'compact');
 const ONLY = arg('only', ''), REPEAT = +arg('repeat', 1), STEPS = +arg('steps', 24), TEMP = +arg('temperature', 0), LABEL = arg('label', MODEL);
-const CAP = 3000;
+const CAP = 3000, THINK = arg('think', 'default');   // --think off: reasoning_effort none (thinking models)
 
 fs.mkdirSync(RES, { recursive: true });
 if (has('board')) { leaderboard(); process.exit(0); }
@@ -168,7 +168,7 @@ function score(t, final, stats) {
 // ---------- model calls ----------
 async function callOpenAI(system, hist, tools) {
   const r = await fetch(BASE.replace(/\/$/, '') + '/chat/completions', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json' }, KEY ? { authorization: 'Bearer ' + KEY } : {}),
-    body: JSON.stringify({ model: MODEL, temperature: TEMP, max_tokens: 4096, messages: [{ role: 'system', content: system }, ...hist.map(m => m.role === 'tool' ? { role: 'tool', tool_call_id: m.id, content: m.content } : m.role === 'assistant' ? Object.assign({ role: 'assistant', content: m.content || '' }, m.calls.length ? { tool_calls: m.calls.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args || {}) } })) } : {}) : m)],
+    body: JSON.stringify({ model: MODEL, temperature: TEMP, max_tokens: 4096, ...(THINK === 'off' ? { reasoning_effort: 'none' } : {}), messages: [{ role: 'system', content: system }, ...hist.map(m => m.role === 'tool' ? { role: 'tool', tool_call_id: m.id, content: m.content } : m.role === 'assistant' ? Object.assign({ role: 'assistant', content: m.content || '' }, m.calls.length ? { tool_calls: m.calls.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args || {}) } })) } : {}) : m)],
       tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) }), signal: AbortSignal.timeout(600000) });
   if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 300));
   const j = await r.json(), m = j.choices[0].message;
@@ -230,9 +230,9 @@ for (let k = 0; k < REPEAT; k++) for (const t of list) {
   const pcb = t.pcb ? ` place ${String(r.placement).padStart(4)} route ${String(r.routing).padStart(4)} drc ${String(r.drc).padStart(4)}` : ' '.repeat(36);
   console.log(`${t.id.padEnd(3)} ${String(r.total).padStart(5)}  sch ${String(r.schematic).padStart(4)}${pcb} beh ${String(r.behaviour).padStart(4)}  ${r.stats.calls} calls ${r.stats.errors + r.stats.bad} err ${r.seconds}s${r.details.failed.length ? '  ✗ ' + r.details.failed.join('; ') : ''}${(r.details.missing_connections || []).length ? '  unrouted: ' + r.details.missing_connections.join(',') : ''}`);
 }
-const summary = summarize(results, { model: LABEL, provider: PROVIDER, base: BASE, tools: TOOLSET, date: new Date().toISOString().slice(0, 16) });
+const summary = summarize(results, { model: LABEL, provider: PROVIDER, base: BASE, tools: TOOLSET + (THINK === 'off' ? ', no thinking' : ''), date: new Date().toISOString().slice(0, 16) });
 console.log(JSON.stringify(summary));
-const file = path.join(RES, LABEL.replace(/[^\w.-]+/g, '_') + '__' + TOOLSET + '.json');
+const file = path.join(RES, LABEL.replace(/[^\w.-]+/g, '_') + '__' + TOOLSET + (THINK === 'off' ? '_nothink' : '') + '.json');
 fs.writeFileSync(file, JSON.stringify({ summary, results }, null, 1));
 leaderboard();
 process.exit(0);

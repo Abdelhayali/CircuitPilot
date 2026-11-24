@@ -509,7 +509,38 @@ async function talkEp(R) {
   else { const V = pick(R, [3.3, 5]); ep.user(typo(R, `i2c pull-up value for ${V}V, 400kHz?`)); ep.say(`2.2 kΩ–4.7 kΩ. For 400 kHz with ~100 pF bus capacitance use ${V === 3.3 ? '2.2 kΩ' : '2.7 kΩ'} (rise time 0.85·R·C ≈ ${(0.85 * (V === 3.3 ? 2.2e3 : 2.7e3) * 100e-12 * 1e9).toFixed(0)} ns < 300 ns); 4.7 kΩ is fine at 100 kHz.`); }
   return ep;
 }
-const EPISODES = [[buildEp, 40], [editEp, 16], [pcbEp, 18], [askEp, 12], [planEp, 6], [talkEp, 8]];
+// ONE request that asks for the whole job (schematic + PCB + size / pour / holes / edge connector): carried out to the
+// end, then a summary — how users (and the benchmark) usually ask
+async function fullEp(R) {
+  const ep = new Ep(R, 'agent', 'full'); Model.load(Model.blank());
+  const k = pickRecipe(R); ep.kind = 'full:' + k;
+  const want = { size: chance(R, 0.55), pour: chance(R, 0.5), holes: chance(R, 0.3), edge: chance(R, 0.35) };
+  if (want.holes) want.size = true;
+  const w = want.holes ? int(R, 32, 45) : int(R, 22, 40), h = want.holes ? int(R, 26, 35) : int(R, 18, 30);
+  const extra = [want.size ? pick(R, [`on a ${w} x ${h} mm board`, `board ${w}x${h}mm`, `PCB size ${w} × ${h} mm`]) : pick(R, ['and make the PCB', 'then make the board', 'and route the pcb'])]
+    .concat(want.pour ? [pick(R, ['with a GND pour on both layers', 'add ground pour top and bottom', 'gnd plane both sides'])] : [])
+    .concat(want.holes ? [pick(R, ['with 4 M3 mounting holes', 'and mounting holes', 'm3 holes in the corners'])] : [])
+    .concat(want.edge ? [pick(R, ['connector on the board edge', 'header at the edge of the board'])] : []);
+  const r = await recipes[k](ep, R);
+  ep.msgs[0].content = ep.msgs[0].content.replace(/[.\s]*$/, '') + (chance(R, 0.5) ? ', ' : '. ') + extra.join(', ') + (chance(R, 0.5) ? '.' : '');
+  await ercStep(ep);
+  const g = await ep.one('generate_pcb', want.size ? { board_width: w, board_height: h } : {}, 'Schematic is clean; now the board.'); if (isErr(g)) throw new Skip();
+  let ro = g.routing || {};
+  if ((ro.failed || []).length) { const o = await ep.one('optimize_pcb', {}, `${ro.failed.join(', ')} not routed yet — optimizing placement.`); if (isErr(o)) throw new Skip(); }
+  const done = [];
+  if (want.edge) {
+    const j = Pcb.placed().find(c => c.type === 'connector'); if (!j) throw new Skip();
+    const p = await ep.one('place_footprint', { ref: j.ref, edge: pick(R, ['left', 'right', 'top', 'bottom']) }); if (isErr(p)) throw new Skip(); done.push(`${j.ref} on the board edge`);
+  }
+  if (want.holes) { const p = await ep.one('add_mounting_holes', {}); if (isErr(p) || (p.holes || []).length < 4) throw new Skip(); done.push(`${p.holes.length} × M3 holes`); }
+  if (want.edge || want.holes) { const rr0 = await ep.one('route_pcb', {}); if (isErr(rr0)) throw new Skip(); ro = rr0.routing || rr0; }
+  if (want.pour) { const p = await ep.one('add_copper_pour', { net: 'GND', layer: 'both' }); if (isErr(p)) throw new Skip(); done.push('GND pour on both layers'); }
+  const st = await ep.one('pcb_status', {}); if (isErr(st) || st.unrouted.length) throw new Skip();
+  const d = await ep.one('run_drc', {}); if (isErr(d) || d.errors) throw new Skip();
+  ep.say(`Done.\n\n- **Schematic:** ${r.summary} — ERC clean.\n- **PCB:** ${st.board.w} × ${st.board.h} mm, ${st.routed}/${st.nets} nets routed${st.vias ? ', ' + st.vias + ' via' + (st.vias > 1 ? 's' : '') : ''}${done.length ? ', ' + done.join(', ') : ''}.\n- **DRC:** ${d.errors ? d.errors + ' errors' : 'no errors'}${d.warnings ? ` (${d.warnings} warning${d.warnings > 1 ? 's' : ''}: ${Object.keys(d.by_type || {}).join(', ')})` : ''}.`);
+  return ep;
+}
+const EPISODES = [[buildEp, 26], [fullEp, 30], [editEp, 14], [pcbEp, 14], [askEp, 8], [planEp, 4], [talkEp, 6]];
 
 // ---------------------------------------------------------------- run this worker's share
 async function workerRun() {

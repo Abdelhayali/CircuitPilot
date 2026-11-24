@@ -4,6 +4,7 @@ out/
 tools-llama.cpp/
 data/
 data_try/
-cache/
 *.gguf
 load_test.py
+tools-llama.cpp-ollama/
+tools-llama.cpp-bin/

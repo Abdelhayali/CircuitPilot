@@ -26,7 +26,8 @@ ap.add_argument('--eval_every', type=int, default=40)
 ap.add_argument('--bucket', type=int, default=512, help='pad lengths to a multiple of this (fewer kernel shapes to compile)')
 ap.add_argument('--verbose', action='store_true')
 ap.add_argument('--val_limit', type=int, default=40, help='validation examples used for the loss checks')
-ap.add_argument('--qlora', action='store_true', help='base model in 4-bit (NF4): ~3 GB instead of 8.4 GB, for 16 GB GPUs')
+ap.add_argument('--qlora', default='auto', choices=['auto', 'yes', 'no'], help='base model in 4-bit (NF4, ~3 GB instead of 8.4 GB); auto: only on GPUs under 20 GB')
+ap.add_argument('--resume', action='store_true', help='continue from <out>/lora-last (adapter + step)')
 ap.add_argument('--mem_fraction', type=float, default=0, help='cap this process at this share of the GPU (shared GPUs)')
 args = ap.parse_args()
 
@@ -80,6 +81,9 @@ ids, labels, _ = train[0]
 print('--- trained text of example 0 ---\n' + tok.decode([t for t, l in zip(ids, labels) if l != -100])[:1500] + '\n---', flush=True)
 
 # ---------- model ----------
+vram = torch.cuda.get_device_properties(0).total_memory / 1e9
+args.qlora = args.qlora == 'yes' or (args.qlora == 'auto' and vram < 20)
+print(f'{vram:.0f} GB GPU -> ' + ('QLoRA (4-bit base)' if args.qlora else 'LoRA on the fp16 / bf16 base'), flush=True)
 if args.qlora:
     from transformers import BitsAndBytesConfig
     from peft import prepare_model_for_kbit_training
@@ -96,7 +100,15 @@ else:
 model.config.use_cache = False
 print('model on GPU:', round(torch.cuda.memory_allocated(0) / 1e9, 2), 'GB', flush=True)
 cfg = LoraConfig(r=args.rank, lora_alpha=args.rank * 2, lora_dropout=0.05, bias='none', task_type='CAUSAL_LM', target_modules='all-linear')
-model = get_peft_model(model, cfg)
+last = os.path.join(args.out, 'lora-last'); start_step = 0
+if args.resume and os.path.exists(os.path.join(last, 'adapter_config.json')):
+    from peft import PeftModel
+    model = PeftModel.from_pretrained(model, last, is_trainable=True)
+    try: start_step = json.load(open(os.path.join(last, 'state.json')))['step']
+    except Exception: start_step = 0
+    print('resumed from', last, 'at step', start_step, flush=True)
+else:
+    model = get_peft_model(model, cfg)
 for n, p in model.named_parameters():
     if p.requires_grad: p.data = p.data.float()      # LoRA weights in fp32 (stable with an fp16 base)
 model.print_trainable_parameters()
@@ -131,7 +143,9 @@ os.makedirs(args.out, exist_ok=True)
 log = open(os.path.join(args.out, 'log.jsonl'), 'a')
 print(f'{steps} optimizer steps ({args.epochs} epochs, accumulate {args.accum})', flush=True)
 if not args.limit: print(f'val loss before: {evaluate():.4f}', flush=True)
-model.train(); order = []; step = 0; t0 = time.time(); run = 0.0; best = 9e9
+model.train(); order = []; step = start_step; t0 = time.time(); run = 0.0; best = 9e9
+for _ in range(start_step): sched.step()   # the learning-rate schedule continues where it stopped
+random.seed(start_step); done0 = start_step
 while step < steps:
     if not order: order = list(range(len(train))); random.shuffle(order)
     acc = 0.0
@@ -143,12 +157,13 @@ while step < steps:
         if args.verbose: torch.cuda.synchronize(); print(f'  sample {len(ids)} tokens {time.time() - t1:.1f} s, peak {torch.cuda.max_memory_allocated(0) / 1e9:.1f} GB', flush=True)
     scaler.unscale_(opt); torch.nn.utils.clip_grad_norm_([p for p in model.parameters() if p.requires_grad], 1.0)
     scaler.step(opt); scaler.update(); opt.zero_grad(set_to_none=True); sched.step(); step += 1
-    if step % 10 == 0: model.save_pretrained(os.path.join(args.out, 'lora-last'))   # resume point
+    if step % 10 == 0: model.save_pretrained(last); json.dump({'step': step}, open(os.path.join(last, 'state.json'), 'w'))   # resume point
     run = acc if step == 1 else 0.9 * run + 0.1 * acc
     el = time.time() - t0
-    rec = {'step': step, 'loss': round(acc, 4), 'avg': round(run, 4), 'lr': sched.get_last_lr()[0], 'min': round(el / 60, 1), 'eta_min': round(el / step * (steps - step) / 60, 1), 'mem_gb': round(torch.cuda.max_memory_allocated(0) / 1e9, 1)}
+    rec = {'step': step, 'loss': round(acc, 4), 'avg': round(run, 4), 'lr': sched.get_last_lr()[0], 'min': round(el / 60, 1), 'eta_min': round(el / max(1, step - done0) * (steps - step) / 60, 1), 'mem_gb': round(torch.cuda.max_memory_allocated(0) / 1e9, 1)}
     if step % args.eval_every == 0 or step == steps:
         rec['val'] = round(evaluate(), 4)
         if rec['val'] < best: best = rec['val']; model.save_pretrained(os.path.join(args.out, 'lora'))
     print(json.dumps(rec), flush=True); log.write(json.dumps(rec) + '\n'); log.flush()
+if best > 8e9: model.save_pretrained(os.path.join(args.out, 'lora'))
 print('done, best val', best, flush=True)

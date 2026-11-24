@@ -446,7 +446,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
 
   // compact mode: the core tools with short descriptions and a short prompt, for small local models (the fine-tuned
   // CircuitPilot 4B and other 2–8B models). On for models named circuitpilot-…, or with the Compact tools setting.
-  const isLite = model => settings.compactTools === true || (settings.compactTools !== false && /circuitpilot-|cp-?\d+b/i.test(String((model && (model.model || model.id)) || '')));
+  const isLite = model => settings.compactTools === true || (settings.compactTools !== false && /circuitpilot-|pcbgo|cp-?\d+b/i.test(String((model && (model.model || model.id)) || '')));
   async function run(text, mode, hooks) {
     const model = currentModel(), lite = isLite(model);
     const tools = (lite ? Engine.LITE.tools() : TOOLS).filter(t => (mode === 'agent' || t.ro) && (settings.webAccess || !t.web));
@@ -474,7 +474,8 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
           : BASE + '\n\n' + MODE[mode] + know + (settings.includeContext ? '\n\n' + designContext() : '');
         systemChars = system.length;
         const sentLen = history.length;
-        const r = await callModel(model, system, history.map(({ role, text, toolCalls, results, files }) => ({ role, text, toolCalls, results, files })), tools, controller.signal);
+        // compact mode on a self-hosted server (Ollama / llama.cpp / LM Studio): thinking off, as pcbgo models are trained
+        const r = await callModel(model, system, history.map(({ role, text, toolCalls, results, files }) => ({ role, text, toolCalls, results, files })), tools, controller.signal, lite && model.provider === 'openai' && !/api\.openai\.com|googleapis|openrouter/.test(model.base || '') ? { body: { reasoning_effort: 'none' } } : {});
         if (r.usage && r.usage.in > 0) lastIn = { tokens: r.usage.in, len: sentLen };
         const msg = { role: 'assistant', text: r.text, toolCalls: r.toolCalls, model: model.label, mode };
         history.push(msg); persist(); hooks.onAssistant(msg, r.usage);

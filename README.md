@@ -261,7 +261,9 @@ node bench/pcb_bench.mjs --provider anthropic --model claude-sonnet-5-5 --key <k
 Results with every tool call, the final design, unrouted nets and DRC errors are in `bench/results/`; the table above
 is rewritten after every run. Send a pull request with your model's results file to add it.
 
-## CircuitPilot-4B — a small model fine-tuned for CircuitPilot
+## pcbgo v1 (CircuitPilot-4B) — a small model fine-tuned for CircuitPilot
+
+**Download: [huggingface.co/abdelhayali91/pcbgo-v1](https://huggingface.co/abdelhayali91/pcbgo-v1)** (Q4_K_M GGUF, 2.8 GB, Apache-2.0). Use it with pcbgo.site through the free Colab notebook, or with Ollama on your PC (`ollama create pcbgo-v1 -f Modelfile`) and model name `pcbgo-v1` in **🔑 Connect AI → Use your own API**; CircuitPilot switches to compact tools and thinking off for it by itself.
 
 [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) fine-tuned with LoRA to design with CircuitPilot's
 tools, small enough for a laptop GPU, Ollama on any PC or a **free Google Colab** GPU. Everything is in

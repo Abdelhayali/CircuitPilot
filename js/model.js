@@ -165,8 +165,17 @@ const Model = (() => {
       if (!lp) throw new Error(`Part ${code} is not loaded — call get_part (database) or create_part first`);
       spec = Object.assign({}, spec, { type: 'part', lcsc: code, footprint: fpNameFor(code) });
     }
+    // no type given (AI models often send only {value: "4.7k"}): infer the simple ones from the value / reference
+    if (!spec.type && !lp) {
+      const v = String(spec.value || '').trim(), r = String(spec.ref || '').toUpperCase();
+      const t = /LED/i.test(v) || /^LED/.test(r) ? 'led'
+        : /^[\d.]+\s*[kKmM]?\s*(Ω|ohm|R)?$/i.test(v) && !/^[\d.]+\s*m$/.test(v) || /^\d+R\d*$/i.test(v) || /^R\d/.test(r) ? 'resistor'
+        : /^[\d.]+\s*[pnuµ]\s*F?$/i.test(v) || /^C\d/.test(r) ? 'capacitor'
+        : /^[\d.]+\s*[nuµm]\s*H$/i.test(v) || /^L\d/.test(r) ? 'inductor' : null;
+      if (t) spec = Object.assign({}, spec, { type: t });
+    }
     const d = Lib.type(spec.type);
-    if (!d) throw new Error(`Unknown type "${spec.type}". Types: ${Lib.types().join(', ')}`);
+    if (!d) throw new Error(spec.type ? `Unknown type "${spec.type}". Types: ${Lib.types().join(', ')}` : `Give each component a "type" (${Lib.types().join(', ')}) or "lcsc" for a database part — e.g. {"type": "resistor", "value": "4.7k"}`);
     const prefix = lp ? (lp.prefix || 'U').replace(/[^A-Z]/gi, '') || 'U' : d.prefix;
     let ref = spec.ref || nextRef(prefix);
     if (comp(ref)) { if (spec.ref) throw new Error(`Ref ${ref} already exists`); ref = nextRef(prefix); }

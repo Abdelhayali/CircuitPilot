@@ -244,6 +244,7 @@ OpenAI-compatible API (OpenAI, Gemini, OpenRouter …) or Claude, with the compa
 <!-- BENCH:START -->
 | Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Date |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CircuitPilot-4B v2 (llama.cpp) | compact, no thinking | 3 × 14 | **79.3** | 70.3 | 91.4 | 75.1 | 82 | 82 | 25/33 | 32/33 | 76/326 | 2026-11-24 |
 | Qwen3.5-4B (base, llama.cpp) | compact, no thinking | 3 × 14 | **65.1** | 38.9 | 100 | 75.4 | 57.3 | 51.6 | 17/33 | 21/33 | 96/599 | 2026-11-24 |
 | Qwen3.5-4B (base) | compact | 3 × 14 | **60.3** | 30.4 | 100 | 65.7 | 52.7 | 45.6 | 15/33 | 19/33 | 6/520 | 2026-11-24 |
 | CircuitPilot-4B (step 25, llama.cpp) | compact, no thinking | 3 × 14 | **57** | 27.3 | 96.5 | 70.9 | 45.3 | 36.4 | 9/33 | 17/33 | 139/391 | 2026-11-24 |
@@ -260,7 +261,7 @@ node bench/pcb_bench.mjs --provider anthropic --model claude-sonnet-5-5 --key <k
 Results with every tool call, the final design, unrouted nets and DRC errors are in `bench/results/`; the table above
 is rewritten after every run. Send a pull request with your model's results file to add it.
 
-## CircuitPilot-4B — a small model fine-tuned for CircuitPilot (in training)
+## CircuitPilot-4B — a small model fine-tuned for CircuitPilot
 
 [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) fine-tuned with LoRA to design with CircuitPilot's
 tools, small enough for a laptop GPU, Ollama on any PC or a **free Google Colab** GPU. Everything is in
@@ -268,8 +269,14 @@ tools, small enough for a laptop GPU, Ollama on any PC or a **free Google Colab*
 - **Training data** made by running CircuitPilot's real engine, so every tool result the model learns from is what the
   app really returns: circuits built from real JLCPCB parts, edits, PCB steps, questions, plans, recovering from a
   wrong pin name, and requests typed with typos. Only designs that pass ERC / DRC are kept.
-- **Training**: QLoRA on a 16 GB GPU (`finetune/train.py`); its progress and results will be listed here and in the
-  benchmark table above.
+- **Training**: QLoRA (`finetune/train.py`), 4-bit base + LoRA r 32, on one 16–24 GB GPU. v1: 400 steps-worth of
+  conversations where the PCB was a follow-up request; **v2** adds requests that ask for the whole job at once
+  (schematic + PCB + size / pour / holes / edge connector) and continues from v1 for 125 steps.
+- **Result on the PCB Bench** (3 × 14 tasks, thinking off, same llama.cpp server): **v2 79.3** vs the untuned
+  Qwen3.5-4B **65.1** — design tasks 70.3 vs 38.9, placement 82 % vs 57 %, routing 82 % vs 52 %, DRC clean 25/33 vs 17/33,
+  fully routed 32/33 vs 21/33. Weak spots left: the 555 blinker and the full sensor node (it loops on a failing call).
+- **Train it yourself on a fresh Windows PC**: [`finetune/train_circuitpilot_4b.bat`](finetune/train_circuitpilot_4b.bat)
+  installs everything, makes the data, trains, exports the GGUF and runs the benchmark.
 - **Free hosting**: [`CircuitPilot_4B_Colab.ipynb`](finetune/CircuitPilot_4B_Colab.ipynb) serves the model on Colab and
   prints the address to paste into **🔑 Connect AI → Use your own API** (model `circuitpilot-4b`).
 

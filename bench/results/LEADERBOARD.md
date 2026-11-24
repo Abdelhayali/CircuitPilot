@@ -4,4 +4,8 @@ Each model designs and repairs boards with CircuitPilot's tools; the design it l
 
 | Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Date |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CircuitPilot-4B v2 (llama.cpp) | compact, no thinking | 3 × 14 | **79.3** | 70.3 | 91.4 | 75.1 | 82 | 82 | 25/33 | 32/33 | 76/326 | 2026-11-24 |
+| Qwen3.5-4B (base, llama.cpp) | compact, no thinking | 3 × 14 | **65.1** | 38.9 | 100 | 75.4 | 57.3 | 51.6 | 17/33 | 21/33 | 96/599 | 2026-11-24 |
 | Qwen3.5-4B (base) | compact | 3 × 14 | **60.3** | 30.4 | 100 | 65.7 | 52.7 | 45.6 | 15/33 | 19/33 | 6/520 | 2026-11-24 |
+| CircuitPilot-4B (step 25, llama.cpp) | compact, no thinking | 3 × 14 | **57** | 27.3 | 96.5 | 70.9 | 45.3 | 36.4 | 9/33 | 17/33 | 139/391 | 2026-11-24 |
+| CircuitPilot-4B (step 25) | compact | 3 × 14 | **47.3** | 24.7 | 77.5 | 53.4 | 44 | 21.2 | 3/33 | 27/33 | 18/87 | 2026-11-24 |

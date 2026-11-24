@@ -4,7 +4,6 @@ Each model designs and repairs boards with CircuitPilot's tools; the design it l
 
 | Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Tokens / task (in · out) | Date |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Claude Opus 5.5 (agent) | compact, agent driver, tokens estimated | 1 × 14 | **99.9** | 99.9 | 100 | 100 | 100 | 100 | 11/11 | 11/11 | 1/75 | 21.5k · 270 | 2026-11-24 |
 | CircuitPilot-4B v2 (llama.cpp) | compact, no thinking | 3 × 14 | **80.4** | 72.2 | 91.4 | 78 | 82 | 82 | 25/33 | 32/33 | 76/326 | 96.7k · 991 | 2026-11-24 |
 | Qwen3.8-27B (llama.cpp) | compact, no thinking | 1 × 14 | **78.6** | 62.5 | 100 | 83.4 | 78.7 | 72.8 | 8/11 | 9/11 | 0/180 | 143k · 864 | 2026-11-24 |
 | Qwen3.6-27B (llama.cpp) | compact, no thinking | 1 × 14 | **77.7** | 61 | 100 | 77.7 | 76 | 72.8 | 8/11 | 11/11 | 46/204 | 181k · 2.4k | 2026-11-24 |

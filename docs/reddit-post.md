@@ -33,7 +33,6 @@ leaves behind** is scored, not its text: schematic 35, placement 15, routing 25,
 
 | Model | Score | Design | Repair | DRC clean | Fully routed | Tokens / task (in · out) |
 |---|---|---|---|---|---|---|
-| Claude Opus 5.5 (agent)* | 99.9 | 99.9 | 100 | 11/11 | 11/11 | ~21k · ~270 |
 | **pcbgo v1 (4B)** | **80.4** | **72.2** | 91.4 | 25/33 | 32/33 | 97k · 1.0k |
 | Qwen3.8-27B | 78.6 | 62.5 | 100 | 8/11 | 9/11 | 143k · 0.9k |
 | Qwen3.6-27B | 77.7 | 61.0 | 100 | 8/11 | 11/11 | 181k · 2.4k |
@@ -43,9 +42,6 @@ All local models ran on llama.cpp (Q4_K_M, thinking off, the same compact 30-too
 tasks, the 27B models 1 × 14. The fine-tune nearly **doubles design quality** over its base (38.9 → 72.2) and lands
 **on par with Qwen3.8-27B and Qwen3.6-27B** (slightly ahead, within run-to-run noise) at 1/7 of the size, while using
 about **half the tokens**.
-
-\*The Opus row is a reference ceiling, not a blind result: it was Claude Opus 5.5 driving the tools from the Claude
-Code session that helped build the benchmark, so it had seen the tasks. 1 × 14 runs; tokens estimated.
 
 Where it's still weak: bigger multi-block boards, some 555 variants, and it can repeat a failing tool call. Always run
 ERC/DRC (built into the app) before ordering.

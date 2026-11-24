@@ -276,7 +276,7 @@
       <div class="row" style="gap:8px;align-items:center;margin-top:10px"><button id="ccBack">← Back</button><h2 style="margin:0">pcbgo-v1 on Google Colab</h2></div>
       <ol class="cc-steps">
         <li><a id="ccOpen" class="btn primary" target="_blank" rel="noopener">Open the notebook in Google Colab ↗</a> <span class="muted small">(sign in with your Google account)</span></li>
-        <li>In Colab: <b>Runtime → Change runtime type → T4 GPU</b>, then <b>Runtime → Run all</b>. It takes about 3–5 minutes (Ollama + the 2.8 GB model).</li>
+        <li>In Colab: <b>Runtime → Change runtime type → T4 GPU</b>, then <b>Runtime → Run all</b>. It takes about 5–8 minutes (Ollama, the 2.8 GB model, then a one-time 2–3 minute GPU warm-up in cell 4 — that is normal).</li>
         <li>At the end, click <b>Open pcbgo.site connected</b> in the last cell — this page connects by itself. Or paste the address it prints here:</li>
       </ol>
       <div class="row" style="gap:8px"><input id="ccUrl" placeholder="https://….trycloudflare.com" style="flex:1" spellcheck="false" autocomplete="off"><button id="ccConnect" class="primary">Connect</button></div>

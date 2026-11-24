@@ -19,7 +19,7 @@ cells = [
 This runs **pcbgo v1** (Qwen3.5-4B fine-tuned to use CircuitPilot's design tools) on Colab's free GPU and connects
 [pcbgo.site](https://pcbgo.site) to it.
 
-1. **Runtime → Change runtime type → T4 GPU** (free), then **Runtime → Run all** (3–5 minutes).
+1. **Runtime → Change runtime type → T4 GPU** (free), then **Runtime → Run all** (about 5–8 minutes; cell 4 warms the GPU up for 2–3 minutes, that is normal).
 2. Click **Open pcbgo.site connected to this model** at the end — pcbgo.site opens with the AI set up.
    (Or paste the printed address in pcbgo.site → 🔑 Connect AI → *Run pcbgo-v1 free on Google Colab*.)
 
@@ -56,12 +56,14 @@ PARAMETER num_ctx 16384
 !ollama list
 """),
     code("""
-# 4. quick test: one tool call, as CircuitPilot would send it
-import json, urllib.request
+# 4. warm-up + quick test: one tool call, as CircuitPilot would send it.
+#    The FIRST call takes 2-3 minutes on a T4 (the GPU code is prepared once); after that answers take seconds.
+import json, urllib.request, time
+print('Warming up the GPU (first call only, 2-3 minutes)...'); t0 = time.time()
 req = {'model': 'pcbgo-v1', 'reasoning_effort': 'none', 'messages': [{'role': 'user', 'content': 'change R1 to 470'}],
        'tools': [{'type': 'function', 'function': {'name': 'update_component', 'description': 'Change a component', 'parameters': {'type': 'object', 'required': ['ref'], 'properties': {'ref': {'type': 'string'}, 'value': {'type': 'string'}}}}}]}
 r = urllib.request.urlopen(urllib.request.Request('http://localhost:11434/v1/chat/completions', json.dumps(req).encode(), {'content-type': 'application/json'}))
-print(json.loads(r.read())['choices'][0]['message'].get('tool_calls'))
+print(f'ready in {time.time() - t0:.0f} s:', json.loads(r.read())['choices'][0]['message'].get('tool_calls'))
 """),
     code("""
 # 5. a public HTTPS address for CircuitPilot (Cloudflare quick tunnel, no account needed)

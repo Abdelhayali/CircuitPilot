@@ -301,15 +301,26 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     }
     const headers = { 'content-type': 'application/json' };
     if (model.key) headers.authorization = 'Bearer ' + model.key;
-    const res = await llmFetch(model.base, '/chat/completions', {
+    // streaming (SSE) so the chat shows the answer, the reasoning and the tool calls while they are written;
+    // not for the shared pool (its relay answers in one piece) — a server that refuses it gets a normal request
+    const stream = !!extra.onDelta && !/\/pool\/v1\/?$/.test(String(model.base || ''));
+    // models on this PC / the local network: a cap on the answer length, so a model stuck repeating itself stops
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|192\.168\.|10\.)/.test(String(model.base || '')) || /trycloudflare\.com/.test(String(model.base || '')))
+      extra = Object.assign({}, extra, { body: Object.assign({ max_tokens: +settings.maxTokens || 4096 }, extra.body || {}) });
+    const send = st => llmFetch(model.base, '/chat/completions', {
       method: 'POST', signal, headers,
-      body: JSON.stringify(Object.assign({ model: model.model || model.id, messages: toOpenAI(hist, system, vision, model.base) }, extra.body || {}, tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}))
+      body: JSON.stringify(Object.assign({ model: model.model || model.id, messages: toOpenAI(hist, system, vision, model.base) }, extra.body || {}, tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}, st ? { stream: true, stream_options: { include_usage: true } } : {}))
     });
+    let res = await send(stream);
+    if (stream && !res.ok && res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429) res = await send(false);
+    if (res.ok && /text\/event-stream/i.test(res.headers.get('content-type') || '')) return readStream(res, extra.onDelta);
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(friendlyError(res.status, (Array.isArray(j) ? j[0] : j)?.error?.message || JSON.stringify(j).slice(0, 300) || res.statusText));
     const m = j.choices?.[0]?.message || {};
+    const think = /<think>([\s\S]*?)(<\/think>|$)/.exec(m.content || '');
     return {
-      text: (m.content || '').trim(),
+      text: (m.content || '').replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim(),
+      reasoning: ((m.reasoning_content || m.reasoning || '') + (think ? think[1] : '')).trim(),
       toolCalls: (m.tool_calls || []).map((t, i) => {
         let input = {}; try { input = JSON.parse(t.function.arguments || '{}'); } catch (e) { input = { __parse_error: t.function.arguments }; }
         return Object.assign({ id: t.id || 'call_' + Date.now() + '_' + i, name: t.function.name, input }, t.extra_content ? { extra: t.extra_content } : {});
@@ -318,8 +329,58 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     };
   }
 
+  // an OpenAI-style SSE stream → the same result as a normal answer; onDelta sees the text / reasoning / tool calls so far
+  async function readStream(res, onDelta) {
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = '', text = '', reasoning = '', usage = null, last = 0;
+    const calls = [];
+    const split = () => {   // <think>…</think> inside the content (Qwen, DeepSeek on some servers) is reasoning
+      const m = /^([\s\S]*?)<think>([\s\S]*?)(<\/think>|$)([\s\S]*)$/.exec(text);
+      return m ? { text: (m[1] + m[4]).trim(), reasoning: (reasoning + m[2]).trim() } : { text: text.trim(), reasoning: reasoning.trim() };
+    };
+    const emit = force => { const now = Date.now(); if (!force && now - last < 80) return; last = now; const s = split(); try { onDelta({ text: s.text, reasoning: s.reasoning, tools: calls.filter(Boolean).map(c => ({ name: c.name, args: c.args })) }); } catch (e) { } };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let k;
+      while ((k = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, k).trim(); buf = buf.slice(k + 1);
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        let j; try { j = JSON.parse(data); } catch (e) { continue; }
+        if (j.error) throw new Error(friendlyError(j.error.code || 500, j.error.message || JSON.stringify(j.error).slice(0, 300)));
+        if (j.usage) usage = j.usage;
+        const d = j.choices && j.choices[0] && j.choices[0].delta;
+        if (!d) continue;
+        if (d.content) text += d.content;
+        const rc = d.reasoning_content || d.reasoning;
+        if (typeof rc === 'string') reasoning += rc;
+        for (const t of d.tool_calls || []) {
+          const i = t.index != null ? t.index : calls.length, c = calls[i] || (calls[i] = { id: '', name: '', args: '', extra: null });
+          if (t.id) c.id = t.id;
+          if (t.function && t.function.name && !c.name) c.name = t.function.name;
+          if (t.function && t.function.arguments) c.args += t.function.arguments;
+          if (t.extra_content) c.extra = t.extra_content;
+        }
+        emit(false);
+      }
+    }
+    emit(true);
+    const s = split();
+    return {
+      text: s.text, reasoning: s.reasoning,
+      toolCalls: calls.filter(c => c && c.name).map((c, i) => {
+        let input = {}; try { input = JSON.parse(c.args || '{}'); } catch (e) { input = { __parse_error: c.args }; }
+        return Object.assign({ id: c.id || 'call_' + Date.now() + '_' + i, name: c.name, input }, c.extra ? { extra: c.extra } : {});
+      }),
+      usage: usage ? { in: usage.prompt_tokens, out: usage.completion_tokens } : null
+    };
+  }
+
   // ---------- agent loop ----------
-  let history = [], controller = null;
+  let history = [], controller = null, live = null;
   try { history = JSON.parse(localStorage.getItem('cp.chat') || '[]'); } catch (e) { }
   // Attachment bytes are big: browser storage keeps them for the latest messages only (the text is always kept).
   const persist = () => {
@@ -495,9 +556,14 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         systemChars = system.length;
         const sentLen = history.length;
         // compact mode on a self-hosted server (Ollama / llama.cpp / LM Studio): thinking off, as pcbgo models are trained
-        const r = await callModel(model, system, history.map(({ role, text, toolCalls, results, files }) => ({ role, text, toolCalls, results, files })), tools, controller.signal, lite && model.provider === 'openai' && !/api\.openai\.com|googleapis|openrouter/.test(model.base || '') ? { body: { reasoning_effort: 'none' } } : {});
+        const ex = lite && model.provider === 'openai' && !/api\.openai\.com|googleapis|openrouter/.test(model.base || '') ? { body: { reasoning_effort: 'none' } } : {};
+        // live view: what the model is doing now (reading the conversation, thinking, writing, calling a tool)
+        live = { phase: 'model', since: Date.now(), model: model.label, tokens: contextInfo().used };
+        hooks.onLive && hooks.onLive();
+        ex.onDelta = d => { if (live && live.phase === 'model') Object.assign(live, d); hooks.onLive && hooks.onLive(); };
+        const r = await callModel(model, system, history.map(({ role, text, toolCalls, results, files }) => ({ role, text, toolCalls, results, files })), tools, controller.signal, ex);
         if (r.usage && r.usage.in > 0) lastIn = { tokens: r.usage.in, len: sentLen };
-        const msg = { role: 'assistant', text: r.text, toolCalls: r.toolCalls, model: model.label, mode };
+        const msg = Object.assign({ role: 'assistant', text: r.text, toolCalls: r.toolCalls, model: model.label, mode }, r.reasoning ? { reasoning: r.reasoning } : {});
         history.push(msg); persist(); hooks.onAssistant(msg, r.usage);
         if (!r.toolCalls.length) break;
         const results = [];
@@ -505,6 +571,8 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
           let content, error = false, image = null;
           try {
             if (tc.input && tc.input.__parse_error) throw new Error('Could not parse tool arguments as JSON');
+            live = { phase: 'tool', since: Date.now(), name: tc.name, input: tc.input };
+            hooks.onLive && hooks.onLive();
             const out = await execTool(tc.name, tc.input, mode);
             if (out && typeof out === 'object' && out.__image) { image = out.__image; const rest = Object.assign({}, out); delete rest.__image; content = JSON.stringify(rest); }
             else content = typeof out === 'string' ? out : JSON.stringify(out);
@@ -537,7 +605,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     } catch (e) {
       if (e.name === 'AbortError') hooks.onError('Stopped.');
       else hooks.onError(e.message);
-    } finally { controller = null; }
+    } finally { controller = null; live = null; }
   }
   // one plain request (no tools, no chat history) — used for quick structured jobs like AI placement
   async function complete(system, text, opts = {}) {
@@ -559,5 +627,5 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   const modelReady = () => { const m = currentModel(); if (m.provider === 'none') return false; return m.provider === 'anthropic' ? !!settings.anthropicKey : !!m.base; };
 
   const partsApi = Engine.partsApi, loadPart = Engine.loadPart;
-  return { routeOf, onWeb, MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, stop, busy, reset, get history() { return history; }, execTool, TOOLS, contextInfo, probeContext, compress };
+  return { routeOf, onWeb, MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, stop, busy, reset, get history() { return history; }, get live() { return live; }, execTool, TOOLS, contextInfo, probeContext, compress };
 })();

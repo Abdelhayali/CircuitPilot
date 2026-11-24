@@ -721,3 +721,11 @@ body.web .as-tabs .tag.webonly { display: inline; }
 @media (max-width: 640px) { .la-grid { grid-template-columns: 1fr; } .la-row { grid-template-columns: 1fr; } }
 .la-row label { display: flex; gap: 8px; align-items: flex-start; }
 .la-row label input[type=radio], .la-check input[type=checkbox] { width: auto; flex: none; margin: 3px 0 0; }
+/* live AI activity */
+.live-status { font-size: 12px; color: var(--muted, #777); display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.live-status .spin, .msg.info .spin { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; animation: lspin 0.8s linear infinite; }
+@keyframes lspin { to { transform: rotate(360deg); } }
+details.think { margin: 2px 0 6px; font-size: 12px; }
+details.think summary { cursor: pointer; color: var(--muted, #777); }
+.think-body { white-space: pre-wrap; max-height: 220px; overflow: auto; color: var(--muted, #666); border-left: 2px solid var(--border, #ddd); padding: 4px 8px; margin-top: 4px; font-size: 12px; }
+.live-tool { font-size: 12px; padding: 2px 0; word-break: break-all; }

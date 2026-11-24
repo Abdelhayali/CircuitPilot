@@ -586,7 +586,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
         try:
             with urllib.request.urlopen(req, timeout=900) as r:
-                self._send(r.status, r.read(), r.headers.get("Content-Type", "application/json"))
+                ctype = r.headers.get("Content-Type", "application/json")
+                if "text/event-stream" not in ctype:
+                    return self._send(r.status, r.read(), ctype)
+                # a streamed answer (SSE): pass each piece on as it arrives, so the chat shows the model writing
+                self.send_response(r.status)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
+                try:
+                    while True:
+                        chunk = r.read1(65536) if hasattr(r, "read1") else r.read(4096)
+                        if not chunk:
+                            break
+                        self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                        self.wfile.flush()
+                    self.wfile.write(b"0\r\n\r\n")
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass   # the user pressed Stop: closing the upstream connection stops the model too
+                self.close_connection = True
         except urllib.error.HTTPError as e:
             self._send(e.code, e.read(), e.headers.get("Content-Type", "application/json"))
         except Exception as e:  # connection refused, timeout, ...

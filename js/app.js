@@ -817,6 +817,7 @@ const App = (() => {
       if (m.role === 'user') out.push(`<div class="msg user">${m.text ? `<div class="bub">${esc(m.text).replace(/\n/g, '<br>')}</div>` : ''}${atts ? `<div class="atts">${atts}</div>` : ''}<div class="meta">${m.mode ? `<span class="mtag ${m.mode}">${m.mode}</span>` : ''}${m.checkpoint ? `<button class="restore" data-i="${i}" title="Restore the design to how it was before this message">↺ restore checkpoint</button>` : ''}</div></div>`);
       else if (m.role === 'assistant') {
         let h = '';
+        if (m.reasoning) h += `<details class="think"><summary>💭 Thinking <span class="muted">(${m.reasoning.split(/\s+/).length} words)</span></summary><div class="think-body">${esc(m.reasoning)}</div></details>`;
         if (m.text) h += `<div class="md">${md(m.text)}</div>`;
         for (const t of m.toolCalls || []) {
           const r = results[t.id];
@@ -828,11 +829,37 @@ const App = (() => {
       }
     });
     if (infoMsg) out.push(`<div class="msg info"><span class="spin"></span> ${esc(infoMsg)}</div>`);
-    else if (running) out.push('<div class="msg ai"><div class="typing"><span></span><span></span><span></span></div></div>');
+    else if (running) out.push(`<div class="msg ai live" id="liveMsg">${liveHtml()}</div>`);
     if (lastError) out.push(`<div class="msg err">${esc(lastError)}</div>`);
     const chat = $('#chat'); chat.innerHTML = out.join(''); chat.scrollTop = chat.scrollHeight;
     updateCtx();
   }
+  // what the AI is doing right now: reading the conversation, thinking, writing, or running a tool (with a timer)
+  function liveHtml() {
+    const L = AI.live;
+    if (!L) return '<div class="typing"><span></span><span></span><span></span></div>';
+    const s = Math.max(0, Math.round((Date.now() - L.since) / 1000));
+    if (L.phase === 'tool') return `<div class="live-status"><span class="spin"></span> Running <b>${esc(L.name)}</b> <span class="muted">${esc(toolHint({ name: L.name, input: L.input || {} }))}</span> · ${s} s${L.name === 'get_part' || L.name === 'search_parts' ? ' <span class="muted">(parts library on the internet)</span>' : /generate_pcb|route_pcb|optimize_pcb|reroute/.test(L.name) ? ' <span class="muted">(placing / routing)</span>' : ''}</div>`;
+    let h = '';
+    if (L.reasoning) h += `<details class="think" open><summary>💭 Thinking…</summary><div class="think-body">${esc(L.reasoning.slice(-4000))}</div></details>`;
+    if (L.text) h += `<div class="md">${md(L.text)}</div>`;
+    for (const t of L.tools || []) if (t.name) h += `<div class="tool run live-tool"><span class="dot"></span>${esc(t.name)} <span class="muted">${esc(String(t.args || '').slice(-200))}</span></div>`;
+    const what = (L.tools || []).some(t => t.name) ? 'writing a tool call' : L.text ? 'writing' : L.reasoning ? 'thinking' : `reading the conversation (${fmtTok(L.tokens || 0)} tokens)`;
+    return h + `<div class="live-status"><span class="spin"></span> ${esc(L.model || 'The model')} is ${what} · ${s} s</div>`;
+  }
+  let liveRaf = 0;
+  function updateLive() {
+    if (liveRaf) return;
+    liveRaf = setTimeout(() => {   // a timer, not requestAnimationFrame: it keeps counting when the window is in the background
+      liveRaf = 0;
+      const el = $('#liveMsg'); if (!el) return;
+      const chat = $('#chat'), atEnd = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 80;
+      el.innerHTML = liveHtml();
+      const tb = el.querySelector('.think-body'); if (tb) tb.scrollTop = tb.scrollHeight;
+      if (atEnd) chat.scrollTop = chat.scrollHeight;
+    }, 60);
+  }
+  setInterval(() => { if (running) updateLive(); }, 1000);   // the seconds counter
 
   // ---------- chat extras: attachments, web toggle, folder, context meter ----------
   let pendingFiles = [], infoMsg = null;
@@ -914,6 +941,7 @@ const App = (() => {
     await AI.run(text, mode, {
       checkpoint, files,
       onAssistant: () => renderChat(),
+      onLive: () => updateLive(),
       onTool: () => renderChat(),
       onInfo: msg => { infoMsg = msg; renderChat(); },
       onError: msg => { lastError = msg; }

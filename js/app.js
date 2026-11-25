@@ -445,36 +445,37 @@ const App = (() => {
 
   // ---------- autorouter in a Web Worker ----------
   let worker = null, routeReject = null, routeBest = null, routeResolve = null;
-  function runRouter({ place = null, opt = {}, optimize = null } = {}) {
+  function runRouter({ place = null, opt = {} } = {}) {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611251930');
+      worker = new Worker('js/route-worker.js?v=202611252220');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;
         if (m.type === 'best') { routeBest = m; return; }
         if (m.type === 'progress') {
-          const opt = m.optimizing ? `Optimizing placement ${m.iteration}/${m.of} · ` : '';
           const time = m.budget ? ` · ${Math.round(m.elapsed)}/${Math.round(m.budget)} s` : '';
           $('#routeMsg').textContent = m.phase === 'ripup'
-            ? `${opt}Rip-up & reroute · ${m.unrouted} unrouted · try ${m.iteration}${m.attempt > 1 ? ' · pass ' + m.attempt : ''}${time}`
-            : `${opt}Routing ${m.net} (${(m.done ?? 0) + 1}/${m.total ?? '?'})${m.attempt > 1 ? ' · pass ' + m.attempt : ''}${time}`;
+            ? `Rip-up & reroute · ${m.unrouted} unrouted · try ${m.iteration}${m.attempt > 1 ? ' · pass ' + m.attempt : ''}${time}`
+            : `Routing ${m.net} (${(m.done ?? 0) + 1}/${m.total ?? '?'})${m.attempt > 1 ? ' · pass ' + m.attempt : ''}${time}`;
           return;
         }
         worker.terminate(); worker = null; $('#routeBusy').classList.add('hidden');
         if (m.type === 'error') { reject(new Error(m.message)); return; }
         Model.mutate(() => {
           const S = Model.S;
-          for (const [ref, pcb] of m.positions) { const c = Model.comp(ref); if (c) c.pcb = pcb; }
+          for (const [ref, pcb] of m.positions) {
+            const c = Model.comp(ref);
+            if (c) { if (pcb) c.pcb = pcb; else delete c.pcb; }
+          }
           S.board = m.board; S.pcb = m.pcb;
         });
         Pcb.ui.drc = null;
-        resolve({ placement: m.placement, routing: m.routing, optimized: m.optimized });
+        resolve({ placement: m.placement, routing: m.routing });
       };
       worker.onerror = e => { worker.terminate(); worker = null; $('#routeBusy').classList.add('hidden'); reject(new Error(e.message || 'Router crashed')); };
-      worker.postMessage({ state: JSON.parse(Model.snapshot()), place, opt, optimize });
-      if (optimize) $('#routeMsg').textContent = 'Optimizing placement…';
+      worker.postMessage({ state: JSON.parse(Model.snapshot()), place, opt });
     });
   }
 
@@ -538,19 +539,6 @@ const App = (() => {
     toast(`Files saved to Downloads. On JLCPCB click “Add gerber file” and choose ${fname('-gerbers.zip')} (board ${b.w}×${b.h} mm, layers detected automatically).${asm ? ' For assembly turn on “PCB Assembly” and upload the BOM and CPL .csv files — check part rotations in the preview.' : ''}`, 20000);
   }
 
-  // ---------- placement optimiser ----------
-  async function runOptimize(o = {}) {
-    try {
-      showView('pcb');
-      const before = `${Model.S.board.w}×${Model.S.board.h}`;
-      const r = await runRouter({ optimize: Object.assign({ time_limit_s: o.shrink ? 180 : 150, allow_grow: false, allow_bottom: false }, o) });
-      const p = r.optimized; Pcb.fit();
-      if (!p) { showDrc(); return; }   // stopped: best kept
-      const size = `${p.board.w}×${p.board.h}`;
-      toast(!p.unrouted.length && !p.iterations && size === before ? `✓ Every net already routes with this placement (${p.total} nets, ${p.seconds}s) — nothing needed moving. For a smaller board: ✨ Optimize ▾ → …make the board as small as possible.` : p.unrouted.length ? `Optimized (${p.iterations} rounds) — ${p.routed}/${p.total} routed, still unrouted: ${p.unrouted.join(', ')}. Try a GND pour, a bigger board or AI place.` : `✓ All ${p.total} nets routed${size !== before ? ` · board ${before} → ${size} mm` : ''} (${p.seconds}s)`, 9000);
-      showDrc(); return p;
-    } catch (e) { toast(e.message); }
-  }
   // AI placement: the copilot plans the floor plan with place_footprints, then routes and fixes what is left
   // AI place: ONE model request (compact parts + nets list → JSON floor plan), then legalise + short polish + route.
   // Much faster than a tool-calling conversation, and works with small / local models.
@@ -576,7 +564,11 @@ const App = (() => {
     const report = msg => { AI.note(msg, '✦ AI place'); renderChat(); };
     const quick = why => {
       report(`**AI place → quick place instead.** ${why}`);
-      return runRouter({ place: S.board.w > 0 ? { w: S.board.w, h: S.board.h } : { fit: true }, opt: { noRoute: true } }).then(() => { Pcb.fit(); toast('Placed with quick place — press Route', 6000); });
+      const place = S.board.w > 0 ? { w: S.board.w, h: S.board.h } : { fit: true };
+      return runRouter({ place: { ...place, no_stack: true }, opt: { noRoute: true } }).then(({ placement }) => {
+        Pcb.fit();
+        toast(placement.fits === false ? placement.hint : 'Placed with quick place — press Route', placement.fits === false ? 12000 : 6000);
+      });
     };
     if (!AI.modelReady()) return quick('No AI model is set up in this browser (⚙ Settings → API key / model). Settings are stored per browser, so a phone or another browser needs its own.');
     aiPlacing = true; showView('pcb');
@@ -607,7 +599,7 @@ const App = (() => {
       clearInterval(tick);
       const rr = await runRouter({ opt: {} }); Pcb.fit();
       const ro = rr && rr.routing;
-      report(`**AI place** with ${model} (${secs} s): placed ${r.placed} parts${list.length < lay.footprints.length ? ` (${lay.footprints.length - list.length} missing from the reply were kept)` : ''}${r.problems && r.problems.length ? `, ${r.problems.length} placement problems left` : ''}, polished, then routed${ro ? `: **${ro.routed}/${ro.total} nets**${ro.failed && ro.failed.length ? ` — unrouted: ${ro.failed.join(', ')} → try ✨ Optimize` : ''}` : ''}.`);
+      report(`**AI place** with ${model} (${secs} s): placed ${r.placed} parts${list.length < lay.footprints.length ? ` (${lay.footprints.length - list.length} missing from the reply were kept)` : ''}${r.problems && r.problems.length ? `, ${r.problems.length} placement problems left` : ''}, polished, then routed${ro ? `: **${ro.routed}/${ro.total} nets**${ro.failed && ro.failed.length ? ` — unrouted: ${ro.failed.join(', ')}` : ''}` : ''}.`);
       toast(ro ? `✦ AI place + route: ${ro.routed}/${ro.total} nets` : 'AI place done', 8000);
       showDrc();
     } catch (e) {
@@ -617,20 +609,25 @@ const App = (() => {
     } finally { clearInterval(tick); aiPlacing = false; aiPlaceCtl = null; if (!worker) busy.classList.add('hidden'); }
   }
 
-  // ---------- update the board from schematic edits: load only (no auto placement / routing) ----------
-  // New parts are lined up beside the board with their ratsnest, changed footprints take effect in place,
-  // copper of deleted nets is removed. Placing and routing stay with the user (drag, Route, Auto-place, Optimize).
+  // Apply schematic changes and place new footprints in free board space.
   function updateFromSchematic() {
+    if (worker) { toast('Wait for routing to finish'); return; }
     showView('pcb');
-    if (!Model.S.board.w || !Pcb.placed().length) { toast('No PCB yet — use Generate PCB first'); return; }
-    let r; try { r = Model.mutate(() => Pcb.syncFromSchematic({ place: false })); } catch (e) { toast(e.message); return; }
-    if (r.added.length) Pcb.fit();
-    const st = Pcb.status(), pl = n => n > 1 ? 's' : '';
-    const what = [r.added.length && `${r.added.length} new part${pl(r.added.length)} loaded beside the board (${r.added.join(', ')}) — drag ${r.added.length > 1 ? 'them' : 'it'} into place`,
-      r.removed_copper && `removed ${r.removed_copper} track${pl(r.removed_copper)}/vias of deleted nets`].filter(Boolean);
-    const warn = [r.overlaps.length && `overlapping after footprint changes: ${r.overlaps.join(', ')}`,
-      r.no_footprint.length && `${r.no_footprint.join(', ')} have no footprint`].filter(Boolean);
-    toast(`Updated from schematic: ${what.join(' · ') || 'footprints and nets are up to date'} · ${st.routed}/${st.nets} nets routed${warn.length ? ' · ' + warn.join(' · ') : ''}`, warn.length || r.added.length ? 12000 : 6000);
+    let r;
+    try { r = Model.mutate(() => Pcb.syncFromSchematic()); }
+    catch (e) { toast(e.message); return; }
+    Pcb.ui.drc = null;
+    if (r.added.length || r.moved.length) Pcb.fit();
+    const what = [r.added.length && 'placed ' + r.added.join(', '),
+      r.placed_on_bottom.length && 'bottom side: ' + r.placed_on_bottom.join(', '),
+      r.moved.length && 'moved ' + r.moved.join(', '),
+      r.removed_copper && 'removed outdated copper'].filter(Boolean);
+    const warn = [r.no_room.length && 'no free space for ' + r.no_room.join(', '),
+      r.no_footprint.length && 'missing footprints: ' + r.no_footprint.join(', ')].filter(Boolean);
+    const st = Pcb.status();
+    toast(['Updated from schematic', ...what, ...warn, st.routed + '/' + st.nets + ' nets routed'].join(' · '),
+      warn.length || r.added.length ? 12000 : 6000);
+    return r;
   }
 
   // ---------- Gerber export: DRC first, then download or fix ----------
@@ -650,7 +647,6 @@ const App = (() => {
     $('#gbSummary').innerHTML = `<p><b class="${d.errors ? 'bad' : 'warn'}">${esc(d.summary)}</b> — ${d.errors ? 'the board has errors that a fab may reject or that would make it not work.' : 'only warnings; the board can be manufactured.'}</p><p class="muted small">Click an item to see it on the board.</p>`;
     $('#gbList').innerHTML = v.map((x, i) => `<li class="${x.severity === 'error' ? 'error' : 'warn'}" data-v="${i}">${esc(x.msg)}</li>`).join('');
     $('#gbList').querySelectorAll('[data-v]').forEach(li => li.onclick = () => { const x = v[+li.dataset.v]; $('#gerberModal').classList.add('hidden'); showView('pcb'); showDrc(); if (x.x != null) Pcb.vp.fit([x.x - 3, x.y - 3, x.x + 3, x.y + 3], 1); });
-    $('#gbOpt').classList.toggle('hidden', !Pcb.status().unrouted.length);
     $('#gbDownload').textContent = d.errors ? 'Download anyway' : 'Download';
     $('#gerberModal').classList.remove('hidden');
   }
@@ -659,7 +655,6 @@ const App = (() => {
     $('#gbDownload').onclick = gerberDownload;
     $('#gbFix').onclick = () => { closeOrderTab(); $('#gerberModal').classList.add('hidden'); showView('pcb'); showDrc(true); };
     $('#gbRoute').onclick = async () => { $('#gerberModal').classList.add('hidden'); try { await runRouter({ opt: {} }); } catch (e) { toast(e.message); } gerberCheck(); };
-    $('#gbOpt').onclick = async () => { $('#gerberModal').classList.add('hidden'); await runOptimize(); gerberCheck(); };
   }
 
   // ---------- design rules + DRC ----------
@@ -853,13 +848,15 @@ const App = (() => {
     const L = AI.live;
     if (!L) return '<div class="typing"><span></span><span></span><span></span></div>';
     const s = Math.max(0, Math.round((Date.now() - L.since) / 1000));
-    if (L.phase === 'tool') return `<div class="live-status"><span class="spin"></span> Running <b>${esc(L.name)}</b> <span class="muted">${esc(toolHint({ name: L.name, input: L.input || {} }))}</span> · ${s} s${L.name === 'get_part' || L.name === 'search_parts' ? ' <span class="muted">(parts library on the internet)</span>' : /generate_pcb|route_pcb|optimize_pcb|reroute/.test(L.name) ? ' <span class="muted">(placing / routing)</span>' : ''}</div>`;
+    if (L.phase === 'tool') return `<div class="live-status"><span class="spin"></span> Running <b>${esc(L.name)}</b> <span class="muted">${esc(toolHint({ name: L.name, input: L.input || {} }))}</span> · ${s} s${L.name === 'get_part' || L.name === 'search_parts' ? ' <span class="muted">(parts library on the internet)</span>' : /generate_pcb|route_pcb|reroute/.test(L.name) ? ' <span class="muted">(placing / routing)</span>' : ''}</div>`;
     let h = '';
     if (L.reasoning) h += `<details class="think" open><summary>💭 Thinking…</summary><div class="think-body">${esc(L.reasoning.slice(-4000))}</div></details>`;
     if (L.text) h += `<div class="md">${md(L.text)}</div>`;
     for (const t of L.tools || []) if (t.name) h += `<div class="tool run live-tool"><span class="dot"></span>${esc(t.name)} <span class="muted">${esc(String(t.args || '').slice(-200))}</span></div>`;
     const what = (L.tools || []).some(t => t.name) ? 'writing a tool call' : L.text ? 'writing' : L.reasoning ? 'thinking' : `reading the conversation (${fmtTok(L.tokens || 0)} tokens)`;
-    return h + `<div class="live-status"><span class="spin"></span> ${esc(L.model || 'The model')} is ${what} · ${s} s</div>`;
+    const speed = L.tokensPerSecond > 0 && Date.now() - L.lastOutput < 2500
+      ? ` · <span title="${L.speedEstimated ? 'Estimated from streamed output' : 'Generation speed reported by the model server'}">${L.speedEstimated ? '≈' : ''}${L.tokensPerSecond.toFixed(1)} tok/s</span>` : '';
+    return h + `<div class="live-status"><span class="spin"></span> ${esc(L.model || 'The model')} is ${what} · ${s} s${speed}</div>`;
   }
   let liveRaf = 0;
   function updateLive() {
@@ -1796,21 +1793,24 @@ const App = (() => {
     $('#compClose').onclick = () => $('#compModal').classList.add('hidden');
     $('#compSearch').oninput = compShow;
     $('#compSearch').onkeydown = e => { if (e.key === 'Enter') compGo(compHits[0]); if (e.key === 'Escape') $('#compModal').classList.add('hidden'); };
-    const routeMsg = r => r && r.routing && r.routing.stopped ? `Stopped — kept the best routing found (${r.routing.unrouted ? r.routing.unrouted + ' nets unrouted' : 'all nets routed'})` : r && r.routing ? `Routed ${r.routing.routed}/${r.routing.total} nets${r.routing.failed.length ? ' — unrouted: ' + r.routing.failed.join(', ') : ''}${r.routing.necked_down && r.routing.necked_down.length ? ' · necked down: ' + r.routing.necked_down.join(', ') : ''}${r.routing.seconds ? ` · ${r.routing.seconds}s` : ''}${r.routing.failed.length ? ' — try ✨ Optimize (moves parts) or ⬛ Pour GND' : ''}` : 'Placed — press Route';
-    const runPcb = async (place, noRoute) => { try { const r = await runRouter({ place, opt: { noRoute } }); Pcb.fit(); const pl = r && r.placement, bad = pl && pl.fits === false; toast(routeMsg(r) + (bad ? ' · ⚠ ' + pl.hint : ''), bad ? 12000 : 6000); if (!noRoute) showDrc(); } catch (e) { toast(e.message); } };
+    const routeMsg = r => r && r.routing && r.routing.stopped ? `Stopped — kept the best routing found (${r.routing.unrouted ? r.routing.unrouted + ' nets unrouted' : 'all nets routed'})` : r && r.routing ? `Routed ${r.routing.routed}/${r.routing.total} nets${r.routing.failed.length ? ' — unrouted: ' + r.routing.failed.join(', ') : ''}${r.routing.necked_down && r.routing.necked_down.length ? ' · necked down: ' + r.routing.necked_down.join(', ') : ''}${r.routing.seconds ? ` · ${r.routing.seconds}s` : ''}` : 'Placed — press Route';
+    const runPcb = async (place, noRoute) => { try { const r = await runRouter({ place, opt: { noRoute } }); Pcb.fit(); const pl = r && r.placement, bad = pl && pl.fits === false; toast(bad ? pl.hint : routeMsg(r), bad ? 12000 : 6000); if (!noRoute) showDrc(); } catch (e) { toast(e.message); } };
     // empty Board W×H boxes = size the board to the parts; otherwise the outline is kept and the parts are fitted inside
     const boardWH = () => { const w = +$('#boardW').value || 0, h = +$('#boardH').value || 0; return w > 0 && h > 0 ? { w, h } : { fit: true }; };
     $('#btnGen').onclick = () => runPcb(boardWH(), false);
     $('#btnPlace').onclick = () => {};   // menu: AI place / quick place
-    $$('[data-place]').forEach(b => b.onclick = () => { document.activeElement && document.activeElement.blur(); if (b.dataset.place === 'ai') aiPlace(); else runPcb(boardWH(), true); });
-    $('#btnRoute').onclick = () => runPcb(null, false);
+    $$('[data-place]').forEach(b => b.onclick = () => { document.activeElement && document.activeElement.blur(); if (b.dataset.place === 'ai') aiPlace(); else runPcb({ ...boardWH(), no_stack: true }, true); });
+    $('#btnRoute').onclick = () => {
+      if (Pcb.pendingFootprints().length) {
+        const r = updateFromSchematic();
+        if (!r || r.no_room.length || r.no_footprint.length) return;
+      }
+      runPcb(null, false);
+    };
     $('#btnSync').onclick = updateFromSchematic;
     $('#btnRules').onclick = openRules; $('#btnDrc').onclick = () => showDrc(true);
     // a DRC marker clicked on the board: that problem in the DRC list
     Pcb.ui.onDrc = i => { const m = (Pcb.ui.drc.violations[i] || {}).msg; if (!$('#props [data-v]')) { const d = showDrc(); i = d.violations.findIndex(v => v.msg === m); } gotoDrc(i); };
-    // a click runs the main optimization (the menu, on hover, has the variants)
-    $('#btnOptimize').onclick = () => { document.activeElement && document.activeElement.blur(); runOptimize({ shrink: false, allow_bottom: false }); };
-    $$('[data-opt]').forEach(b => b.onclick = () => { document.activeElement && document.activeElement.blur(); runOptimize({ shrink: b.dataset.opt !== 'route', allow_bottom: b.dataset.opt === 'bottom' }); });
     $('#btnPourGnd').onclick = () => {
       const S = Model.S, net = S.nets.GND ? 'GND' : prompt('Net for the copper pour', Object.keys(S.nets)[0] || 'GND');
       if (!net) return;
@@ -1845,8 +1845,6 @@ const App = (() => {
       if (routeBest) {   // stop = keep the best routing found so far
         const b = routeBest; routeBest = null;
         Model.mutate(() => {
-          if (b.positions) for (const [ref, pcb] of b.positions) { const c = Model.comp(ref); if (c) c.pcb = pcb; }
-          if (b.board) Model.S.board = b.board;
           Model.S.pcb = b.pcb;
         });
         Pcb.ui.drc = null;

@@ -45,7 +45,7 @@ Object.assign(Engine.env, { base: 'http://cp', headers: {}, myLib: () => [], sav
   fetch: async u => { const p = String(u).replace(/^http:\/\/cp/, ''); try { const r = await fetch('http://localhost:5173' + p, { headers: pw ? { authorization: 'Bearer ' + pw } : {}, signal: AbortSignal.timeout(20000) }); if (r.ok) return r; } catch { } return new Response(cache[p] || '{"results":[]}', { status: cache[p] ? 200 : 404, headers: { 'content-type': 'application/json' } }); } });
 // bounded effort so a run takes minutes, not hours (the same for every model)
 const autoPlace0 = Pcb.autoPlace; Pcb.autoPlace = o => autoPlace0(Object.assign({}, o, { time_s: 5 }));
-const LIMIT = { generate_pcb: 20, route_pcb: 20, optimize_pcb: 30, reroute: 30 };
+const LIMIT = { generate_pcb: 20, route_pcb: 20,  reroute: 30 };
 const run = (n, i, mode = 'agent') => Engine.exec(n, Object.assign({}, i, LIMIT[n] ? { time_limit_s: Math.min(+(i && i.time_limit_s) || 1e9, LIMIT[n]) } : {}), mode);
 const toolList = mode => (TOOLSET === 'full' ? Engine.TOOLS.filter(t => !t.web) : Engine.LITE.tools()).filter(t => mode === 'agent' || t.ro);
 const systemFor = mode => Engine.LITE.system + '\n\n' + Engine.LITE.mode[mode] + '\n\n' + Engine.designContext();

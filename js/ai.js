@@ -185,8 +185,8 @@ DESIGN MODEL
 - COMPONENT DATABASE: for real ICs, modules, regulators, connectors (ESP32, STM32, AMS1117, CH340, USB-C, etc.) use search_parts → pick an in-stock part (prefer Basic parts) → get_part → add_components with {"lcsc": "Cxxxx"}. This gives the exact pinout and real footprint; connect using the pin names returned by get_part. Built-in types (resistor, capacitor, LED, diode, transistor, regulator, …) automatically get a real JLCPCB part's footprint and pinout (pins matched by name); match_jlcpcb_parts fills in part numbers per value for assembly.
 - CUSTOM PARTS: if a part is not in the database (or the user asks), create it with create_part (pins + footprint generator or explicit pads), then add_components {lcsc: <returned key>}. Fix wrong pinouts/footprints with update_part.
 - PROJECT KNOWLEDGE: when the project has a knowledge folder, follow its requirements, conventions and guides. Use knowledge_search / knowledge_read for details not included below.
-- PCB WORKFLOW: generate_pcb (connectors go on the board edge automatically; placement is annealed for short connections; the router rips up and re-routes for up to the routeTime budget) → if anything is unrouted, call optimize_pcb (moves parts and re-routes; shrink: true also makes the board as small as it still routes) → optionally add_copper_pour GND on both layers (frees routing space and replaces long GND traces) → run_drc and fix errors. Don't just repeat route_pcb on the same placement. Use set_board_shape for rounded / round / custom outlines. When the board already exists and the user edits the schematic (adds/removes parts, rewires, changes footprints), call update_pcb_from_schematic instead of generate_pcb — it keeps the layout and tracks and only places/routes what changed.
-- PCB PLACEMENT (when asked to place / auto-place, or when routing struggles): read get_pcb_layout {include: ["pins"]} (part sizes, pins with their nets and positions), then decide a floor plan like an experienced layout engineer: connectors on the board edges facing out; the main IC central with room (1–2 mm) around fine-pitch sides for fan-out; each decoupling capacitor within ~1–2 mm of the power pin it serves, on the same side; crystal and its caps right next to the MCU clock pins; regulator and bulk caps near the power input; USB / differential pairs short and straight from connector to IC; group parts by function along the signal flow; avoid placing parts where they block the straight path between an IC and its connector. Apply it in ONE place_footprints call (all parts), then route_pcb; if nets stay unrouted, move the parts around them (another place_footprints) or call optimize_pcb.
+- PCB WORKFLOW: on a new design use generate_pcb. After adding, removing, rewiring or changing parts on an existing PCB, use update_pcb_from_schematic first. It finds room inside the outline on either usable side and routes incomplete nets. If parts cannot fit, make room or enlarge the board. Inspect the result with run_drc and adjust placement around nets that fail.
+- PCB PLACEMENT (when asked to place / auto-place, or when routing struggles): read get_pcb_layout {include: ["pins"]} (part sizes, pins with their nets and positions), then decide a floor plan like an experienced layout engineer: connectors on the board edges facing out; the main IC central with room (1–2 mm) around fine-pitch sides for fan-out; each decoupling capacitor within ~1–2 mm of the power pin it serves, on the same side; crystal and its caps right next to the MCU clock pins; regulator and bulk caps near the power input; USB / differential pairs short and straight from connector to IC; group parts by function along the signal flow; avoid placing parts where they block the straight path between an IC and its connector. Apply it in ONE place_footprints call (all parts), then route_pcb; if nets stay unrouted, move the parts around them (another place_footprints).
 - HAND-ROUTED TRACKS (when the user asks to route a net a certain way, for critical nets — RF, crystals, USB pairs, power paths — or to fix what the autorouter did): get_pcb_layout {refs: [the parts]} for pad positions, then add_track {points: ["U1.3", [x, y], {x, y, via: true}, "C2.1"], corner: "45"} draws one track pad to pad through your corners; it reports new DRC problems — if any, remove_tracks {tracks: [...]} and draw it again with other corners. get_tracks lists every track. VIAS: add_via {near: "U2.9"} (a pad) or {near: [x, y], net} finds the closest legal via spot itself (all clearances, hole to hole, edge, keep-outs, no via in pad) and from a pad draws the short track to it — use that instead of guessing x, y; it also changes layer for a track. When run_drc reports "Net GND is not routed" (or another pour net) — pads the pour cannot reach with the full clearance — or the EasyEDA export warns about pads joined only through thin pour copper, call connect_pads_to_pour {net: "GND"}: it joins every cut-off pad group with a via to the other layer's pour and reports what it did; then run_drc. route_pcb keeps hand-drawn tracks and routes the rest around them.
 - CUSTOM 3D DESIGNS: for anything beyond a plain box — wearables (wristband / watch pods like Whoop, rings, clips), ECG / EEG / EMG patches with electrode holes, curved, rounded or organic housings, mounts, brackets. FASTEST: set_enclosure_script {template, params} — a tested template sized from the board with your changes (shape, wall, curve, strap, lugs, electrodes, battery, batteryPlace, label …), no code; builds in about a second and returns a picture (4 views) plus the fit report. Templates: 10 wrist, 10 chest/ECG, 7 body-worn, 8 boxes (enclosure_script_help lists them and their params). Only when a template cannot do it, write a 3D script (enclosure_script_help has the API: booleans, hull, extrude / revolve, bend around the wrist, smooth, text, honeycomb grilles, screw bosses, measure) and send it as code. Fix every collision with the PCB / components / battery and any script error, and call again until it is clean; look at the picture. Ask about key dimensions you cannot infer (wrist size, strap width, electrode type/spacing) only if they matter; otherwise use sensible defaults and say which you chose.
 - BATTERIES: when the device runs on a battery, pick one with list_batteries (filter by size the case allows, capacity, avg_mA for runtime, peak_mA for radios, charge_mA for the charge rate — XIAO nRF52840 charges at 50 mA): LIR coin cells (rechargeable), CR coins (primary, only a few mA), LiPo pouches (any size code such as lipo-302020, or your own {t, w, l, mAh}), 10440 … 21700. Put it in the case with params {battery, batteryPlace} (custom; envelope also takes batterySide, batteryRotate, batteryTilt) or set_enclosure {battery, batteryPlace} (box): the case grows to hold it. Rechargeable cells need a Li-ion charger IC on the PCB; tell the user which cell you chose, the estimated runtime and the charge rate.
@@ -312,14 +312,20 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     // streaming (SSE) so the chat shows the answer, the reasoning and the tool calls while they are written;
     // not for the shared pool (its relay answers in one piece) — a server that refuses it gets a normal request
     const stream = !!extra.onDelta && !/\/pool\/v1\/?$/.test(String(model.base || ''));
+    let requestTimings = stream && isLocal(model);
     // models on this PC / the local network: a cap on the answer length, so a model stuck repeating itself stops
     if (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|192\.168\.|10\.)/.test(String(model.base || '')) || /trycloudflare\.com/.test(String(model.base || '')))
       extra = Object.assign({}, extra, { body: Object.assign({ max_tokens: +settings.maxTokens || 4096 }, extra.body || {}) });
     const send = st => llmFetch(model.base, '/chat/completions', {
       method: 'POST', signal, headers,
-      body: JSON.stringify(Object.assign({ model: model.model || model.id, messages: toOpenAI(hist, system, vision, model.base) }, extra.body || {}, tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}, st ? { stream: true, stream_options: { include_usage: true } } : {}))
+      body: JSON.stringify(Object.assign({ model: model.model || model.id, messages: toOpenAI(hist, system, vision, model.base) }, extra.body || {}, tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}, st ? { stream: true, stream_options: { include_usage: true } } : {}, st && requestTimings ? { timings_per_token: true } : {}))
     });
     let res = await send(stream);
+    if (requestTimings && !res.ok && res.status >= 400 && res.status < 500
+        && /timings_per_token/i.test(await res.clone().text().catch(() => ''))) {
+      requestTimings = false;
+      res = await send(stream);
+    }
     // a chat template that refuses this reasoning effort ("Supported types are xhigh, medium, and low"): use the closest
     // level it lists (high → xhigh), else only thinking on, without a level
     const kw = extra.body && extra.body.chat_template_kwargs;
@@ -356,12 +362,23 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   async function readStream(res, onDelta) {
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = '', text = '', reasoning = '', usage = null, last = 0;
+    let chars = 0, tokensPerSecond = 0, measured = false, lastOutput = 0;
+    const samples = [];
     const calls = [];
     const split = () => {   // <think>…</think> inside the content (Qwen, DeepSeek on some servers) is reasoning
       const m = /^([\s\S]*?)<think>([\s\S]*?)(<\/think>|$)([\s\S]*)$/.exec(text);
       return m ? { text: (m[1] + m[4]).trim(), reasoning: (reasoning + m[2]).trim() } : { text: text.trim(), reasoning: reasoning.trim() };
     };
-    const emit = force => { const now = Date.now(); if (!force && now - last < 80) return; last = now; const s = split(); try { onDelta({ text: s.text, reasoning: s.reasoning, tools: calls.filter(Boolean).map(c => ({ name: c.name, args: c.args })) }); } catch (e) { } };
+    const emit = force => {
+      const now = Date.now();
+      if (!force && now - last < 80) return;
+      last = now;
+      const s = split();
+      try {
+        onDelta({ text: s.text, reasoning: s.reasoning, tools: calls.filter(Boolean).map(c => ({ name: c.name, args: c.args })),
+          tokensPerSecond, speedEstimated: !measured, lastOutput });
+      } catch (e) { }
+    };
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -375,17 +392,31 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         let j; try { j = JSON.parse(data); } catch (e) { continue; }
         if (j.error) throw new Error(friendlyError(j.error.code || 500, j.error.message || JSON.stringify(j.error).slice(0, 300)));
         if (j.usage) usage = j.usage;
+        const rate = j.timings?.predicted_per_second;
+        const hasRate = Number.isFinite(rate) && rate > 0;
+        if (hasRate) { tokensPerSecond = rate; measured = true; lastOutput = Date.now(); }
         const d = j.choices && j.choices[0] && j.choices[0].delta;
-        if (!d) continue;
-        if (d.content) text += d.content;
+        if (!d) { if (hasRate) emit(false); continue; }
+        let count = 0;
+        if (typeof d.content === 'string') { text += d.content; count += d.content.length; }
         const rc = d.reasoning_content || d.reasoning;
-        if (typeof rc === 'string') reasoning += rc;
+        if (typeof rc === 'string') { reasoning += rc; count += rc.length; }
         for (const t of d.tool_calls || []) {
           const i = t.index != null ? t.index : calls.length, c = calls[i] || (calls[i] = { id: '', name: '', args: '', extra: null });
           if (t.id) c.id = t.id;
-          if (t.function && t.function.name && !c.name) c.name = t.function.name;
-          if (t.function && t.function.arguments) c.args += t.function.arguments;
+          if (t.function && t.function.name && !c.name) { c.name = t.function.name; count += c.name.length; }
+          if (t.function && t.function.arguments) { c.args += t.function.arguments; count += t.function.arguments.length; }
           if (t.extra_content) c.extra = t.extra_content;
+        }
+        if (count) {
+          lastOutput = Date.now();
+          chars += count;
+          if (!measured) {
+            samples.push([lastOutput, chars]);
+            while (samples.length > 1 && lastOutput - samples[1][0] > 2000) samples.shift();
+            const [time, earlierChars] = samples[0];
+            if (lastOutput - time >= 350) tokensPerSecond = 250 * (chars - earlierChars) / (lastOutput - time);
+          }
         }
         emit(false);
       }

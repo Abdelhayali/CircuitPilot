@@ -9,6 +9,9 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      'Chat shows the model’s generation speed in tokens per second as it responds',
+      'Quick place keeps footprints from stacking in the board view and lists parts that need more room',
+      'Update from schematic automatically places new parts inside the PCB outline, using the bottom side for suitable parts when the top is full. Optimize is paused for now',
       'Connect to Codex from Settings to use CircuitPilot’s design tools in a Codex chat',
       'Local AI can add standard pin headers with named pins and saved library parts from their footprint IDs',
       '💭 Reasoning menu next to the model for local models (Local AI, Ollama, LM Studio, Colab): Auto, Off, Low, Medium or High thinking before each answer',

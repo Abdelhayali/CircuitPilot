@@ -953,7 +953,7 @@ const Pcb = (() => {
     const groups = regs.map(r => ({ r, cs: [] })), loose = [];
     for (const c of keepC) { const n = sheetBoard(Model.sheetOf(c)), g = n && groups.find(q => q.r.name === n); (g ? g.cs : loose).push(c); }
     if (loose.length) groups[0].cs.push(...loose);
-    const done = [];
+    const done = [], unplaced = [];
     try {
       for (const { r, cs } of groups) {
         if (!cs.some(c => Lib.footprint(c.footprint))) continue;
@@ -961,12 +961,16 @@ const Pcb = (() => {
         S.board = Object.assign({}, keepB, { w: r.x1 - r.x0, h: r.y1 - r.y0, shape: { type: 'polygon', pts: r.poly.map(q => [q[0] - r.x0, q[1] - r.y0]), r: 0 }, panel: null });
         for (const c of cs) if (c.pcb && c.pcb.locked) { c.pcb.x -= r.x0; c.pcb.y -= r.y0; }
         if (Model.invalidate) Model.invalidate();
-        try { fitInside(Object.assign({}, opt, { _region: true })); }
+        try {
+          const result = fitInside(Object.assign({}, opt, { _region: true }));
+          done.push({ board: r.name, parts: cs.length, placed: result.placed, fits: result.fits, hint: result.hint });
+          unplaced.push(...(result.unplaced || []));
+        }
         finally { for (const c of cs) if (c.pcb) { c.pcb.x += r.x0; c.pcb.y += r.y0; } }
-        done.push({ board: r.name, parts: cs.length });
       }
     } finally { S.board = keepB; S.components = keepC; if (Model.invalidate) Model.invalidate(); }
-    return { boards: done, parts_without_a_board: loose.map(c => c.ref) };
+    return { boards: done, parts_without_a_board: loose.map(c => c.ref), fits: done.every(b => b.fits),
+      unplaced, hint: done.map(b => b.hint).filter(Boolean).join(' · ') };
   }
   // DRC: a part outside the board its sheet belongs to; a net that joins two boards (it can only cross through a tab or a wire)
   function boardRegionIssues(idx) {
@@ -1002,6 +1006,7 @@ const Pcb = (() => {
     const S = Model.S, cs = S.components.filter(c => Lib.footprint(c.footprint) && onActivePcb(c));
     if (!cs.length) throw new Error('No components with footprints to place');
     const R = rules(), W = S.board.w, H = S.board.h, poly = boardPoly();
+    const noStack = !!opt.no_stack, rectangular = isRectBoard();
     const margin = Math.max(R.edgeClearance + 0.4, 0.8), cx0 = W / 2, cy0 = H / 2;
     // locked parts stay exactly where they are; everything else is arranged around them
     const lockedSet = new Set(cs.filter(c => c.pcb && c.pcb.locked));
@@ -1059,40 +1064,37 @@ const Pcb = (() => {
     const twoSided = +R.layers !== 1, canFlip = c => twoSided && !c.pcbEdge && !padsOf(c).some(p => p.drill);
     const setSide = (c, s, auto) => { if (s === 'B') c.pcb.side = 'B'; else delete c.pcb.side; if (auto && s === 'B') c.pcb.autoSide = true; else delete c.pcb.autoSide; };
     const okAt = (c, placed, gap, inset, strict) => boxInside(c, poly, inset) && !hit(c, placed, gap, strict);
-    // no free spot at all: the spot inside the outline where it overlaps the least (then: closest to where it wants to be)
-    const leastOverlap = (c, w, placed, gap) => {
-      let best = null; const sd = isBottom(c), st = Math.max(0.25, Math.min(1, Math.sqrt(W * H) / 60));
-      for (const rot of [w.rot, (w.rot + 90) % 360]) {
-        c.pcb.rot = rot;
-        for (let y = 0; y <= H; y += st) for (let x = 0; x <= W; x += st) {
-          c.pcb.x = x; c.pcb.y = y;
-          if (!boxInside(c, poly, margin) && !boxInside(c, poly, -0.05)) continue;
-          const q = fpBox(c, gap / 2); let ov = 0;
-          for (const o of placed) {
-            const r = oBox(o, gap), dx = Math.min(q[2], r[2]) - Math.max(q[0], r[0]), dy = Math.min(q[3], r[3]) - Math.max(q[1], r[1]);
-            if (dx > 0 && dy > 0) ov += dx * dy * (isBottom(o) === sd ? 1 : 0.2);
-          }
-          const sc = ov * 1000 + Math.hypot(x - w.x, y - w.y);
-          if (!best || sc < best.sc) best = { x, y, rot, sc, ov };
-        }
-      }
-      return best;
-    };
     const side0Of = new Map(cs.map(c => [c, isBottom(c) ? 'B' : 'F']));
     function legalise(gap, flip, final) {
       const placed = [...lockedSet], failed = [];
       boxC = new Map(); thC = new Map();
       for (const c of free) setSide(c, side0Of.get(c));
-      // connectors: keep their edge, slide along it to the nearest free spot
+      // Check connectors at their final edge coordinates before accepting the placement.
       for (const e of edgeParts) {
-        const c = e.c, w = want.get(c), base = { x: c.pcb.x, y: c.pcb.y }, along = e.side === 'left' || e.side === 'right' ? [0, 1] : [1, 0];
+        const c = e.c, w = want.get(c);
+        const sides = c.pcbEdge ? [e.side] : [e.side, ...Object.keys(NORMAL).filter(side => side !== e.side)];
         let done = false;
-        for (let k = 0; k <= 400 && !done; k++) for (const sgn of k ? [1, -1] : [1]) {
-          c.pcb.x = base.x + along[0] * sgn * k * 0.25; c.pcb.y = base.y + along[1] * sgn * k * 0.25;
-          if (okAt(c, placed, gap, -0.05)) { done = true; break; }
+        for (const side of sides) {
+          const alongX = side === 'top' || side === 'bottom', info = edgeInfo(c);
+          const [nx, ny] = NORMAL[side];
+          c.pcb.x = w.x; c.pcb.y = w.y; c.pcb.rot = edgeRot(c, side, info || { front: null });
+          const inset = edgeInset(c, side, e.plug), b = fpBox(c);
+          if (side === 'left') c.pcb.x += inset - b[0]; if (side === 'right') c.pcb.x += W - inset - b[2];
+          if (side === 'top') c.pcb.y += inset - b[1]; if (side === 'bottom') c.pcb.y += H - inset - b[3];
+          const [x, y] = [c.pcb.x, c.pcb.y], maxSteps = Math.ceil((alongX ? W : H) / 0.25);
+          for (let k = 0; k <= maxSteps && !done; k++) for (const sign of k ? [1, -1] : [1]) {
+            c.pcb.x = x + (alongX ? sign * k * 0.25 : 0);
+            c.pcb.y = y + (alongX ? 0 : sign * k * 0.25);
+            if (alongX ? c.pcb.x < 0 || c.pcb.x > W : c.pcb.y < 0 || c.pcb.y > H) continue;
+            for (let t = 0; !rectangular && t < 80 && !boxInside(c, poly, 0); t++) {
+              c.pcb.x -= nx * 0.25; c.pcb.y -= ny * 0.25;
+            }
+            if (okAt(c, placed, gap, 0, noStack)) { e.placedSide = side; done = true; break; }
+          }
+          if (done) break;
         }
-        if (!done) { c.pcb.x = base.x; c.pcb.y = base.y; failed.push(c.ref); }
-        placed.push(c);
+        if (done) placed.push(c);
+        else failed.push(c.ref);
       }
       // everything else: biggest first, nearest free position (both orientations), spiral outward
       const rest = free.slice().sort((p, q) => areaOf(q) - areaOf(p));
@@ -1122,45 +1124,52 @@ const Pcb = (() => {
         const other = side0 === 'B' ? 'F' : 'B', flipOk = flip && canFlip(c);
         let best = search(c, w, q => okAt(q, placed, gap, margin, true)), side = side0;
         if (!best && flipOk) { side = other; setSide(c, side, true); best = search(c, w, q => okAt(q, placed, gap, margin, true)); }
-        if (!best) { side = side0; setSide(c, side0); best = search(c, w, q => okAt(q, placed, gap, margin)); }
-        if (!best && flipOk) { side = other; setSide(c, side, true); best = search(c, w, q => okAt(q, placed, gap, margin)); }
-        if (!best && !final) return [c.ref];   // this pass is retried with a smaller gap / both sides: stop early
-        if (!best) {   // no free spot: never outside the outline — where it overlaps the least, reported as overlapping
-          setSide(c, side0); side = side0;
-          let lo = leastOverlap(c, w, placed, gap);
-          if (flipOk) { setSide(c, other, true); const lb = leastOverlap(c, w, placed, gap); if (lb && (!lo || lb.sc < lo.sc)) { lo = lb; side = other; } }
-          best = lo;
-          if (!lo || lo.ov > 1e-6) failed.push(c.ref);   // a free spot close to the edge is fine
+        if (!best && !noStack) { side = side0; setSide(c, side0); best = search(c, w, q => okAt(q, placed, gap, margin)); }
+        if (!best && flipOk && !noStack) { side = other; setSide(c, side, true); best = search(c, w, q => okAt(q, placed, gap, margin)); }
+        if (!best && final) {
+          side = side0; setSide(c, side0);
+          best = search(c, w, q => okAt(q, placed, gap, R.edgeClearance, noStack));
+          if (!best && flipOk) {
+            side = other; setSide(c, side, true);
+            best = search(c, w, q => okAt(q, placed, gap, R.edgeClearance, noStack));
+          }
+        }
+        if (!best) {
+          failed.push(c.ref);
+          if (!final) return failed;
+          continue;
         }
         setSide(c, side, side !== side0);
-        if (best) { c.pcb.x = best.x; c.pcb.y = best.y; c.pcb.rot = best.rot; }
-        else { c.pcb.x = W / 2; c.pcb.y = H / 2; c.pcb.rot = w.rot; }
+        c.pcb.x = best.x; c.pcb.y = best.y; c.pcb.rot = best.rot;
         placed.push(c);
       }
       return failed;
     }
     let failed = [];
     // top side only at every gap first (one-sided assembly is cheaper); then top and bottom
-    const passes = []; for (const flip of twoSided ? [false, true] : [false]) for (const gap of [1.0, 0.6, 0.3, 0.15]) passes.push([gap, flip]);
+    const passes = []; for (const flip of twoSided ? [false, true] : [false]) for (const gap of [...new Set([1.0, 0.6, 0.3, 0.15].map(gap => Math.max(+R.partGap || 0, gap)))]) passes.push([gap, flip]);
     for (let i = 0; i < passes.length; i++) { failed = legalise(passes[i][0], passes[i][1], i === passes.length - 1); if (!failed.length) break; }
-    // put every edge connector back flush with its edge after the search
-    for (const e of edgeParts) {
-      const q = fpBox(e.c), ins = edgeInset(e.c, e.side, e.plug);
-      if (e.side === 'left') e.c.pcb.x += ins - q[0]; if (e.side === 'right') e.c.pcb.x += W - ins - q[2];
-      if (e.side === 'top') e.c.pcb.y += ins - q[1]; if (e.side === 'bottom') e.c.pcb.y += H - ins - q[3];
-      const n = { left: [1, 0], right: [-1, 0], top: [0, 1], bottom: [0, -1] }[e.side];
-      for (let t = 0; t < 80 && !boxInside(e.c, poly, -0.05); t++) { e.c.pcb.x += n[0] * 0.25; e.c.pcb.y += n[1] * 0.25; }
-    }
-    for (const c of cs) { c.pcb.x = +(Math.round(c.pcb.x / 0.05) * 0.05).toFixed(3); c.pcb.y = +(Math.round(c.pcb.y / 0.05) * 0.05).toFixed(3); }
-    const area = cs.reduce((a, c) => { const b = fpBox(c); return a + (b[2] - b[0]) * (b[3] - b[1]); }, 0);
+    for (const c of cs) if (failed.includes(c.ref)) delete c.pcb;
+    const packed = cs.filter(c => c.pcb);
+    const area = cs.reduce((a, c) => { const b = Lib.footprint(c.footprint).box; return a + (b[2] - b[0]) * (b[3] - b[1]); }, 0);
     let boardArea = 0; for (let i = 0; i < poly.length; i++) { const p = poly[i], q = poly[(i + 1) % poly.length]; boardArea += p[0] * q[1] - q[0] * p[1]; } boardArea = Math.abs(boardArea / 2);
     const hadHoles = (S.pcb.holes || []).filter(h => h.auto), holeD = hadHoles.length ? hadHoles[0].d : 0;
     S.pcb = Object.assign({}, S.pcb, { traces: [], vias: [], routed: {}, pours: (S.pcb.pours || []).filter(pr => pr.whole), holes: [] });
     if (holeD) addMountingHoles({ diameter: holeD });
-    const still = overlaps(cs, -0.1).map(([a, b]) => `${a.ref}/${b.ref}`), outside = cs.filter(c => !boxInside(c, poly, -0.1)).map(c => c.ref);
-    const res = { board: boardBrief(), kept_board: true, placed: cs.length, fits: !still.length && !outside.length, parts_area_pct: Math.round(area / boardArea * 100), on_edge: edgeParts.map(e => `${e.c.ref}:${e.side}${e.plug ? ' (opening outward)' : ''}`) };
-    if (!res.fits) { res.overlapping = still; res.outside = outside; res.hint = `The parts need about ${Math.round(area / boardArea * 100)}% of the board area${twoSided ? ' (top and bottom are both used already)' : ''} — enlarge the board (Board W×H, or clear it for auto-size) or use smaller packages. Nothing was left outside the outline: the parts that did not fit overlap others (${[...new Set([...still.flatMap(x => x.split('/')), ...outside])].slice(0, 12).join(', ')}).`; }
-    const nb = cs.filter(c => c.pcb.autoSide).map(c => c.ref); if (nb.length) res.moved_to_bottom = nb;
+    const still = overlaps(packed, 0, noStack).map(([a, b]) => `${a.ref}/${b.ref}`);
+    const outside = packed.filter(c => !boxInside(c, poly, 0)).map(c => c.ref);
+    const res = { board: boardBrief(), kept_board: true, placed: packed.length, fits: !failed.length && !still.length && !outside.length,
+      parts_area_pct: Math.round(area / boardArea * 100),
+      on_edge: edgeParts.filter(e => e.c.pcb).map(e => `${e.c.ref}:${e.placedSide}${e.plug ? ' (opening outward)' : ''}`) };
+    if (!res.fits) {
+      res.unplaced = failed;
+      res.overlapping = still;
+      res.outside = outside;
+      res.hint = [failed.length && 'No free space for ' + failed.join(', '),
+        still.length && 'Overlapping fixed parts: ' + still.join(', '),
+        outside.length && 'Outside the outline: ' + outside.join(', ')].filter(Boolean).join(' · ') + ' — make room or enlarge the board.';
+    }
+    const nb = packed.filter(c => c.pcb.autoSide).map(c => c.ref); if (nb.length) res.moved_to_bottom = nb;
     return res;
   }
   function boxInside(c, poly, inset) {
@@ -1187,13 +1196,16 @@ const Pcb = (() => {
     const S = Model.S, R = rules(); if (!S.board.w) throw new Error('No PCB yet — generate_pcb first');
     const cs = (refs || []).map(r => { const c = Model.comp(r); if (!c) throw new Error(`No component ${r}`); return c; });
     if (!cs.length) throw new Error('refs is empty');
-    for (const c of cs) if (!c.pcb) c.pcb = { x: S.board.w / 2, y: S.board.h / 2, rot: 0, side: o.side === 'bottom' ? 'B' : 'F' };
+    const newParts = new Set(cs.filter(c => !c.pcb));
+    for (const c of cs) if (!c.pcb) c.pcb = { x: S.board.w / 2, y: S.board.h / 2, rot: c.rot || 0, side: o.side === 'bottom' ? 'B' : 'F' };
     const own = new Set(cs.map(c => c.ref)), gap = Math.max(o.gap != null ? +o.gap : 0.5, +R.partGap || 0), margin = Math.max(R.edgeClearance + 0.2, 0.5), poly = boardPoly();
     const fixed = placed().filter(c => !own.has(c.ref)).map(c => ({ b: fpBox(c, gap / 2), side: isBottom(c) ? 'B' : 'F', th: thBoxes(c, gap) }));
     const holes = (S.pcb.holes || []).map(h => [h.x - h.d / 2 - gap, h.y - h.d / 2 - gap, h.x + h.d / 2 + gap, h.y + h.d / 2 + gap]);
     // every keep-out by default (a part brings copper pads); allow_keepouts: only those that forbid parts
     const kos = keepouts().filter(k => k.parts || (o.allow_keepouts !== true && (k.tracks || k.pours)));
     const reg = Array.isArray(o.region) && o.region.length === 4 ? [Math.min(o.region[0], o.region[2]), Math.min(o.region[1], o.region[3]), Math.max(o.region[0], o.region[2]), Math.max(o.region[1], o.region[3])].map(Number) : null;
+    const regions = o.sheet_boards && boardSheetsOn() ? boardRegions() : [];
+    const regionFor = c => regions.find(r => r.name === sheetBoard(Model.sheetOf(c))) || regions[0];
     const hitBox = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
     // copper already on the board: tracks and vias of other nets may not come closer to the part's pads than the rules
     // (bucketed in 2 mm cells so the many candidate spots stay fast); avoid_pours: pads not on another net's pour either
@@ -1220,15 +1232,27 @@ const Pcb = (() => {
       return false;
     };
     const pieces0 = pourPieces();
+    const rectangular = isRectBoard();
     // SMD parts on opposite sides may overlap; through-hole parts block both sides
     const free = c => {
       if (!boxInside(c, poly, margin)) return false;
+      const region = regionFor(c);
+      if (region && !bodyPoints(c, margin).every(([x, y]) => inPoly(x, y, region.poly))) return false;
       if (reg) { const b = fpBox(c); if (b[0] < reg[0] || b[1] < reg[1] || b[2] > reg[2] || b[3] > reg[3]) return false; }
       const b = fpBox(c, gap / 2), side = isBottom(c) ? 'B' : 'F', th = thBoxes(c, gap);
       if (fixed.some(f => f.side === side ? hitBox(b, f.b) : (f.th.some(t => hitBox(t, b)) || th.some(t => hitBox(t, f.b))))) return false;
       if (holes.some(h => hitBox(b, h))) return false;
       for (const k of kos) if (koOn(k, side) && ([...Array(25)].some((_, q) => inPoly(b[0] + (b[2] - b[0]) * (q % 5) / 4, b[1] + (b[3] - b[1]) * Math.floor(q / 5) / 4, k.pts)) || k.pts.some(([x, y]) => x > b[0] && x < b[2] && y > b[1] && y < b[3]))) return false;
       if (copperHit(c)) return false;
+      // A concave outline can cross the body between the points sampled by boxInside.
+      if (!rectangular || region) {
+        const [x0, y0, x1, y1] = fpBox(c, margin);
+        const fp = Lib.footprint(c.footprint);
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hw = (x1 - x0) / 2, hh = (y1 - y0) / 2;
+        const body = fp && fp.pads.length === 1 && fp.pads[0].shape === 'round'
+          ? { k: 'circ', c: [cx, cy], r: Math.min(hw, hh) } : { k: 'rect', cx, cy, hw, hh };
+        if ((!rectangular && edgeDist(body, poly) <= 1e-6) || (region && edgeDist(body, region.poly) <= 1e-6)) return false;
+      }
       return true;
     };
     // target point
@@ -1268,7 +1292,9 @@ const Pcb = (() => {
       for (const p of padsOf(c, idx2)) if (p.net) { if (!Model.isPower(p.net)) sig.add(p.net); else if (!Model.isGround(p.net)) sup.add(p.net); }
       const nets = sig.size ? sig : sup, pts = [];
       for (const q of placed()) if (q !== c && (!own.has(q.ref) || placedNow.has(q.ref))) for (const p of padsOf(q, idx2)) if (nets.has(p.net)) pts.push([p.x, p.y]);
-      return pts.length ? [pts.reduce((a, q) => a + q[0], 0) / pts.length, pts.reduce((a, q) => a + q[1], 0) / pts.length] : T;
+      const region = regionFor(c);
+      return pts.length ? [pts.reduce((a, q) => a + q[0], 0) / pts.length, pts.reduce((a, q) => a + q[1], 0) / pts.length]
+        : region ? [(region.x0 + region.x1) / 2, (region.y0 + region.y1) / 2] : T;
     };
     const placedNow = new Set();
     // bigger parts first (the small ones fit around them); with only_overlapping (default) a part already clear of
@@ -1278,8 +1304,23 @@ const Pcb = (() => {
       if (o.only_overlapping !== false && !o.near && !reg && c.pcb && free(c)) { kept.push(c.ref); placedNow.add(c.ref); fixed.push({ b: fpBox(c, gap / 2), side: isBottom(c) ? 'B' : 'F', th: thBoxes(c, gap) }); continue; }
       const x0 = c.pcb.x, y0 = c.pcb.y, r0 = c.pcb.rot || 0, rots = o.rotate === false ? [r0] : [r0, ...[0, 90, 180, 270].filter(r => r !== r0)];
       let ok = false;
-      for (const [x, y] of (o.near ? cand : near(targetFor(c)))) { for (const r of rots) { c.pcb.x = +x.toFixed(3); c.pcb.y = +y.toFixed(3); c.pcb.rot = r; if (free(c)) { ok = true; break; } } if (ok) break; }
-      if (!ok) { c.pcb.x = x0; c.pcb.y = y0; c.pcb.rot = r0; failed.push(c.ref); continue; }
+      const side = c.pcb.side;
+      const canFlip = o.try_other_side && +R.layers !== 1 && !c.pcb.locked && !c.pcbEdge && !edgeInfo(c) && !padsOf(c).some(p => p.drill);
+      const spots = o.near ? cand : near(targetFor(c));
+      search: for (const nextSide of canFlip ? [side, isBottom(c) ? 'F' : 'B'] : [side]) {
+        if (nextSide) c.pcb.side = nextSide; else delete c.pcb.side;
+        for (const [x, y] of spots) for (const r of rots) {
+          c.pcb.x = +x.toFixed(3); c.pcb.y = +y.toFixed(3); c.pcb.rot = r;
+          if (free(c)) { ok = true; break search; }
+        }
+      }
+      if (!ok) {
+        if (newParts.has(c)) delete c.pcb;
+        else { c.pcb.x = x0; c.pcb.y = y0; c.pcb.rot = r0; if (side) c.pcb.side = side; else delete c.pcb.side; }
+        failed.push(c.ref);
+        continue;
+      }
+      if (canFlip && c.pcb.side !== side) { if (isBottom(c)) c.pcb.autoSide = true; else delete c.pcb.autoSide; }
       fixed.push({ b: fpBox(c, gap / 2), side: isBottom(c) ? 'B' : 'F', th: thBoxes(c, gap) });   // the next part avoids this one
       placedNow.add(c.ref);
       moves.push({ ref: c.ref, x: c.pcb.x, y: c.pcb.y, rot: c.pcb.rot, moved_mm: +Math.hypot(c.pcb.x - x0, c.pcb.y - y0).toFixed(2) });
@@ -1389,12 +1430,12 @@ const Pcb = (() => {
     return { accepted_overlaps: S.pcb.okOverlaps };
   }
   const legalCheck = refs => { const r = checkPlacement(refs); return r.length ? r.map(q => q.msg) : undefined; };
-  function overlaps(cs, gap) {
+  function overlaps(cs, gap, allSides = false) {
     // parts on opposite sides only clash over through-hole pads
     const out = [], B = cs.map(c => fpBox(c, gap / 2)), hb = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
     for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
       const a = B[i], b = B[j]; if (!hb(a, b)) continue;
-      if (isBottom(cs[i]) !== isBottom(cs[j]) && !thBoxes(cs[i], gap).some(t => hb(t, b)) && !thBoxes(cs[j], gap).some(t => hb(t, a))) continue;
+      if (!allSides && isBottom(cs[i]) !== isBottom(cs[j]) && !thBoxes(cs[i], gap).some(t => hb(t, b)) && !thBoxes(cs[j], gap).some(t => hb(t, a))) continue;
       out.push([cs[i], cs[j]]);
     }
     return out;
@@ -1407,6 +1448,7 @@ const Pcb = (() => {
   function compactPlace(opt = {}) {
     const S = Model.S, t0 = Date.now(), clone = o => JSON.parse(JSON.stringify(o)), limit = (opt.time_s ?? 30) * 1000;
     autoSize(opt);
+    const parts = placed(), initialBoard = clone(S.board);
     const rect = !S.board.shape || !S.board.shape.type || S.board.shape.type === 'rect' || S.board.shape.type === 'rounded';
     const scaleXY = (fx, fy) => {
       const cx = S.board.w / 2, cy = S.board.h / 2;
@@ -1414,7 +1456,10 @@ const Pcb = (() => {
       S.board.w = +(S.board.w * fx).toFixed(2); S.board.h = +(S.board.h * fy).toFixed(2);
       if (S.board.shape && S.board.shape.pts) S.board.shape.pts = S.board.shape.pts.map(q => [+(q[0] * fx).toFixed(3), +(q[1] * fy).toFixed(3)]);
     };
-    const legal = () => !overlaps(placed(), 0.35).length && placed().every(c => boxInside(c, boardPoly(), -0.05));
+    const legal = () => {
+      const ps = placed();
+      return ps.length === parts.length && !overlaps(ps, 0.35, opt.no_stack).length && ps.every(c => boxInside(c, boardPoly(), 0));
+    };
     const snap = () => ({ board: clone(S.board), place: placed().map(c => [c.ref, clone(c.pcb)]) });
     const restore = s => { S.board = clone(s.board); for (const [ref, q] of s.place) { const c = Model.comp(ref); if (c) c.pcb = clone(q); } };
     // For three board shapes (natural aspect, square, turned 90° — the shape decides which edges the connectors get),
@@ -1430,9 +1475,9 @@ const Pcb = (() => {
       const tryArea = area => {
         const [w, h] = sizeFor(area);
         S.board.w = +w.toFixed(1); S.board.h = +h.toFixed(1);
-        fitInside(Object.assign({}, opt, { tries: 2, compact: 0.6, anneal_s: 0.5, seed: 11 + vi * 101 + steps }));
-        legalisePlacement(0.4); steps++;
-        return legal() ? snap() : null;
+        const result = fitInside(Object.assign({}, opt, { tries: 2, compact: 0.6, anneal_s: 0.5, seed: 11 + vi * 101 + steps }));
+        steps++;
+        return result.fits && legal() ? snap() : null;
       };
       // upper bound: grow until it packs; lower bound: the parts themselves (+20 %)
       let hiA = Math.max(A0, partsArea * 2.2), best = null;
@@ -1447,7 +1492,12 @@ const Pcb = (() => {
       const b = unionBox(placed()), area = (b[2] - b[0]) * (b[3] - b[1]);
       if (!winner || area < winner.area) winner = { area, s: best };
     });
-    if (winner) restore(winner.s);
+    if (!winner) {
+      S.board = initialBoard;
+      const result = fitInside(opt);
+      return Object.assign(result, { compacted: steps, seconds: +((Date.now() - t0) / 1000).toFixed(1) });
+    }
+    restore(winner.s);
     // trim a rectangular board to the parts (+ edge margin), keeping connectors flush with their edges
     if (rect && winner) {
       const R = rules(), m = Math.max(1, R.edgeClearance + 0.7), b = unionBox(placed()), pre = snap();
@@ -1460,7 +1510,7 @@ const Pcb = (() => {
     const hadHoles = (S.pcb.holes || []).filter(h => h.auto), holeD = hadHoles.length ? hadHoles[0].d : 0;
     S.pcb = Object.assign({}, S.pcb, { traces: [], vias: [], routed: {}, pours: (S.pcb.pours || []).filter(pr => pr.whole), holes: [] });
     if (holeD) addMountingHoles({ diameter: holeD });
-    const cs = placed(), still = overlaps(cs, 0).map(([a, b]) => `${a.ref}/${b.ref}`), outside = cs.filter(c => !boxInside(c, boardPoly(), 0)).map(c => c.ref);
+    const cs = placed(), still = overlaps(cs, 0, opt.no_stack).map(([a, b]) => `${a.ref}/${b.ref}`), outside = cs.filter(c => !boxInside(c, boardPoly(), 0)).map(c => c.ref);
     return { board: boardBrief(), placed: cs.length, compacted: steps, fits: !still.length && !outside.length, overlapping: still.length ? still : undefined, outside: outside.length ? outside : undefined, seconds: +((Date.now() - t0) / 1000).toFixed(1) };
   }
   function autoSize(opt = {}) {
@@ -1749,13 +1799,13 @@ const Pcb = (() => {
         else { const st = status(); r = Object.assign({}, r, { routed: st.routed, failed: st.unrouted, vias: S.pcb.vias.length, clearance_repaired: nets }); }
       }
     }
-    if (r.via_in_pad && r.via_in_pad.length) r.note = 'Via on an SMD pin was needed for: ' + r.via_in_pad.join(', ') + ' (DRC warning). Optimize placement or give the router more room to avoid it.';
+    if (r.via_in_pad && r.via_in_pad.length) r.note = 'Via on an SMD pin was needed for: ' + r.via_in_pad.join(', ') + ' (DRC warning). Adjust placement or give the router more room to avoid it.';
     // why each net that is still open failed
     if (r.failed && r.failed.length) {
       const fr = {}, why = r.failed_reason || {};
       for (const n of r.failed) fr[n] = why[n] || ((S.pcb.pours || []).some(p => p.net === n)
         ? 'its copper pour is split into pieces that are not joined (tracks cut through it) — add a stitching via (add_via) or a track (add_track) between the pieces, or make room'
-        : 'the router ran out of time or room — route_pcb again, optimize_pcb, more board area or ' + (rules().preset === 'jlcpcb_free_min' ? 'narrower tracks (traceWidth down to 0.1 mm)' : 'narrower rules (preset jlcpcb_free_min)'));
+        : 'the router ran out of time or room — adjust placement, more board area or ' + (rules().preset === 'jlcpcb_free_min' ? 'narrower tracks (traceWidth down to 0.1 mm)' : 'narrower rules (preset jlcpcb_free_min)'));
       r.failed_reason = fr;
     } else delete r.failed_reason;
     S.pcb.routeNotes = r.failed_reason ? Object.assign({}, r.failed_reason) : undefined;
@@ -2387,7 +2437,7 @@ const Pcb = (() => {
       });
       const head = hard.has(n) ? 'no path even with the other routed nets ignored' : 'no room left between the tracks of the other nets';
       const tip = hard.has(n) ? (near.some(t => /no room for a via/.test(t)) ? 'move the parts next to that pin apart so a via fits' : near.some(t => /kept track|kept via/.test(t)) ? 'remove or move the kept copper (remove_tracks)' : 'move parts apart or make room')
-        : 'optimize_pcb, more board area, or ' + (R.preset === 'jlcpcb_free_min' ? 'narrower tracks (traceWidth down to 0.1 mm)' : 'narrower rules (preset jlcpcb_free_min)');
+        : 'adjust placement, more board area, or ' + (R.preset === 'jlcpcb_free_min' ? 'narrower tracks (traceWidth down to 0.1 mm)' : 'narrower rules (preset jlcpcb_free_min)');
       return `${head}${miss.length ? ` — not joined: ${miss.slice(0, 6).join(', ')}${miss.length > 6 ? ` (+${miss.length - 6})` : ''}` : ''}${near.length ? ` · blocked at ${near.join(' · ')}` : ''} — ${tip}${r && r.segs && r.segs.length ? ' (the rest of the net is routed)' : ''}`;
     };
     S.pcb = Object.assign({}, S.pcb, { traces: oldTraces.concat(fin.traces), vias: oldVias.concat(fin.vias), pours: S.pcb.pours || [], holes: S.pcb.holes || [], routed: fin.routed });
@@ -2457,7 +2507,11 @@ const Pcb = (() => {
     const S = Model.S, R = rules(), idx = Model.pinIndex(), cs = placed(), out = [];
     const add = (type, msg, x, y, severity = 'error') => out.push({ type, severity, msg, x: +(+x).toFixed(2), y: +(+y).toFixed(2) });
     for (const w of ruleWarnings(R)) out.push({ type: 'rules', severity: 'warning', msg: w });
-    if (!cs.length || !S.board.w) return { violations: out, summary: 'No PCB' };
+    if (!S.board.w) return { violations: out, summary: 'No PCB' };
+    const missing = S.components.filter(c => !c.pcb && onActivePcb(c) && Lib.footprint(c.footprint));
+    for (const c of missing) out.push({ type: 'unplaced', severity: 'error', msg: `${c.ref} is unplaced — update from schematic or make room on the PCB` });
+    if (!cs.length) return { violations: out, errors: missing.length, warnings: out.length - missing.length,
+      summary: missing.length ? `${missing.length} unplaced part${missing.length === 1 ? '' : 's'}` : 'No PCB' };
     const L = R.layers === 1 ? 1 : 2, objs = [];
     let orphan = 0;
     for (const c of cs) for (const p of padsOf(c, idx)) objs.push({ s: padShape(p), net: p.net || '~' + (orphan++), layers: L === 1 ? ['F'] : padCu(p, ['F', 'B']), what: `pad ${p.key}`, drill: p.drill, ring: p.drill ? (Math.min(p.w, p.h) - p.drill) / 2 : undefined, x: p.x, y: p.y });
@@ -3613,177 +3667,63 @@ const Pcb = (() => {
     for (const c of placed()) { c.pcb.x = +(Math.round(c.pcb.x / 0.05) * 0.05).toFixed(3); c.pcb.y = +(Math.round(c.pcb.y / 0.05) * 0.05).toFixed(3); }
     return { overlaps: overlaps(placed(), 0).map(([a, b]) => `${a.ref}/${b.ref}`), outside: placed().filter(c => !boxInside(c, boardPoly(), -0.05)).map(c => c.ref) };
   }
-  // Update the board after schematic edits. Placed parts and still-valid copper stay as they are: copper of nets that no
-  // longer exist is removed, new parts go to the nearest free spot next to the parts they connect to (away from existing
-  // tracks when possible), and parts that now overlap (e.g. after a footprint change) are moved to a free spot nearby.
-  // The caller then routes the nets left incomplete.
-  // opt.place === false: load only — new parts are lined up beside the board for manual placement, nothing is moved.
-  function syncFromSchematic(opt = {}) {
-    const S = Model.S, R = rules();
-    if (!S.board.w || !placed().length) throw new Error('Generate the PCB first');
-    const nets = new Set(Object.keys(S.nets)), n0 = S.pcb.traces.length + S.pcb.vias.length;
-    S.pcb.traces = S.pcb.traces.filter(t => !t.net || nets.has(t.net));
-    S.pcb.vias = S.pcb.vias.filter(v => !v.net || nets.has(v.net));
-    if (S.pcb.pours) S.pcb.pours = S.pcb.pours.filter(p => !p.net || nets.has(p.net));
-    for (const n of Object.keys(S.pcb.routed || {})) if (!nets.has(n)) delete S.pcb.routed[n];
-    const removed = n0 - S.pcb.traces.length - S.pcb.vias.length;
-    const netsOf = c => Object.keys(S.nets).filter(n => S.nets[n].some(k => k.startsWith(c.ref + '.')));
-    const rip = new Set(), drop = ns => { for (const n of ns) { rip.add(n); delete S.pcb.routed[n]; } S.pcb.traces = S.pcb.traces.filter(t => !ns.includes(t.net)); S.pcb.vias = S.pcb.vias.filter(v => !ns.includes(v.net)); };
-
-    const fresh = S.components.filter(c => !c.pcb && Lib.footprint(c.footprint) && onActivePcb(c));
-    const noFp = S.components.filter(c => !c.pcb && !Lib.footprint(c.footprint) && onActivePcb(c)).map(c => c.ref);
-    if (opt.place === false) {
-      // column(s) to the right of the board, 1 mm apart, top to bottom
-      let x = S.board.w + 3, y = 0, colW = 0;
-      for (const c of fresh) {
-        const b = Lib.rotBox(Lib.footprint(c.footprint).box, c.rot || 0), w = b[2] - b[0], h = b[3] - b[1];
-        if (y > 0 && y + h > Math.max(S.board.h, 10)) { x += colW + 2; y = 0; colW = 0; }
-        c.pcb = { x: +(x - b[0]).toFixed(3), y: +(y - b[1]).toFixed(3), rot: c.rot || 0 };
-        y += h + 1; colW = Math.max(colW, w);
-      }
-      return { added: fresh.map(c => c.ref), parked: true, overlaps: overlaps(placed().filter(c => !fresh.includes(c)), 0).map(([a, b]) => `${a.ref}/${b.ref}`), no_footprint: noFp, removed_copper: removed };
-    }
-    // overlapping placed parts: move the smaller, free one of each pair
-    const area = c => { const fp = Lib.footprint(c.footprint), b = fp ? fp.box : [0, 0, 0, 0]; return (b[2] - b[0]) * (b[3] - b[1]); }, pinned = c => c.pcb && (c.pcb.locked || c.pcbEdge || edgeInfo(c));
-    const move = new Set();
-    // only real clashes move a placed part: pads closer than the clearance (courtyard-only overlaps of a dense layout,
-    // opposite-side SMD parts and accepted overlaps stay as they are)
-    const clashes = checkPlacement(null, 0, 0.25).filter(q => q.type === 'overlap' && q.pads_clear === false).map(q => q.parts.map(r => Model.comp(r)));
-    for (const [a, b] of clashes) {
-      if (move.has(a) || move.has(b)) continue;
-      const pick = pinned(a) && pinned(b) ? null : pinned(a) ? b : pinned(b) ? a : area(a) <= area(b) ? a : b;
-      if (pick) move.add(pick);
-    }
-    { const bp = boardPoly(); for (const c of placed()) if (!pinned(c) && partMargin(c, bp).copper_mm < 0) move.add(c); }   // copper off the board (a body corner past a curved edge is fine)
-    const fixed = new Set(placed().filter(c => !move.has(c)));
-    const gap = Math.max(0.3, R.clearance), m = Math.max(R.edgeClearance + 0.3, 0.6), poly = boardPoly(), W = S.board.w, H = S.board.h;
-    const copperHits = (c, own) => {
-      const b = fpBox(c), hit = new Set();
-      for (const t of S.pcb.traces) {
-        if (own.includes(t.net) || hit.has(t.net)) continue;
-        const e = t.w / 2 + R.clearance;
-        for (let i = 1; i < t.pts.length && !hit.has(t.net); i++) {
-          const [ax, ay] = t.pts[i - 1], [bx, by] = t.pts[i], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.2));
-          for (let k = 0; k <= n; k++) { const x = ax + (bx - ax) * k / n, y = ay + (by - ay) * k / n; if (x > b[0] - e && x < b[2] + e && y > b[1] - e && y < b[3] + e) { hit.add(t.net); break; } }
-        }
-      }
-      for (const v of S.pcb.vias) { const e = v.d / 2 + R.clearance; if (!own.includes(v.net) && v.x > b[0] - e && v.x < b[2] + e && v.y > b[1] - e && v.y < b[3] + e) hit.add(v.net); }
-      return [...hit];
-    };
-    const spot = c => {
-      const own = netsOf(c), pts = [];
-      for (const n of own) for (const k of S.nets[n]) { const o = Model.comp(k.slice(0, k.lastIndexOf('.'))); if (o && o !== c && fixed.has(o)) pts.push([o.pcb.x, o.pcb.y]); }
-      const tx = c.pcb && move.has(c) ? c.pcb.x : pts.length ? pts.reduce((a, p) => a + p[0], 0) / pts.length : W / 2;
-      const ty = c.pcb && move.has(c) ? c.pcb.y : pts.length ? pts.reduce((a, p) => a + p[1], 0) / pts.length : H / 2;
-      const cand = [];
-      for (let x = 0; x <= W; x += 0.5) for (let y = 0; y <= H; y += 0.5) cand.push([x, y, (x - tx) ** 2 + (y - ty) ** 2]);
-      cand.sort((a, b) => a[2] - b[2]);
-      const side = c.pcb && c.pcb.side, rot0 = (c.pcb ? c.pcb.rot : c.rot) || 0, others = [...fixed].map(o => fpBox(o, gap / 2));
-      let best = null;
-      // nearest spot clear of parts and copper; otherwise (after a further 400 spots) the one crossing the fewest nets
-      search: for (let i = 0, lastHit = -1; i < cand.length; i++) {
-        if (best && i - lastHit > 400) break;
-        const [x, y] = cand[i];
-        for (const rot of [rot0, (rot0 + 90) % 360]) {
-          c.pcb = { x, y, rot }; if (side === 'B') c.pcb.side = 'B';
-          if (!boxInside(c, poly, m)) continue;
-          const b = fpBox(c, gap / 2);
-          if (others.some(o => b[0] < o[2] && o[0] < b[2] && b[1] < o[3] && o[1] < b[3])) continue;
-          const hits = copperHits(c, own);
-          if (!hits.length) { best = { x, y, rot, hits }; break search; }
-          if (!best) lastHit = i;
-          if (!best || hits.length < best.hits.length) best = { x, y, rot, hits };
-        }
-      }
-      return best;
-    };
-    const added = [], moved = [], noRoom = [];
-    for (const c of [...move, ...fresh].sort((a, b) => area(b) - area(a))) {
-      const was = !!c.pcb, side = c.pcb && c.pcb.side;
-      if (was) drop(netsOf(c));
-      const s = spot(c);
-      if (s) { c.pcb = { x: +s.x.toFixed(3), y: +s.y.toFixed(3), rot: s.rot }; if (side === 'B') c.pcb.side = 'B'; if (s.hits.length) drop(s.hits); }
-      else { // no room: park it beside the board
-        const b0 = Lib.footprint(c.footprint).box; c.pcb = { x: +(W + 2 - b0[0] + noRoom.length * 4).toFixed(3), y: +(H / 2).toFixed(3), rot: 0 }; noRoom.push(c.ref);
-      }
-      fixed.add(c); (was ? moved : added).push(c.ref);
-    }
-    return { added, moved, no_room: noRoom, no_footprint: noFp, removed_copper: removed, ripped_nets: [...rip] };
+  // Recognize both new parts and parts parked beside the board by older versions.
+  function pendingFootprints() {
+    const S = Model.S;
+    if (!(S.board.w > 0 && S.board.h > 0)) return [];
+    return S.components.filter(c => onActivePcb(c) && Lib.footprint(c.footprint)
+      && (!c.pcb || (!c.pcb.locked && !c.pcbEdge && fpBox(c)[0] >= S.board.w)));
   }
-  // Move parts until every net routes (and, with opt.shrink, make the board smaller while it still routes).
-  // Each round: give the parts on unrouted nets more room and pull, re-anneal locally from the best placement,
-  // legalise, route with rip-up; keep the best (fewest unrouted, then smallest board, then shortest copper).
-  function optimize(opt = {}) {
-    const S = Model.S, t0 = Date.now(), limit = (opt.time_limit_s || 120) * 1000, maxIt = opt.iterations || 60;
-    const grow = !!opt.allow_grow, flip = !!opt.allow_bottom, shrink = !!opt.shrink, rt = opt.route_time_s || 12, rtLong = opt.route_time_long_s || 45;
-    if (!placed().length || !S.board.w) throw new Error('Generate the PCB first');
-    const manual = { traces: S.pcb.traces.filter(t => t.manual), vias: S.pcb.vias.filter(v => v.manual) };
-    const clone = o => JSON.parse(JSON.stringify(o));
-    const snapPlace = () => placed().map(c => [c.ref, clone(c.pcb)]);
-    const applyPlace = arr => arr.forEach(([ref, q]) => { const c = Model.comp(ref); if (c) c.pcb = clone(q); });
-    let it = 0, phase = 'route';
-    const left = () => limit - (Date.now() - t0);
-    const evaluate = (secs = rt) => {
-      S.pcb = Object.assign({}, S.pcb, { traces: manual.traces.slice(), vias: manual.vias.slice(), pours: S.pcb.pours || [], holes: S.pcb.holes || [], routed: {} });
-      route({ time_limit_s: Math.max(3, Math.min(secs, left() / 1000)), onProgress: opt.onProgress ? p => opt.onProgress(Object.assign({}, p, { iteration: it, of: maxIt, optimizing: true, stage: phase })) : null });
-      const st = status(), cs = placed(), poly = boardPoly();
-      // parts that overlap or stick out of the board make the layout invalid, whatever the router says
-      const bad = overlaps(cs, 0.05).length + cs.filter(c => !boxInside(c, poly, -0.05)).length;
-      return { failed: st.unrouted.length + bad * 2, bad, len: st.trace_length_mm, unrouted: st.unrouted, area: +(S.board.w * S.board.h).toFixed(1) };
+
+  // Update the existing outline in place. Free-space placement tries the other side
+  // for eligible SMD parts when their preferred side is full.
+  function syncFromSchematic() {
+    const S = Model.S;
+    if (!(S.board.w > 0 && S.board.h > 0)) throw new Error('Generate the PCB first');
+    const P = S.pcb, nets = new Set(Object.keys(S.nets));
+    const n0 = P.traces.length + P.vias.length;
+    P.traces = P.traces.filter(t => !t.net || nets.has(t.net));
+    P.vias = P.vias.filter(v => !v.net || nets.has(v.net));
+    if (P.pours) P.pours = P.pours.filter(p => !p.net || nets.has(p.net));
+    for (const n of Object.keys(P.routed || {})) if (!nets.has(n)) delete P.routed[n];
+
+    const fresh = pendingFootprints(), noFp = S.components.filter(c => onActivePcb(c) && !Lib.footprint(c.footprint)).map(c => c.ref);
+    for (const c of fresh) delete c.pcb;
+    const area = c => {
+      const b = Lib.footprint(c.footprint).box;
+      return (b[2] - b[0]) * (b[3] - b[1]);
     };
-    const better = (a, b) => a.failed < b.failed || (a.failed === b.failed && (a.area < b.area - 1 || (Math.abs(a.area - b.area) <= 1 && a.len < b.len - 0.5)));
-    const legalise = () => legalisePlacement();
-    const scaleBoard = f => {
-      const cx = S.board.w / 2, cy = S.board.h / 2;
-      for (const c of placed()) { c.pcb.x = cx * f + (c.pcb.x - cx) * f; c.pcb.y = cy * f + (c.pcb.y - cy) * f; }
-      S.board.w = +(S.board.w * f).toFixed(1); S.board.h = +(S.board.h * f).toFixed(1);
-      if (S.board.shape && S.board.shape.pts) S.board.shape.pts = S.board.shape.pts.map(q => [+(q[0] * f).toFixed(3), +(q[1] * f).toFixed(3)]);
-      for (const h of S.pcb.holes || []) { h.x = cx * f + (h.x - cx) * f; h.y = cy * f + (h.y - cy) * f; }
-    };
-    let cur = evaluate(rtLong);
-    let best = { score: cur, place: snapPlace(), pcb: clone(S.pcb), board: clone(S.board) };
-    if (opt.onBest) opt.onBest({ unrouted: cur.failed });
-    const history = [{ iteration: 0, unrouted: cur.failed, length_mm: cur.len, board: `${S.board.w}×${S.board.h}`, move: 'start' }];
-    const pressure = {};   // nets that keep failing get more pull and their parts more room
-    const applyPressure = (boost, netBoost) => { if (Object.keys(netBoost).length) anneal({ time_s: Math.min(2, left() / 6000), hot: 0.2, seed: 77 + it, boost, netBoost, allow_bottom: flip }); };
-    let shrinkStep = 0.94, stuck = 0;
-    while (it < maxIt && left() > 4000) {
-      it++;
-      applyPlace(best.place); S.board = clone(best.board); S.pcb = clone(best.pcb);
-      let desc = '';
-      if (best.score.failed > 0) {
-        phase = 'route';
-        for (const n of best.score.unrouted) pressure[n] = (pressure[n] || 0) + 1;
-        const idx = Model.pinIndex(), boost = {}, netBoost = {};
-        for (const [n, k] of Object.entries(pressure)) netBoost[n] = Math.min(4, 0.8 * k);
-        for (const c of placed()) for (const p of padsOf(c, idx)) if (p.net && pressure[p.net]) boost[c.ref] = Math.min(2.5, (boost[c.ref] || 0) + 0.25 * pressure[p.net]);
-        if (grow && stuck >= 4) { scaleBoard(1.08); stuck = 0; desc = `enlarge board to ${S.board.w}×${S.board.h} mm, re-arrange`; }
-        if (!desc && it % 2 === 0) {
-          // a fresh global arrangement (different seed) inside the same outline
-          fitInside({ anneal_s: Math.min(5, left() / 4000), seed: 3000 + it * 104729, tries: 1 });
-          applyPressure(boost, netBoost);
-          desc = 'new arrangement of all parts';
-        } else {
-          desc = desc || `re-arrange around ${best.score.unrouted.slice(0, 3).join(', ')}${best.score.unrouted.length > 3 ? '…' : ''}`;
-          anneal({ time_s: Math.min(4, left() / 4000), hot: stuck > 2 ? 0.6 : 0.25, seed: 1000 + it * 7919, boost, netBoost, allow_bottom: flip });
-        }
-      } else if (shrink) {
-        phase = 'shrink';
-        scaleBoard(shrinkStep); desc = `shrink board to ${S.board.w}×${S.board.h} mm`;
-        anneal({ time_s: Math.min(3, left() / 4000), hot: 0.3, seed: 2000 + it * 7919, allow_bottom: flip });
-      } else break;
-      legalise();
-      let sc = evaluate();
-      // a promising candidate (no worse than the best) gets the full rip-up time before it is judged
-      if (sc.failed > 0 && !sc.bad && sc.failed <= best.score.failed && left() > 15000) sc = evaluate(rtLong);
-      const kept = better(sc, best.score);
-      history.push({ iteration: it, move: desc, unrouted: sc.failed, length_mm: sc.len, board: `${S.board.w}×${S.board.h}`, kept });
-      if (kept) { best = { score: sc, place: snapPlace(), pcb: clone(S.pcb), board: clone(S.board) }; stuck = 0; if (opt.onBest) opt.onBest({ unrouted: sc.failed }); }
-      else { stuck++; if (phase === 'shrink') { shrinkStep = 1 - (1 - shrinkStep) / 2; if (shrinkStep > 0.985) break; } }
+    const pinned = c => c.pcb.locked || c.pcbEdge || edgeInfo(c);
+    const move = new Set();
+    for (const q of checkPlacement(null, 0, 0.25)) {
+      if (q.type !== 'overlap' || q.pads_clear !== false) continue;
+      const [a, b] = q.parts.map(ref => Model.comp(ref));
+      if (move.has(a) || move.has(b)) continue;
+      if (pinned(a) && pinned(b)) continue;
+      move.add(pinned(a) ? b : pinned(b) || area(a) <= area(b) ? a : b);
     }
-    applyPlace(best.place); S.board = clone(best.board); S.pcb = clone(best.pcb);
-    const st = status();
-    return { iterations: it, routed: st.routed, total: st.nets, unrouted: st.unrouted, trace_length_mm: st.trace_length_mm, board: boardBrief(), seconds: +((Date.now() - t0) / 1000).toFixed(1), history };
+    const poly = boardPoly();
+    for (const c of placed()) if (!pinned(c) && partMargin(c, poly).copper_mm < 0) move.add(c);
+
+    const options = { only_overlapping: false, try_other_side: true, sheet_boards: true };
+    const moved = [], noRoom = [], rip = new Set();
+    for (const c of [...move].sort((a, b) => area(b) - area(a))) {
+      const r = placeFree([c.ref], options);
+      if (r.failed) { noRoom.push(c.ref); continue; }
+      moved.push(c.ref);
+      for (const n of Model.netsOfComp(c.ref)) rip.add(n);
+    }
+    if (rip.size) {
+      P.traces = P.traces.filter(t => t.manual || t.locked || !rip.has(t.net));
+      P.vias = P.vias.filter(v => v.manual || v.locked || !rip.has(v.net));
+      for (const n of rip) if (P.routed) delete P.routed[n];
+    }
+    const added = fresh.length ? placeFree(fresh.map(c => c.ref), options) : { placed: [] };
+    noRoom.push(...(added.failed || []));
+    const placedRefs = added.placed.map(p => p.ref);
+    return { added: placedRefs, moved, no_room: noRoom, no_footprint: noFp,
+      placed_on_bottom: [...placedRefs, ...moved].filter(ref => isBottom(Model.comp(ref))),
+      removed_copper: n0 - P.traces.length - P.vias.length, ripped_nets: [...rip] };
   }
 
   // ---------- board code + revision, printed on the silkscreen ----------
@@ -3843,7 +3783,7 @@ const Pcb = (() => {
     const m = /^(?:CP-?)?([A-HJ-NP-Z2-9]{5})(?:-(\d+))?(?:\s*[-_ ]?\s*R(?:EV)?\s*(\d+))?$/i.exec(String(q || '').trim());
     return m ? { id: 'CP-' + m[1].toUpperCase(), pcb: m[2] ? +m[2] : null, rev: m[3] ? +m[3] : null } : null;
   }
-  return { unionPoly, boardForMerge, mergeBoard, setRulesAll, rulesOfPcb, trackIds, touchesPad, danglingVias, removeDanglingVias, pourPieces, pourSplitWarnings, ensureFabId, fabCode, fabLabelText, fabRelease, fabRevisions, parseFabCode, designHash, planeMap, planeFanout, easyedaRuleCheck, easyedaRuleNote, addLine, updateLine, removeLine, LINE_LAYERS, pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, optimize, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
+  return { unionPoly, boardForMerge, mergeBoard, setRulesAll, rulesOfPcb, trackIds, touchesPad, danglingVias, removeDanglingVias, pourPieces, pourSplitWarnings, ensureFabId, fabCode, fabLabelText, fabRelease, fabRevisions, parseFabCode, designHash, planeMap, planeFanout, easyedaRuleCheck, easyedaRuleNote, addLine, updateLine, removeLine, LINE_LAYERS, pcbList, activePcb, selectPcb, addPcb, renamePcb, deletePcb, setSheetPcb, onActivePcb, boardRegions, setPanel, placeByBoards, boardRegionIssues, pourKeepouts, pourFill, jlcPcbParam, setFlex, boardThickness, addThermalVias, epKeepouts, viaRoomWarnings, textWidth, rotPt, pourFillRings, viaGap, padCl, viaCl, pourCl, savePourTemplate, applyPourTemplate, describePour, markOverlapOk, boardBrief, partMargin, edgeMargins, autoFit, transformParts, clipPoly, arrangeSilk, viaSummary, costsExtra, checkPlacement, legalCheck, addTrack, addVia, trackList, removeTracks, connectPadsToPour, viaSpotProblem, addKeepout, removeKeepout, keepouts, pourInfo, pourIslands, stitchPour, placeFree, silkLabels, silkInfo, setSilkLabel, addText, updateText, removeText, labelCentre, strokeText, addMountingHoles, autoPlace, placeFootprint, syncFromSchematic, pendingFootprints, anneal, legalisePlacement, setBoardShape, boardPoly, isRectBoard, addPour, pourPoly, pourRaster, isBottom, padCu, inPoly, edgeInfo, route, status, gerbers, padsOf, fpBox, pin1Dot, placed, rules, setRules, ruleWarnings, drc, RULE_PRESETS, connectivity, ratsnest, netWidth: n => netWidth(rules(), n), geom: { shapeDist, padShape, ptSeg, padDist, segSegDist } };
 })();
 
 // Minimal ZIP (store, no compression) writer.

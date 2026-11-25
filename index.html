@@ -123,19 +123,13 @@
       <div id="pcbTools" class="tools hidden">
         <button id="btn3d" title="Switch between the 2D editor and a 3D view of the board">◈ 3D</button>
         <button id="btnGen" class="primary">Generate PCB</button>
-        <button id="btnSync" title="Load schematic edits onto the board: new parts appear beside the board (with their ratsnest) for you to place, changed footprints update in place, tracks of deleted nets are removed. Nothing is auto-placed or routed.">⟳ Update from schematic</button>
+        <button id="btnSync" title="Auto-place new parts inside the existing PCB outline and remove outdated copper. Use Route to connect the updated layout.">⟳ Update from schematic</button>
         <div class="dd"><button id="btnPlace" title="Place the parts on the board">Auto-place ▾</button>
           <div class="ddm">
             <button data-place="ai" title="The AI copilot plans the floor plan (decoupling next to pins, crystal at the MCU, connectors on edges…), then it is polished and routed">✦ AI place (copilot plans the layout)</button>
             <button data-place="quick" title="Annealing on wire length with room for fan-out — no AI needed">Quick place (algorithm)</button>
           </div></div>
         <button id="btnRoute" title="Autoroute with rip-up and reroute (effort: Rules → Autorouter effort)">Route</button>
-        <div class="dd"><button id="btnOptimize" title="Move parts and re-route until everything is connected">✨ Optimize ▾</button>
-          <div class="ddm">
-            <button data-opt="route">Move parts until every net routes</button>
-            <button data-opt="shrink">…and make the board as small as possible</button>
-            <button data-opt="bottom">…also allowed to use the bottom side</button>
-          </div></div>
         <button id="btnUnroute">Clear routes</button>
         <button id="btnShape" title="Board outline: rectangle, rounded, circle / ellipse, custom">▭ Board</button>
         <button id="btnPanel" title="Several boards on one PCB, joined by break-off tabs; each schematic sheet can go on its own board">⊞ Panel</button>
@@ -440,7 +434,7 @@
       <label title="Track or via to a pad, SMD or through-hole (EasyEDA Pro default 0.152 mm, JLCPCB minimum 0.1 mm)">Clearance to pads<input data-r="padClearance" type="number" step="0.005" min="0"><span>mm</span></label>
       <label title="Track, pad or via to a via (EasyEDA Pro default 0.152 mm; JLCPCB also wants 0.2 mm from the via hole)">Clearance to vias<input data-r="viaClearance" type="number" step="0.005" min="0"><span>mm</span></label>
       <label title="Copper pour to other nets' copper (EasyEDA Pro default 0.254 mm)">Copper pour clearance<input data-r="pourClearance" type="number" step="0.01" min="0"><span>mm</span></label>
-      <label title="Minimum space between part outlines on the same side (0 = off). DRC warns below it; placement and Optimize keep it">Gap between parts<input data-r="partGap" type="number" step="0.05" min="0"><span>mm</span></label>
+      <label title="Minimum space between part outlines on the same side (0 = off). DRC warns below it; automatic placement keeps it">Gap between parts<input data-r="partGap" type="number" step="0.05" min="0"><span>mm</span></label>
       <label>Via diameter<input data-r="viaDiameter" type="number" step="0.01" min="0.1"><span>mm</span></label>
       <label>Via drill<input data-r="viaDrill" type="number" step="0.01" min="0.1"><span>mm</span></label>
       <label>Copper to board edge<input data-r="edgeClearance" type="number" step="0.05" min="0"><span>mm</span></label>
@@ -601,7 +595,6 @@
     <div class="row end">
       <button id="gbFix">Fix on board</button>
       <button id="gbRoute">Re-route</button>
-      <button id="gbOpt">✨ Optimize placement</button>
       <button id="gbDownload" class="primary">Download anyway</button>
     </div>
   </div>
@@ -615,7 +608,7 @@
 <script src="js/model.js?v=202611252130"></script>
 <script src="js/schematic.js?v=202611170600"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611251930"></script>
+<script src="js/pcb.js?v=202611252220"></script>
 <script src="js/cnc.js?v=202611071200"></script>
 <script src="js/pcbview.js?v=202611232300"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
@@ -632,8 +625,8 @@
 <script src="js/pcb3d.js?v=202611240100"></script>
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
-<script src="js/engine.js?v=202611252130"></script>
-<script src="js/ai.js?v=202611251500"></script>
+<script src="js/engine.js?v=202611252220"></script>
+<script src="js/ai.js?v=202611252220"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202611231900"></script>
@@ -642,8 +635,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611252130"></script>
-<script src="js/app.js?v=202611252130"></script>
+<script src="js/welcome.js?v=202611252220"></script>
+<script src="js/app.js?v=202611252220"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

@@ -9,6 +9,7 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.26', date: '2026-11-26', items: [
+      'Quick place budgets routing space separately for each side, so parts can spread underneath a large module',
       'Quick place leaves wider channels between footprints when the board has room for routing',
       'Quick place prefers open space between pads on the opposite side of the board, including under modules',
     ] },

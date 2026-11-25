@@ -1092,16 +1092,23 @@ const Pcb = (() => {
       return sum + p[0] * q[1] - q[0] * p[1];
     }, 0)) / 2;
     const footprints = cs.map(c => Lib.footprint(c.footprint).box);
-    const partArea = gap => footprints.reduce((sum, b) => sum + (b[2] - b[0] + gap) * (b[3] - b[1] + gap), 0);
+    const partArea = (boxes, gap = 0) => boxes.reduce((sum, b) => sum + (b[2] - b[0] + gap) * (b[3] - b[1] + gap), 0);
     const defaultGaps = [1.0, 0.6, 0.3, 0.15];
     const minGap = +R.partGap || 0;
-    const sparePerPart = (Math.sqrt(boardArea) - Math.sqrt(partArea(0))) / Math.sqrt(cs.length);
-    const channelLimit = Math.min(2.5, Math.max(1.5, 6 * (R.traceWidth + R.clearance)));
-    const channels = Math.min(channelLimit, sparePerPart * 0.45);
-    // Leave room for several tracks between footprints on spacious boards. Tight boards and
-    // explicit compaction keep their previous packing options, including both sides.
-    const roomyGaps = opt.quick && !opt.tight_pack && !opt.compact
-      ? [channels, channels * 0.75].filter(gap => gap > Math.max(minGap, defaultGaps[0]) && partArea(gap) <= boardArea * 0.6) : [];
+    const channelLimit = Math.min(4.5, Math.max(1.5, 9 * (R.traceWidth + R.clearance)));
+    // A module occupies its own side. Budget routing space separately so the other side can use
+    // the area below its body. Through-hole and reverse-side pads are still tested during placement.
+    const sideBoxes = [[], []];
+    cs.forEach((c, i) => sideBoxes[isBottom(c) ? 1 : 0].push(footprints[i]));
+    if (sideBoxes[1].length < 2 && +R.layers !== 1) {
+      sideBoxes[1] = cs.flatMap((c, i) => !c.pcb?.locked && !c.pcbEdge && !edgeInfo(c) &&
+        !Lib.footprint(c.footprint).pads.some(p => p.drill) ? [footprints[i]] : []);
+    }
+    const roomyGaps = opt.quick && !opt.tight_pack && !opt.compact ? [1, 0.75].map(scale => sideBoxes.map(boxes => {
+      const spare = (Math.sqrt(boardArea) - Math.sqrt(partArea(boxes))) / Math.sqrt(boxes.length || 1);
+      const gap = Math.min(channelLimit, spare * 0.7) * scale;
+      return gap > Math.max(minGap, defaultGaps[0]) && partArea(boxes, gap) <= boardArea * 0.7 ? gap : Math.max(minGap, defaultGaps[0]);
+    })).filter(gaps => gaps.some(gap => gap > Math.max(minGap, defaultGaps[0]))) : [];
     // locked parts stay exactly where they are; everything else is arranged around them
     const lockedSet = new Set(cs.filter(c => c.pcb && c.pcb.locked));
     // a part quick place itself moved to the bottom (autoSide) starts on top again; one the user put there stays
@@ -1134,7 +1141,7 @@ const Pcb = (() => {
       let bestS = null, bestC = Infinity;
       for (let k = 0; k < tries; k++) {
         cs.forEach((c, i) => { c.pcb = JSON.parse(JSON.stringify(base[i])); });
-        const r = anneal({ time_s: opt.anneal_s ?? 2, seed: (opt.seed ?? 7) + k * 7919, fixed: fx, compact: opt.compact || 0, routingGap: roomyGaps[0] });
+        const r = anneal({ time_s: opt.anneal_s ?? 2, seed: (opt.seed ?? 7) + k * 7919, fixed: fx, compact: opt.compact || 0, routingGaps: roomyGaps[0] });
         const cst = r.cost_after ?? r.cost ?? 0;
         if (cst < bestC) { bestC = cst; bestS = cs.map(c => JSON.parse(JSON.stringify(c.pcb))); }
       }
@@ -1151,10 +1158,17 @@ const Pcb = (() => {
     let boxC = new Map(), thC = new Map(), padC = new Map();
     const oBox = (o, gap) => { const k = o.ref + '|' + gap; let v = boxC.get(k); if (!v) boxC.set(k, v = fpBox(o, gap / 2)); return v; };
     const oTh = (o, gap) => { const k = o.ref + '|' + gap; let v = thC.get(k); if (!v) thC.set(k, v = thBoxes(o, gap)); return v; };
-    const hit = (c, placed, gap, strict) => {
+    const hit = (c, placed, gap, strict, crossGap) => {
       const q = fpBox(c, gap / 2), sd = isBottom(c);
-      let th = null;
-      return placed.some(o => { const r = oBox(o, gap); if (!hb(q, r)) return false; if (strict || isBottom(o) === sd) return true; th = th || thBoxes(c, gap); return th.some(t => hb(t, r)) || oTh(o, gap).some(t => hb(t, q)); });
+      const cross = crossGap === gap ? q : fpBox(c, crossGap / 2);
+      let th;
+      return placed.some(o => {
+        if (strict || isBottom(o) === sd) return hb(q, oBox(o, gap));
+        const r = oBox(o, crossGap);
+        if (!hb(cross, r)) return false;
+        th ??= thBoxes(c, crossGap);
+        return th.some(t => hb(t, r)) || oTh(o, crossGap).some(t => hb(t, cross));
+      });
     };
     const padMargin = padCl(R);
     const smdBounds = c => padsOf(c).filter(p => !p.drill && !p.back).map(p => [
@@ -1179,10 +1193,12 @@ const Pcb = (() => {
     };
     const twoSided = +R.layers !== 1, canFlip = c => twoSided && !c.pcbEdge && !padsOf(c).some(p => p.drill);
     const setSide = (c, s, auto) => { if (s === 'B') c.pcb.side = 'B'; else delete c.pcb.side; if (auto && s === 'B') c.pcb.autoSide = true; else delete c.pcb.autoSide; };
-    const okAt = (c, placed, gap, inset, strict) => boxInside(c, poly, inset) && !hit(c, placed, gap, strict);
+    const okAt = (c, placed, gap, inset, strict, crossGap = gap) => boxInside(c, poly, inset) && !hit(c, placed, gap, strict, crossGap);
     const side0Of = new Map(cs.map(c => [c, isBottom(c) ? 'B' : 'F']));
-    function legalise(gap, flip, final, corner = false) {
+    function legalise(spacing, flip, final, corner = false) {
       const placed = [...lockedSet], failed = [];
+      const gapOf = c => typeof spacing === 'number' ? spacing : spacing[isBottom(c) ? 1 : 0];
+      const crossGap = typeof spacing === 'number' ? spacing : Math.max(minGap, defaultGaps[0]);
       boxC = new Map(); thC = new Map(); padC = new Map();
       for (const c of free) setSide(c, side0Of.get(c));
       // Check connectors at their final edge coordinates before accepting the placement.
@@ -1205,7 +1221,7 @@ const Pcb = (() => {
             for (let t = 0; !rectangular && t < 80 && !boxInside(c, poly, 0); t++) {
               c.pcb.x -= nx * 0.25; c.pcb.y -= ny * 0.25;
             }
-            if (okAt(c, placed, gap, 0, noStack)) { e.placedSide = side; done = true; break; }
+            if (okAt(c, placed, gapOf(c), 0, noStack, crossGap)) { e.placedSide = side; done = true; break; }
           }
           if (done) break;
         }
@@ -1236,7 +1252,8 @@ const Pcb = (() => {
       for (const c of rest) {
         const w = want.get(c), side0 = isBottom(c) ? 'B' : 'F';
         const find = (inset, strict) => {
-          const legal = q => okAt(q, placed, gap, inset, strict);
+          const gap = gapOf(c);
+          const legal = q => okAt(q, placed, gap, inset, strict, crossGap);
           const opposite = opt.quick && !strict ? placed.filter(o => isBottom(o) !== isBottom(c)) : [];
           if (opposite.length) {
             // The body of a part may cover the other side, but prefer clear space between its SMD pads.
@@ -1251,7 +1268,7 @@ const Pcb = (() => {
         // its own side first, then (SMD parts on a 2+ layer board) the other side: top and bottom are both used.
         // Free board area first (nothing on either side there); under a part of the other side only when the board is full
         const other = side0 === 'B' ? 'F' : 'B', flipOk = flip && canFlip(c);
-        if (opt.tight_pack || (opt.quick && flip && !noStack)) {
+        if (opt.tight_pack || (opt.quick && (flip || typeof spacing !== 'number') && !noStack)) {
           const inset = final ? R.edgeClearance : margin;
           let best = find(inset, noStack), side = side0;
           if (flipOk && (!best || !best.padsClear || best.r >= 1.5)) {
@@ -1321,7 +1338,7 @@ const Pcb = (() => {
     const still = overlaps(packed, 0, noStack).map(([a, b]) => `${a.ref}/${b.ref}`);
     const outside = packed.filter(c => !boxInside(c, poly, 0)).map(c => c.ref);
     const res = { board: boardBrief(), kept_board: true, placed: packed.length, fits: !failed.length && !still.length && !outside.length,
-      parts_area_pct: Math.round(partArea(0) / boardArea * 100),
+      parts_area_pct: Math.round(partArea(footprints) / boardArea * 100),
       on_edge: edgeParts.filter(e => e.c.pcb).map(e => `${e.c.ref}:${e.placedSide}${e.plug ? ' (opening outward)' : ''}`) };
     if (!res.fits) {
       res.unplaced = failed;
@@ -3728,7 +3745,7 @@ const Pcb = (() => {
       const pins = padsOf(c, idx).length;
       let o = orients.findIndex(q => q.rot === (c.pcb.rot || 0) && q.side === (c.pcb.side === 'B' ? 'B' : 'F')); if (o < 0) o = 0;
       const nb = new Set(orients[0].pads.map(q => q[0]));
-      const margin = Math.max(+R.partGap || 0, opt.routingGap || 0, Math.min(3, 0.4 + pitch * Math.sqrt(pins) * 0.6 + (boost[c.ref] || 0)));
+      const margin = Math.max(+R.partGap || 0, opt.routingGaps?.[isBottom(c) ? 1 : 0] || 0, Math.min(3, 0.4 + pitch * Math.sqrt(pins) * 0.6 + (boost[c.ref] || 0)));
       return { c, x: c.pcb.x, y: c.pcb.y, o, orients, fixed: fixed(c), nets: [...nb], margin, pins };
     });
     // net → [(part index, pad index list)] ; power nets weigh less (wide / poured), large nets get the usual HPWL correction
@@ -3752,7 +3769,7 @@ const Pcb = (() => {
       if (!rect && !o) for (const [x, y] of [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]) if (!inPoly(x, y, poly)) o += 1;
       return o;
     };
-    const ovI = (i, j) => { const w = Math.min(BX[i * 4 + 2], BX[j * 4 + 2]) - Math.max(BX[i * 4], BX[j * 4]); if (w <= 0) return 0; const h = Math.min(BX[i * 4 + 3], BX[j * 4 + 3]) - Math.max(BX[i * 4 + 1], BX[j * 4 + 1]); return h > 0 ? w * h : 0; };
+    const ovI = (i, j) => { if (opt.routingGaps && P[i].orients[P[i].o].side !== P[j].orients[P[j].o].side) return 0; const w = Math.min(BX[i * 4 + 2], BX[j * 4 + 2]) - Math.max(BX[i * 4], BX[j * 4]); if (w <= 0) return 0; const h = Math.min(BX[i * 4 + 3], BX[j * 4 + 3]) - Math.max(BX[i * 4 + 1], BX[j * 4 + 1]); return h > 0 ? w * h : 0; };
     let OV = 4; const OUT = 60;
     // big ICs are pulled to the board centre (the rest gathers around them)
     const cx0 = W / 2, cy0 = H / 2, CW = P.map(p => opt.center !== false && p.pins >= 8 ? 0.12 * Math.sqrt(p.pins / 8) : 0);

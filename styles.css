@@ -152,6 +152,10 @@ details.tool .dot { width: 7px; height: 7px; border-radius: 50%; background: var
 details.tool.ok .dot { background: var(--good); } details.tool.err .dot { background: var(--bad); } details.tool.run .dot { background: var(--warn); animation: pulse 1s infinite; }
 details.tool pre { margin: 0; padding: 6px 8px; border-top: 1px solid var(--line); max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11px; }
 details.tool pre.res { color: var(--tool-res); } details.tool.err pre.res { color: var(--bad); }
+details.tool .copy-row { display: flex; gap: 6px; padding: 4px 8px; border-top: 1px solid var(--line); }
+button.copy { font-size: 11px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+button.copy:hover { color: var(--fg, inherit); border-color: var(--muted); }
+#chat .md, #chat pre, #chat .bub, #chat .think-body { user-select: text; -webkit-user-select: text; }
 .exec { margin-top: 6px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: 0; font-weight: 600; }
 .msg.err { color: var(--bad); background: #ff5d5d14; border: 1px solid #ff5d5d55; padding: 8px; border-radius: 8px; }
 .typing { display: flex; gap: 4px; padding: 6px 0; } .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1s infinite; }

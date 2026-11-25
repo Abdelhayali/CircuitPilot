@@ -8,6 +8,9 @@ const Welcome = (() => {
 
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
+    { v: '2026.11.25', date: '2026-11-25', items: [
+      'Chat: copy any text — select it and right-click → Copy (or Ctrl+C), or use the ⧉ Copy buttons on answers and on tool calls (input and full result)',
+    ] },
     { v: '2026.11.24', date: '2026-11-24', items: [
       'Windows app → Connect AI → Run a model on this PC: pcbgo-v1, Qwen3.6-35B-A3B, Qwen3.8-27B, Gemma-4-31B, Inkling-2-Mini (Maya engine), any GGUF from Hugging Face (search in the app) or a .gguf on your PC (Browse); processor or graphics card(s) with GPU split, context, KV cache type, flash attention, threads, batch and any llama-server option; your own llama-server.exe (e.g. CUDA) or an external engine command',
       'Use your own API: a model server on any local port (e.g. http://127.0.0.1:8899) works in the Windows app without --allow-ports',

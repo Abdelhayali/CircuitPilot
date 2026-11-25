@@ -801,6 +801,18 @@ const App = (() => {
     'Create a non-inverting op-amp amplifier with gain 10 using a TL071 on ±12V',
     'NPN transistor switch driving a 12V relay coil from a 3.3V GPIO, with flyback diode',
   ];
+  // clipboard: the async API needs a secure context (https / localhost); a LAN http page falls back to execCommand
+  function copyText(t) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(t);
+    return new Promise((ok, no) => { const a = document.createElement('textarea'); a.value = t; a.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(a); a.select(); const r = document.execCommand('copy'); a.remove(); r ? ok() : no(); });
+  }
+  // text the user has selected outside the drawing views (chat, panels, logs) — the browser's copy / right-click menu handle it
+  function textSelected(target) {
+    const s = window.getSelection && window.getSelection();
+    if (!s || s.isCollapsed || !s.toString().trim()) return false;
+    const n = s.anchorNode && (s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement);
+    return !(n && n.closest('#views, svg, canvas')) && !(target && target.closest && target.closest('#views, svg, canvas'));
+  }
   function renderChat() {
     const H = AI.history, out = [];
     if (!H.length) {
@@ -821,11 +833,11 @@ const App = (() => {
         if (m.text) h += `<div class="md">${md(m.text)}</div>`;
         for (const t of m.toolCalls || []) {
           const r = results[t.id];
-          h += `<details class="tool ${r ? (r.error ? 'err' : 'ok') : 'run'}"><summary><span class="dot"></span>${esc(t.name)} <span class="muted">${esc(toolHint(t))}</span></summary><pre>${esc(JSON.stringify(t.input, null, 1))}</pre>${r ? `<pre class="res">${esc(r.content.slice(0, 4000))}</pre>` : ''}</details>` + (r && r.image ? `<img class="shot" alt="Screenshot the AI looked at" src="data:${r.image.mime};base64,${r.image.data}">` : '');
+          h += `<details class="tool ${r ? (r.error ? 'err' : 'ok') : 'run'}"><summary><span class="dot"></span>${esc(t.name)} <span class="muted">${esc(toolHint(t))}</span></summary><pre>${esc(JSON.stringify(t.input, null, 1))}</pre>${r ? `<pre class="res">${esc(r.content.slice(0, 4000))}</pre>` : ''}<div class="copy-row"><button class="copy" data-copy="in" data-i="${i}" data-id="${esc(t.id)}" title="Copy what the AI sent to the tool">⧉ Copy input</button>${r ? `<button class="copy" data-copy="out" data-i="${i}" data-id="${esc(t.id)}" title="Copy the full tool result">⧉ Copy result</button>` : ''}</div></details>` + (r && r.image ? `<img class="shot" alt="Screenshot the AI looked at" src="data:${r.image.mime};base64,${r.image.data}">` : '');
         }
         const next = H[i + 1];
         if (m.mode === 'plan' && !(m.toolCalls || []).length && (!next || next.role === 'user') && !running) h += '<button class="exec">▶ Execute plan</button>';
-        out.push(`<div class="msg ai">${h}<div class="meta">${esc(m.model || '')}</div></div>`);
+        out.push(`<div class="msg ai">${h}<div class="meta">${esc(m.model || '')}${m.text ? ` <button class="copy" data-copy="msg" data-i="${i}" title="Copy this answer">⧉ Copy</button>` : ''}</div></div>`);
       }
     });
     if (infoMsg) out.push(`<div class="msg info"><span class="spin"></span> ${esc(infoMsg)}</div>`);
@@ -1991,6 +2003,15 @@ const App = (() => {
     $('#modelSel').addEventListener('change', () => AI.probeContext().then(updateCtx));
     Model.subscribe(k => { if (k !== 'move') updateCtx(); });
     $('#chat').onclick = e => {
+      const cp = e.target.closest('button.copy');
+      if (cp) {
+        const H = AI.history, m = H[+cp.dataset.i]; let txt = '';
+        if (cp.dataset.copy === 'msg') txt = (m && m.text) || '';
+        else if (cp.dataset.copy === 'in') { const t = ((m && m.toolCalls) || []).find(c => c.id === cp.dataset.id); txt = t ? JSON.stringify(t.input, null, 2) : ''; }
+        else for (const x of H) if (x.role === 'tool') for (const r of x.results) if (r.id === cp.dataset.id) txt = r.content || '';
+        copyText(txt).then(() => { const o = cp.textContent; cp.textContent = '✓ Copied'; setTimeout(() => { cp.textContent = o; }, 1200); }, () => toast('Copy failed — select the text and press Ctrl+C'));
+        return;
+      }
       const s = e.target.closest('.sugg'); if (s) { send(s.textContent); return; }
       const im = e.target.closest('img.thumb'); if (im) { im.classList.toggle('big'); return; }
       if (e.target.closest('.exec')) { setMode('agent'); send('Execute the plan above step by step.'); return; }
@@ -2255,6 +2276,7 @@ const App = (() => {
       if (e.key === 'Escape') hideCtx();
       if ((view === 'sch' || view === 'pcb') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
         const k = e.key.toLowerCase(), a = { c: 'copy', x: 'cut', v: 'paste', d: 'dup', a: 'all' }[k];
+        if (a === 'copy' && textSelected()) return;   // copying selected chat / panel text, not parts
         if (a) { e.preventDefault(); act(a); return; }
       }
       if (e.key === 'f' || e.key === 'F') { view === 'sch' ? Sch.fit() : Pcb.fit(); return; }
@@ -2265,7 +2287,12 @@ const App = (() => {
     });
     // right-click belongs to CircuitPilot (pan, context menu, finish a track): the browser menu only appears in
     // text fields. On Windows the event fires on mouse-up, often over our own menu that just opened.
-    document.addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea, [contenteditable="true"], .allow-ctx')) e.preventDefault(); });
+    // Text outside the drawing views (chat, tool results, logs) keeps the browser menu, so Copy works there.
+    document.addEventListener('contextmenu', e => {
+      if (e.target.closest('input, textarea, [contenteditable="true"], .allow-ctx, #chat, pre, .la-log')) return;
+      if (textSelected(e.target)) return;
+      e.preventDefault();
+    });
   }
   return { orderWebsite, init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download, openProjectData, exportProject: () => exportAs('json') };
 })();

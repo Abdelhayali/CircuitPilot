@@ -8,9 +8,12 @@ const Welcome = (() => {
 
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
+    { v: '2026.11.26', date: '2026-11-26', items: [
+      'Quick place prefers open space between pads on the opposite side of the board, including under modules',
+    ] },
     { v: '2026.11.25', date: '2026-11-25', items: [
       'Add Components accepts an exact My Library key when the AI puts it in the footprint field',
-      'Quick place tries tighter two-sided layouts before making the smallest board increase it finds'
+      'Quick place tries tighter two-sided layouts before making the smallest board increase it finds',
       'Select an overlapping part by its active copper side, or Alt-click to pick the other side',
       'Drag a board outline edge to resize it with a snapped preview',
       'The AI can place, route and check a new PCB in one call, and skips repeating identical design snapshots',

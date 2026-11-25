@@ -127,7 +127,7 @@
         <div class="dd"><button id="btnPlace" title="Place the parts on the board">Auto-place ▾</button>
           <div class="ddm">
             <button data-place="ai" title="The AI copilot plans the floor plan (decoupling next to pins, crystal at the MCU, connectors on edges…), then it is polished and routed">✦ AI place (copilot plans the layout)</button>
-            <button data-place="quick" title="Uses both sides where possible and enlarges the board if the parts need more room">Quick place (algorithm)</button>
+            <button data-place="quick" title="Uses both sides, prefers keeping parts away from opposite-side pads, and grows the board only if needed">Quick place (algorithm)</button>
           </div></div>
         <button id="btnRoute" title="Autoroute with rip-up and reroute (effort: Rules → Autorouter effort)">Route</button>
         <button id="btnUnroute">Clear routes</button>
@@ -608,7 +608,7 @@
 <script src="js/model.js?v=202611252350"></script>
 <script src="js/schematic.js?v=202611170600"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611252352"></script>
+<script src="js/pcb.js?v=202611260001"></script>
 <script src="js/cnc.js?v=202611071200"></script>
 <script src="js/pcbview.js?v=202611252352"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
@@ -635,8 +635,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611252353"></script>
-<script src="js/app.js?v=202611252352"></script>
+<script src="js/welcome.js?v=202611260001"></script>
+<script src="js/app.js?v=202611260001"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

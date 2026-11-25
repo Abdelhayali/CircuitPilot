@@ -1133,7 +1133,7 @@ const Pcb = (() => {
     const hb = (a, b) => Math.min(a[2], b[2]) - Math.max(a[0], b[0]) > 1e-6 && Math.min(a[3], b[3]) - Math.max(a[1], b[1]) > 1e-6;
     // strict: no overlap with any part on either side (a part under another looks stacked and is hard to assemble / probe)
     // placed parts do not move during a legalise pass: their boxes are cached (keyed by part and gap)
-    let boxC = new Map(), thC = new Map();
+    let boxC = new Map(), thC = new Map(), padC = new Map();
     const oBox = (o, gap) => { const k = o.ref + '|' + gap; let v = boxC.get(k); if (!v) boxC.set(k, v = fpBox(o, gap / 2)); return v; };
     const oTh = (o, gap) => { const k = o.ref + '|' + gap; let v = thC.get(k); if (!v) thC.set(k, v = thBoxes(o, gap)); return v; };
     const hit = (c, placed, gap, strict) => {
@@ -1141,13 +1141,34 @@ const Pcb = (() => {
       let th = null;
       return placed.some(o => { const r = oBox(o, gap); if (!hb(q, r)) return false; if (strict || isBottom(o) === sd) return true; th = th || thBoxes(c, gap); return th.some(t => hb(t, r)) || oTh(o, gap).some(t => hb(t, q)); });
     };
+    const padMargin = padCl(R);
+    const smdBounds = c => padsOf(c).filter(p => !p.drill && !p.back).map(p => [
+      p.x - p.w / 2 - padMargin, p.y - p.h / 2 - padMargin,
+      p.x + p.w / 2 + padMargin, p.y + p.h / 2 + padMargin
+    ]);
+    const clearOfOppositePads = (c, opposite) => {
+      const body = fpBox(c), expanded = fpBox(c, padMargin);
+      const area = (body[2] - body[0]) * (body[3] - body[1]);
+      let ownPads;
+      return opposite.every(o => {
+        const other = oBox(o, 0);
+        if (!hb(expanded, other)) return true;
+        if (area > (other[2] - other[0]) * (other[3] - other[1])) {
+          ownPads ??= smdBounds(c);
+          return !ownPads.some(p => hb(p, other));
+        }
+        let otherPads = padC.get(o);
+        if (!otherPads) padC.set(o, otherPads = smdBounds(o));
+        return !otherPads.some(p => hb(p, body));
+      });
+    };
     const twoSided = +R.layers !== 1, canFlip = c => twoSided && !c.pcbEdge && !padsOf(c).some(p => p.drill);
     const setSide = (c, s, auto) => { if (s === 'B') c.pcb.side = 'B'; else delete c.pcb.side; if (auto && s === 'B') c.pcb.autoSide = true; else delete c.pcb.autoSide; };
     const okAt = (c, placed, gap, inset, strict) => boxInside(c, poly, inset) && !hit(c, placed, gap, strict);
     const side0Of = new Map(cs.map(c => [c, isBottom(c) ? 'B' : 'F']));
     function legalise(gap, flip, final, corner = false) {
       const placed = [...lockedSet], failed = [];
-      boxC = new Map(); thC = new Map();
+      boxC = new Map(); thC = new Map(); padC = new Map();
       for (const c of free) setSide(c, side0Of.get(c));
       // Check connectors at their final edge coordinates before accepting the placement.
       for (const e of edgeParts) {
@@ -1199,17 +1220,32 @@ const Pcb = (() => {
       };
       for (const c of rest) {
         const w = want.get(c), side0 = isBottom(c) ? 'B' : 'F';
+        const find = (inset, strict) => {
+          const legal = q => okAt(q, placed, gap, inset, strict);
+          const opposite = opt.quick && !strict ? placed.filter(o => isBottom(o) !== isBottom(c)) : [];
+          if (opposite.length) {
+            // The body of a part may cover the other side, but prefer clear space between its SMD pads.
+            const clear = search(c, w, q => legal(q) && clearOfOppositePads(q, opposite));
+            if (clear) return { ...clear, padsClear: true };
+            // Falling back remains legal and is preferable to growing the board.
+            return search(c, w, legal);
+          }
+          const best = search(c, w, legal);
+          return best && { ...best, padsClear: true };
+        };
         // its own side first, then (SMD parts on a 2+ layer board) the other side: top and bottom are both used.
         // Free board area first (nothing on either side there); under a part of the other side only when the board is full
         const other = side0 === 'B' ? 'F' : 'B', flipOk = flip && canFlip(c);
         if (opt.tight_pack || (opt.quick && flip && !noStack)) {
           const inset = final ? R.edgeClearance : margin;
-          const find = () => search(c, w, q => okAt(q, placed, gap, inset, noStack));
-          let best = find(), side = side0;
-          if (flipOk && (!best || best.r >= 1.5)) {
+          let best = find(inset, noStack), side = side0;
+          if (flipOk && (!best || !best.padsClear || best.r >= 1.5)) {
             setSide(c, other, true);
-            const across = find();
-            if (across && (!best || across.r + 1.5 < best.r)) { best = across; side = other; }
+            const across = find(inset, noStack);
+            if (across && (!best || (across.padsClear && !best.padsClear) ||
+                (!!across.padsClear === !!best.padsClear && across.r + 1.5 < best.r))) {
+              best = across; side = other;
+            }
           }
           if (!best) {
             failed.push(c.ref);
@@ -1221,16 +1257,16 @@ const Pcb = (() => {
           placed.push(c);
           continue;
         }
-        let best = search(c, w, q => okAt(q, placed, gap, margin, true)), side = side0;
-        if (!best && flipOk) { side = other; setSide(c, side, true); best = search(c, w, q => okAt(q, placed, gap, margin, true)); }
-        if (!best && !noStack) { side = side0; setSide(c, side0); best = search(c, w, q => okAt(q, placed, gap, margin)); }
-        if (!best && flipOk && !noStack) { side = other; setSide(c, side, true); best = search(c, w, q => okAt(q, placed, gap, margin)); }
+        let best = find(margin, true), side = side0;
+        if (!best && flipOk) { side = other; setSide(c, side, true); best = find(margin, true); }
+        if (!best && !noStack) { side = side0; setSide(c, side0); best = find(margin, false); }
+        if (!best && flipOk && !noStack) { side = other; setSide(c, side, true); best = find(margin, false); }
         if (!best && final) {
           side = side0; setSide(c, side0);
-          best = search(c, w, q => okAt(q, placed, gap, R.edgeClearance, noStack));
+          best = find(R.edgeClearance, noStack);
           if (!best && flipOk) {
             side = other; setSide(c, side, true);
-            best = search(c, w, q => okAt(q, placed, gap, R.edgeClearance, noStack));
+            best = find(R.edgeClearance, noStack);
           }
         }
         if (!best) {

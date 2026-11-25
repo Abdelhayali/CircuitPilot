@@ -1005,7 +1005,8 @@ const Pcb = (() => {
     const margin = Math.max(R.edgeClearance + 0.4, 0.8), cx0 = W / 2, cy0 = H / 2;
     // locked parts stay exactly where they are; everything else is arranged around them
     const lockedSet = new Set(cs.filter(c => c.pcb && c.pcb.locked));
-    for (const c of cs) { if (lockedSet.has(c)) continue; const side = c.pcb && c.pcb.side; c.pcb = { x: 0, y: 0, rot: c.rot || 0 }; if (side === 'B') c.pcb.side = 'B'; }
+    // a part quick place itself moved to the bottom (autoSide) starts on top again; one the user put there stays
+    for (const c of cs) { if (lockedSet.has(c)) continue; const side = c.pcb && !c.pcb.autoSide && c.pcb.side; c.pcb = { x: 0, y: 0, rot: c.rot || 0 }; if (side === 'B') c.pcb.side = 'B'; }
     // 1) keep the schematic arrangement, scaled to fit the board
     const xs = cs.map(c => c.x), ys = cs.map(c => c.y), sxm = (Math.min(...xs) + Math.max(...xs)) / 2, sym = (Math.min(...ys) + Math.max(...ys)) / 2;
     const spanX = Math.max(1, Math.max(...xs) - Math.min(...xs)), spanY = Math.max(1, Math.max(...ys) - Math.min(...ys));
@@ -1043,10 +1044,19 @@ const Pcb = (() => {
     //    to where the schematic wants them — spiral search, inside the outline, no overlaps.
     const want = new Map(cs.map(c => [c, { x: c.pcb.x, y: c.pcb.y, rot: c.pcb.rot }]));
     const areaOf = c => { const q = fpBox(c); return (q[2] - q[0]) * (q[3] - q[1]); };
-    const hit = (c, placed, gap) => { const q = fpBox(c, gap / 2); return placed.some(o => { const r = fpBox(o, gap / 2); return q[0] < r[2] && r[0] < q[2] && q[1] < r[3] && r[1] < q[3]; }); };
+    // parts on the same side may not overlap; SMD parts on opposite sides may, except over through-hole pads
+    const hb = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    const hit = (c, placed, gap) => {
+      const q = fpBox(c, gap / 2), sd = isBottom(c), th = thBoxes(c, gap);
+      return placed.some(o => { const r = fpBox(o, gap / 2); if (!hb(q, r)) return false; if (isBottom(o) === sd) return true; return th.some(t => hb(t, r)) || thBoxes(o, gap).some(t => hb(t, q)); });
+    };
+    const twoSided = +R.layers !== 1, canFlip = c => twoSided && !c.pcbEdge && !padsOf(c).some(p => p.drill);
+    const setSide = (c, s, auto) => { if (s === 'B') c.pcb.side = 'B'; else delete c.pcb.side; if (auto && s === 'B') c.pcb.autoSide = true; else delete c.pcb.autoSide; };
     const okAt = (c, placed, gap, inset) => boxInside(c, poly, inset) && !hit(c, placed, gap);
-    function legalise(gap) {
+    const side0Of = new Map(cs.map(c => [c, isBottom(c) ? 'B' : 'F']));
+    function legalise(gap, flip) {
       const placed = [...lockedSet], failed = [];
+      for (const c of free) setSide(c, side0Of.get(c));
       // connectors: keep their edge, slide along it to the nearest free spot
       for (const e of edgeParts) {
         const c = e.c, w = want.get(c), base = { x: c.pcb.x, y: c.pcb.y }, along = e.side === 'left' || e.side === 'right' ? [0, 1] : [1, 0];
@@ -1061,29 +1071,44 @@ const Pcb = (() => {
       // everything else: biggest first, nearest free position (both orientations), spiral outward
       const rest = free.slice().sort((p, q) => areaOf(q) - areaOf(p));
       const step = 0.5, maxR = Math.hypot(W, H);
-      for (const c of rest) {
-        const w = want.get(c); let best = null;
+      // nearest spot to where the part wants to be, on one side, both orientations; ok(c) decides what is allowed
+      const search = (c, w, ok) => {
+        let best = null;
         for (const rot of [w.rot, (w.rot + 90) % 360]) {
-          c.pcb.rot = rot;
-          for (let r = 0; r <= maxR && !best; r += step) {
+          c.pcb.rot = rot; let found = null;
+          for (let r = 0; r <= maxR && !found; r += step) {
             const n = r === 0 ? 1 : Math.max(8, Math.ceil(2 * Math.PI * r / step));
             for (let i = 0; i < n; i++) {
               const t = i / n * 2 * Math.PI;
               c.pcb.x = w.x + r * Math.cos(t); c.pcb.y = w.y + r * Math.sin(t);
-              if (okAt(c, placed, gap, margin)) { best = { x: c.pcb.x, y: c.pcb.y, rot, r }; break; }
+              if (ok(c)) { found = { x: c.pcb.x, y: c.pcb.y, rot, r }; break; }
             }
           }
+          if (found && (!best || found.r < best.r - 1)) best = found;
           if (best && rot === w.rot && best.r < 2) break;   // close to its spot already: keep its orientation
-          if (best && rot !== w.rot) break;
         }
+        return best;
+      };
+      for (const c of rest) {
+        const w = want.get(c), side0 = isBottom(c) ? 'B' : 'F';
+        // its own side first, then (SMD parts on a 2+ layer board) the other side: top and bottom are both used
+        let best = search(c, w, q => okAt(q, placed, gap, margin)), side = side0;
+        if (!best && flip && canFlip(c)) { side = side0 === 'B' ? 'F' : 'B'; setSide(c, side, true); best = search(c, w, q => okAt(q, placed, gap, margin)); }
+        if (!best) {   // no free spot: never outside the outline — the closest spot inside, reported as overlapping
+          setSide(c, side0); side = side0;
+          best = search(c, w, q => boxInside(q, poly, margin)) || search(c, { x: W / 2, y: H / 2, rot: w.rot }, q => boxInside(q, poly, -0.05));
+          failed.push(c.ref);
+        }
+        setSide(c, side, side !== side0);
         if (best) { c.pcb.x = best.x; c.pcb.y = best.y; c.pcb.rot = best.rot; }
-        else { c.pcb.x = w.x; c.pcb.y = w.y; c.pcb.rot = w.rot; failed.push(c.ref); }
+        else { c.pcb.x = W / 2; c.pcb.y = H / 2; c.pcb.rot = w.rot; }
         placed.push(c);
       }
       return failed;
     }
     let failed = [];
-    for (const gap of [1.0, 0.6, 0.3]) { failed = legalise(gap); if (!failed.length) break; }
+    // top side only at every gap first (one-sided assembly is cheaper); then top and bottom
+    for (const flip of [false, true]) { for (const gap of [1.0, 0.6, 0.3]) { failed = legalise(gap, flip); if (!failed.length) break; } if (!failed.length || !twoSided) break; }
     // put every edge connector back flush with its edge after the search
     for (const e of edgeParts) {
       const q = fpBox(e.c), ins = edgeInset(e.c, e.side, e.plug);
@@ -1100,7 +1125,8 @@ const Pcb = (() => {
     if (holeD) addMountingHoles({ diameter: holeD });
     const still = overlaps(cs, -0.1).map(([a, b]) => `${a.ref}/${b.ref}`), outside = cs.filter(c => !boxInside(c, poly, -0.1)).map(c => c.ref);
     const res = { board: boardBrief(), kept_board: true, placed: cs.length, fits: !still.length && !outside.length, parts_area_pct: Math.round(area / boardArea * 100), on_edge: edgeParts.map(e => `${e.c.ref}:${e.side}${e.plug ? ' (opening outward)' : ''}`) };
-    if (!res.fits) { res.overlapping = still; res.outside = outside; res.hint = `The parts need about ${Math.round(area / boardArea * 100)}% of the board area — enlarge the board (Board W×H, or clear it for auto-size), move parts to the bottom side, or use smaller packages.`; }
+    if (!res.fits) { res.overlapping = still; res.outside = outside; res.hint = `The parts need about ${Math.round(area / boardArea * 100)}% of the board area${twoSided ? ' (top and bottom are both used already)' : ''} — enlarge the board (Board W×H, or clear it for auto-size) or use smaller packages. Nothing was left outside the outline: the parts that did not fit overlap others (${[...new Set([...still.flatMap(x => x.split('/')), ...outside])].slice(0, 12).join(', ')}).`; }
+    const nb = cs.filter(c => c.pcb.autoSide).map(c => c.ref); if (nb.length) res.moved_to_bottom = nb;
     return res;
   }
   function boxInside(c, poly, inset) {
@@ -1330,8 +1356,13 @@ const Pcb = (() => {
   }
   const legalCheck = refs => { const r = checkPlacement(refs); return r.length ? r.map(q => q.msg) : undefined; };
   function overlaps(cs, gap) {
-    const out = [], B = cs.map(c => fpBox(c, gap / 2));
-    for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) { const a = B[i], b = B[j]; if (a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]) out.push([cs[i], cs[j]]); }
+    // parts on opposite sides only clash over through-hole pads
+    const out = [], B = cs.map(c => fpBox(c, gap / 2)), hb = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
+      const a = B[i], b = B[j]; if (!hb(a, b)) continue;
+      if (isBottom(cs[i]) !== isBottom(cs[j]) && !thBoxes(cs[i], gap).some(t => hb(t, b)) && !thBoxes(cs[j], gap).some(t => hb(t, a))) continue;
+      out.push([cs[i], cs[j]]);
+    }
     return out;
   }
 

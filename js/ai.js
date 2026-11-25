@@ -620,9 +620,13 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         history.push({ role: 'tool', results }); persist();
         if (controller.signal.aborted) break;
         if (stuck) {
-          const m = { role: 'assistant', text: `⚠ Stopped: the AI repeated the same tool call 4 times without progress (${stuck}). Try saying it differently, add that part yourself (Parts panel), or use a larger model for this step.`, toolCalls: [], model: 'CircuitPilot', mode };
+          const m = { role: 'assistant', text: `⚠ Stopped: the AI repeated the same tool call 4 times without progress (${stuck}). Press **▶ Continue** (or type "continue") to let it go on with another approach, say it differently, add that part yourself (Parts panel), or use a larger model for this step.`, toolCalls: [], model: 'CircuitPilot', mode, canContinue: 'stuck' };
           history.push(m); persist(); hooks.onAssistant(m, null);
           break;
+        }
+        if (step === 39) {
+          const m = { role: 'assistant', text: '⏸ Paused after 40 steps. Press **▶ Continue** (or type "continue") to let the AI go on.', toolCalls: [], model: 'CircuitPilot', mode, canContinue: 'steps' };
+          history.push(m); persist(); hooks.onAssistant(m, null);
         }
       }
     } catch (e) {

@@ -156,7 +156,7 @@ details.tool .copy-row { display: flex; gap: 6px; padding: 4px 8px; border-top: 
 button.copy { font-size: 11px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
 button.copy:hover { color: var(--fg, inherit); border-color: var(--muted); }
 #chat .md, #chat pre, #chat .bub, #chat .think-body { user-select: text; -webkit-user-select: text; }
-.exec { margin-top: 6px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: 0; font-weight: 600; }
+.exec, .cont { margin-top: 6px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: 0; font-weight: 600; }
 .msg.err { color: var(--bad); background: #ff5d5d14; border: 1px solid #ff5d5d55; padding: 8px; border-radius: 8px; }
 .typing { display: flex; gap: 4px; padding: 6px 0; } .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1s infinite; }
 .typing span:nth-child(2) { animation-delay: .2s; } .typing span:nth-child(3) { animation-delay: .4s; }

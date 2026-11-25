@@ -449,7 +449,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611231400');
+      worker = new Worker('js/route-worker.js?v=202611251510');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;
@@ -837,13 +837,14 @@ const App = (() => {
         }
         const next = H[i + 1];
         if (m.mode === 'plan' && !(m.toolCalls || []).length && (!next || next.role === 'user') && !running) h += '<button class="exec">▶ Execute plan</button>';
+        if (m.canContinue && !next && !running) h += `<button class="cont" data-why="${esc(m.canContinue)}" title="Let the AI go on from here">▶ Continue</button>`;
         out.push(`<div class="msg ai">${h}<div class="meta">${esc(m.model || '')}${m.text ? ` <button class="copy" data-copy="msg" data-i="${i}" title="Copy this answer">⧉ Copy</button>` : ''}</div></div>`);
       }
     });
     if (infoMsg) out.push(`<div class="msg info"><span class="spin"></span> ${esc(infoMsg)}</div>`);
     else if (running) out.push(`<div class="msg ai live" id="liveMsg">${liveHtml()}</div>`);
     for (const q of (running && AI.queued) || []) out.push(`<div class="msg user queued"><div class="bub">${esc(q).replace(/\n/g, '<br>')}</div><div class="meta"><span class="muted small">⏳ waiting — the AI reads this before its next step</span></div></div>`);
-    if (lastError) out.push(`<div class="msg err">${esc(lastError)}</div>`);
+    if (lastError) out.push(`<div class="msg err">${esc(lastError)}${H.length && !running ? ' <button class="cont" data-why="error" title="Send it again from where it stopped">▶ Continue</button>' : ''}</div>`);
     const chat = $('#chat'); chat.innerHTML = out.join(''); chat.scrollTop = chat.scrollHeight;
     updateCtx();
   }
@@ -2015,6 +2016,8 @@ const App = (() => {
       const s = e.target.closest('.sugg'); if (s) { send(s.textContent); return; }
       const im = e.target.closest('img.thumb'); if (im) { im.classList.toggle('big'); return; }
       if (e.target.closest('.exec')) { setMode('agent'); send('Execute the plan above step by step.'); return; }
+      const ct = e.target.closest('.cont');
+      if (ct) { send(ct.dataset.why === 'stuck' ? 'Continue the task. Do not repeat the call that kept failing: try a different approach (other arguments, another tool), or tell me what is missing.' : 'Continue.'); return; }
       const r = e.target.closest('.restore');
       if (r) { const m = AI.history[+r.dataset.i]; if (m && m.checkpoint && confirm('Restore the design to the checkpoint taken before this message? (Undo is available.)')) { Model.load(m.checkpoint, true); Sch.fit(); toast('Checkpoint restored'); } }
     };

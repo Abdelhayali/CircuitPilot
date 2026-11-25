@@ -9,6 +9,9 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      'Quick place keeps every part inside the board outline: when the top side is full, SMD parts go to the bottom (through-hole parts and connectors stay on top); a board too small for all parts gets overlaps inside the outline (listed), never parts outside it. A new quick place on a bigger board brings them back to the top',
+      'When the AI stops (it repeated a call 4 times, 40 steps, an error or Stop): ▶ Continue button — or type "continue"',
+      'Follow-up questions: the start of the prompt stays the same for the whole chat, so llama.cpp / Maya re-read only the new question (measured with Inkling-2-Mini on Maya: 2 s instead of 48 s)',
       'Chat: copy any text — select it and right-click → Copy (or Ctrl+C), or use the ⧉ Copy buttons on answers and on tool calls (input and full result)',
     ] },
     { v: '2026.11.24', date: '2026-11-24', items: [

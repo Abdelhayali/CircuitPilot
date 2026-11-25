@@ -1046,16 +1046,42 @@ const Pcb = (() => {
     const areaOf = c => { const q = fpBox(c); return (q[2] - q[0]) * (q[3] - q[1]); };
     // parts on the same side may not overlap; SMD parts on opposite sides may, except over through-hole pads
     const hb = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
-    const hit = (c, placed, gap) => {
-      const q = fpBox(c, gap / 2), sd = isBottom(c), th = thBoxes(c, gap);
-      return placed.some(o => { const r = fpBox(o, gap / 2); if (!hb(q, r)) return false; if (isBottom(o) === sd) return true; return th.some(t => hb(t, r)) || thBoxes(o, gap).some(t => hb(t, q)); });
+    // strict: no overlap with any part on either side (a part under another looks stacked and is hard to assemble / probe)
+    // placed parts do not move during a legalise pass: their boxes are cached (keyed by part and gap)
+    let boxC = new Map(), thC = new Map();
+    const oBox = (o, gap) => { const k = o.ref + '|' + gap; let v = boxC.get(k); if (!v) boxC.set(k, v = fpBox(o, gap / 2)); return v; };
+    const oTh = (o, gap) => { const k = o.ref + '|' + gap; let v = thC.get(k); if (!v) thC.set(k, v = thBoxes(o, gap)); return v; };
+    const hit = (c, placed, gap, strict) => {
+      const q = fpBox(c, gap / 2), sd = isBottom(c);
+      let th = null;
+      return placed.some(o => { const r = oBox(o, gap); if (!hb(q, r)) return false; if (strict || isBottom(o) === sd) return true; th = th || thBoxes(c, gap); return th.some(t => hb(t, r)) || oTh(o, gap).some(t => hb(t, q)); });
     };
     const twoSided = +R.layers !== 1, canFlip = c => twoSided && !c.pcbEdge && !padsOf(c).some(p => p.drill);
     const setSide = (c, s, auto) => { if (s === 'B') c.pcb.side = 'B'; else delete c.pcb.side; if (auto && s === 'B') c.pcb.autoSide = true; else delete c.pcb.autoSide; };
-    const okAt = (c, placed, gap, inset) => boxInside(c, poly, inset) && !hit(c, placed, gap);
+    const okAt = (c, placed, gap, inset, strict) => boxInside(c, poly, inset) && !hit(c, placed, gap, strict);
+    // no free spot at all: the spot inside the outline where it overlaps the least (then: closest to where it wants to be)
+    const leastOverlap = (c, w, placed, gap) => {
+      let best = null; const sd = isBottom(c), st = Math.max(0.25, Math.min(1, Math.sqrt(W * H) / 60));
+      for (const rot of [w.rot, (w.rot + 90) % 360]) {
+        c.pcb.rot = rot;
+        for (let y = 0; y <= H; y += st) for (let x = 0; x <= W; x += st) {
+          c.pcb.x = x; c.pcb.y = y;
+          if (!boxInside(c, poly, margin) && !boxInside(c, poly, -0.05)) continue;
+          const q = fpBox(c, gap / 2); let ov = 0;
+          for (const o of placed) {
+            const r = oBox(o, gap), dx = Math.min(q[2], r[2]) - Math.max(q[0], r[0]), dy = Math.min(q[3], r[3]) - Math.max(q[1], r[1]);
+            if (dx > 0 && dy > 0) ov += dx * dy * (isBottom(o) === sd ? 1 : 0.2);
+          }
+          const sc = ov * 1000 + Math.hypot(x - w.x, y - w.y);
+          if (!best || sc < best.sc) best = { x, y, rot, sc, ov };
+        }
+      }
+      return best;
+    };
     const side0Of = new Map(cs.map(c => [c, isBottom(c) ? 'B' : 'F']));
-    function legalise(gap, flip) {
+    function legalise(gap, flip, final) {
       const placed = [...lockedSet], failed = [];
+      boxC = new Map(); thC = new Map();
       for (const c of free) setSide(c, side0Of.get(c));
       // connectors: keep their edge, slide along it to the nearest free spot
       for (const e of edgeParts) {
@@ -1091,13 +1117,20 @@ const Pcb = (() => {
       };
       for (const c of rest) {
         const w = want.get(c), side0 = isBottom(c) ? 'B' : 'F';
-        // its own side first, then (SMD parts on a 2+ layer board) the other side: top and bottom are both used
-        let best = search(c, w, q => okAt(q, placed, gap, margin)), side = side0;
-        if (!best && flip && canFlip(c)) { side = side0 === 'B' ? 'F' : 'B'; setSide(c, side, true); best = search(c, w, q => okAt(q, placed, gap, margin)); }
-        if (!best) {   // no free spot: never outside the outline — the closest spot inside, reported as overlapping
+        // its own side first, then (SMD parts on a 2+ layer board) the other side: top and bottom are both used.
+        // Free board area first (nothing on either side there); under a part of the other side only when the board is full
+        const other = side0 === 'B' ? 'F' : 'B', flipOk = flip && canFlip(c);
+        let best = search(c, w, q => okAt(q, placed, gap, margin, true)), side = side0;
+        if (!best && flipOk) { side = other; setSide(c, side, true); best = search(c, w, q => okAt(q, placed, gap, margin, true)); }
+        if (!best) { side = side0; setSide(c, side0); best = search(c, w, q => okAt(q, placed, gap, margin)); }
+        if (!best && flipOk) { side = other; setSide(c, side, true); best = search(c, w, q => okAt(q, placed, gap, margin)); }
+        if (!best && !final) return [c.ref];   // this pass is retried with a smaller gap / both sides: stop early
+        if (!best) {   // no free spot: never outside the outline — where it overlaps the least, reported as overlapping
           setSide(c, side0); side = side0;
-          best = search(c, w, q => boxInside(q, poly, margin)) || search(c, { x: W / 2, y: H / 2, rot: w.rot }, q => boxInside(q, poly, -0.05));
-          failed.push(c.ref);
+          let lo = leastOverlap(c, w, placed, gap);
+          if (flipOk) { setSide(c, other, true); const lb = leastOverlap(c, w, placed, gap); if (lb && (!lo || lb.sc < lo.sc)) { lo = lb; side = other; } }
+          best = lo;
+          if (!lo || lo.ov > 1e-6) failed.push(c.ref);   // a free spot close to the edge is fine
         }
         setSide(c, side, side !== side0);
         if (best) { c.pcb.x = best.x; c.pcb.y = best.y; c.pcb.rot = best.rot; }
@@ -1108,7 +1141,8 @@ const Pcb = (() => {
     }
     let failed = [];
     // top side only at every gap first (one-sided assembly is cheaper); then top and bottom
-    for (const flip of [false, true]) { for (const gap of [1.0, 0.6, 0.3]) { failed = legalise(gap, flip); if (!failed.length) break; } if (!failed.length || !twoSided) break; }
+    const passes = []; for (const flip of twoSided ? [false, true] : [false]) for (const gap of [1.0, 0.6, 0.3, 0.15]) passes.push([gap, flip]);
+    for (let i = 0; i < passes.length; i++) { failed = legalise(passes[i][0], passes[i][1], i === passes.length - 1); if (!failed.length) break; }
     // put every edge connector back flush with its edge after the search
     for (const e of edgeParts) {
       const q = fpBox(e.c), ins = edgeInset(e.c, e.side, e.plug);

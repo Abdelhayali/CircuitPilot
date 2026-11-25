@@ -9,6 +9,10 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      '⬆ Update button in the top bar (Windows app): checks for a new version; it lights up when one is out',
+      'Quick place keeps parts apart: free board area first (nothing on either side), bottom parts go under top parts only when the board is full, and a part that does not fit goes where it overlaps the least; about 3× faster on full boards',
+      '✨ Optimize: clicking the button runs it (the menu has the variants); says so when every net already routes',
+      'The AI updates an existing PCB from the schematic (update_pcb_from_schematic, also for local / compact models) instead of making a new board; generate_pcb only starts over with start_over',
       'pcbgo.site: Run a model on this PC — the website uses CircuitPilot’s engine on your PC (start CircuitPilot.exe once): download models, choose their folder, graphics cards and llama.cpp settings from the website, and the copilot there runs on your own computer',
       'Changing the board width / height keeps your tracks and vias (and the outline shape); what no longer fits is listed instead of deleted',
       'Closing the CircuitPilot window ends the app: nothing stays in the background, and the local model server it started stops too (even if the app is killed)',

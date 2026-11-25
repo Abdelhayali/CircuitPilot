@@ -57,8 +57,23 @@
     clearTimeout(poll);
     if (cur && cur.download && cur.download.active) poll = setTimeout(async () => { try { cur = await call('check'); show(cur, true); } catch (e) {} watch(); }, 1000);
   }
+  // the ⬆ Update button in the top bar (Windows app): always there, highlighted when a new version is out
+  function button(s) {
+    const b = document.getElementById('btnUpdate'); if (!b) return;
+    if (!s || !s.current) return;
+    b.classList.remove('hidden');
+    b.classList.toggle('primary', !!s.newer);
+    b.title = s.newer ? `CircuitPilot ${s.latest.tag} is available (you have ${s.current}) — click to update` : `CircuitPilot ${s.current} — click to check for a new version`;
+    b.querySelector('.lbl').textContent = s.newer ? ' Update available' : ' Update';
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('#btnUpdate'); if (!b) return;
+    b.disabled = true; b.querySelector('.lbl').textContent = ' Checking…';
+    check(true).finally(() => { b.disabled = false; button(cur); });
+  });
   async function check(force) {
-    try { cur = await call('check', { force }); } catch (e) { return; }
+    try { cur = await call('check', { force }); } catch (e) { if (force) alert('Update check failed: ' + e.message); return; }
+    button(cur);
     if (cur.newer || (cur.download && (cur.download.active || cur.download.ready))) { show(cur, force); watch(); }
     else if (force) alert(cur.current ? `CircuitPilot ${cur.current} is the latest version.` : 'This copy of CircuitPilot has no version number (not the Windows app).');
   }

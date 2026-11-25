@@ -449,7 +449,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611251510');
+      worker = new Worker('js/route-worker.js?v=202611251800');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;
@@ -547,7 +547,7 @@ const App = (() => {
       const p = r.optimized; Pcb.fit();
       if (!p) { showDrc(); return; }   // stopped: best kept
       const size = `${p.board.w}×${p.board.h}`;
-      toast(p.unrouted.length ? `Optimized (${p.iterations} rounds) — ${p.routed}/${p.total} routed, still unrouted: ${p.unrouted.join(', ')}. Try a GND pour, a bigger board or AI place.` : `✓ All ${p.total} nets routed${size !== before ? ` · board ${before} → ${size} mm` : ''} (${p.seconds}s)`, 9000);
+      toast(!p.unrouted.length && !p.iterations && size === before ? `✓ Every net already routes with this placement (${p.total} nets, ${p.seconds}s) — nothing needed moving. For a smaller board: ✨ Optimize ▾ → …make the board as small as possible.` : p.unrouted.length ? `Optimized (${p.iterations} rounds) — ${p.routed}/${p.total} routed, still unrouted: ${p.unrouted.join(', ')}. Try a GND pour, a bigger board or AI place.` : `✓ All ${p.total} nets routed${size !== before ? ` · board ${before} → ${size} mm` : ''} (${p.seconds}s)`, 9000);
       showDrc(); return p;
     } catch (e) { toast(e.message); }
   }
@@ -1777,7 +1777,8 @@ const App = (() => {
     $('#btnRules').onclick = openRules; $('#btnDrc').onclick = () => showDrc(true);
     // a DRC marker clicked on the board: that problem in the DRC list
     Pcb.ui.onDrc = i => { const m = (Pcb.ui.drc.violations[i] || {}).msg; if (!$('#props [data-v]')) { const d = showDrc(); i = d.violations.findIndex(v => v.msg === m); } gotoDrc(i); };
-    $('#btnOptimize').onclick = () => {};
+    // a click runs the main optimization (the menu, on hover, has the variants)
+    $('#btnOptimize').onclick = () => { document.activeElement && document.activeElement.blur(); runOptimize({ shrink: false, allow_bottom: false }); };
     $$('[data-opt]').forEach(b => b.onclick = () => { document.activeElement && document.activeElement.blur(); runOptimize({ shrink: b.dataset.opt !== 'route', allow_bottom: b.dataset.opt === 'bottom' }); });
     $('#btnPourGnd').onclick = () => {
       const S = Model.S, net = S.nets.GND ? 'GND' : prompt('Net for the copper pour', Object.keys(S.nets)[0] || 'GND');

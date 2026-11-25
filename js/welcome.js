@@ -9,6 +9,7 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      'The AI can place, route and check a new PCB in one call, and skips repeating identical design snapshots',
       'New PCBs use the EasyEDA Pro preset for routing and design rule checks',
       'The AI starts new PCB layouts with Quick place before adjusting individual footprints',
       'PCB text, board names and board codes can rotate with buttons in their properties',

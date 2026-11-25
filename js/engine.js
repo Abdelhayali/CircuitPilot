@@ -67,7 +67,7 @@ const Engine = (() => {
     { name: 'organize_schematic', description: 'Make the schematic readable (the ✨ Organize button): ICs / modules in a row, every small part (R, C, L, LED, transistor) next to the IC pin it is wired to, chains continuing outward; parts on GND vertical with GND at the bottom, parts on a supply (3V3, VDD …) vertical with the supply on top, series parts horizontal; wires are routed around the symbols without running over each other. Prefer it over auto_layout. Use view_design {view: "schematic"} to check.', input_schema: { type: 'object', properties: {} } },
     { name: 'run_erc', ro: true, description: 'Run the electrical rule check: unconnected pins, single-pin nets, missing ground, overlapping symbols.', input_schema: { type: 'object', properties: {} } },
     { name: 'clear_design', description: 'Delete everything in the current project and start an empty design.', input_schema: { type: 'object', properties: {} } },
-    { name: 'quick_place_pcb', description: 'First step for a new or general PCB layout, before moving individual parts. Packs footprints on both sides and enlarges a small outline as needed. Re-lays out unlocked parts and clears routing on success, so use update_pcb_from_schematic for edits to an existing schematic.', input_schema: { type: 'object', properties: {} } },
+    { name: 'quick_place_pcb', description: 'Start a new PCB with Quick place. Pass {route: true} to also route and check DRC after placement succeeds. Packs both sides and grows small outlines. Re-lays out unlocked parts and clears routing; use update_pcb_from_schematic for schematic edits on an existing PCB.', input_schema: { type: 'object', properties: { route: { type: 'boolean', description: 'Also run the standard autorouter and DRC. Default false, to review placement first.' } } } },
     { name: 'generate_pcb', description: 'Create the PCB: place all footprints on a board (based on schematic positions) and autoroute with a 2-layer router. Returns routing statistics. keep_placement: true keeps the parts where they already are (only new parts are placed) and just routes — much faster on a custom outline.', input_schema: { type: 'object', properties: { start_over: { type: 'boolean', description: 'throw away the current placement and tracks and make a new board (without it, a board that is already placed is updated from the schematic instead)' }, keep_placement: { type: 'boolean' },  board_width: { type: 'number', description: 'mm, optional (auto-sized if omitted)' }, board_height: { type: 'number', description: 'mm, optional' }, auto_size: { type: 'boolean', description: 'size the board to the parts; by default an existing board outline is kept and parts are fitted inside it' }, route: { type: 'boolean', description: 'default true' }, time_limit_s: { type: 'number', description: 'autorouter effort in seconds (default 90)' } } } },
     { name: 'web_search', ro: true, web: true, description: 'Search the internet (datasheets, application notes, reference designs, prices, availability, how-tos, anything else you need). Returns titles, URLs and snippets; read pages with web_fetch.', input_schema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, max_results: { type: 'number', description: 'default 8, max 20' } } } },
     { name: 'web_fetch', ro: true, web: true, description: 'Read a web page or PDF (e.g. a datasheet) as text. Long documents are paged: call again with offset = previous offset + returned length while "more" is true.', input_schema: { type: 'object', required: ['url'], properties: { url: { type: 'string' }, offset: { type: 'number' }, max_chars: { type: 'number', description: 'default 12000, max 40000' } } } },
@@ -341,7 +341,16 @@ const Engine = (() => {
     if (bad.length) throw new Error(`${t.name}: unknown argument${bad.length > 1 ? 's' : ''} ${bad.map(b => '"' + b + '"').join(', ')} — allowed: ${Object.keys(props).join(', ')}`);
     return out;
   }
-  async function exec(name, input, mode = 'agent') {
+  function drcReport(d, input = {}, fullLimit = 80) {
+    const by = {};
+    for (const v of d.violations) by[v.type] = (by[v.type] || 0) + 1;
+    let v = d.violations.slice().sort((a, b) => (a.severity === 'error' ? 0 : 1) - (b.severity === 'error' ? 0 : 1));
+    if (input.types && input.types.length) v = v.filter(x => input.types.includes(x.type));
+    const n = input.full ? fullLimit : +(input.limit || 5);
+    return { summary: d.summary, errors: d.errors, warnings: d.warnings, by_type: by, violations: v.slice(0, n).map(x => input.full ? x : { type: x.type, severity: x.severity, msg: x.msg.split(' — ')[0], at: x.x != null ? [x.x, x.y] : undefined }), more: v.length > n ? v.length - n : undefined };
+  }
+
+  async function exec(name, input, mode = 'agent', detailedDrc = false) {
     const t = TOOLS.find(t => t.name === name);
     if (!t) throw new Error(name === 'optimize_pcb'
       ? 'Optimize is unavailable. After schematic edits, call update_pcb_from_schematic to place new parts and route incomplete nets.'
@@ -854,6 +863,11 @@ const Engine = (() => {
         const placement = env.route ? (await env.route({ place, opt: { noRoute: true } })).placement
           : Model.mutate(() => Pcb.autoPlace(place));
         env.ui('show-pcb');
+        if (input.route === true && placement.fits !== false) {
+          const result = await exec('route_pcb', {}, mode, true);
+          const { drc, ...routingResult } = result;
+          return { placement, drc, ...routingResult };
+        }
         return { ...placement, note: placement.fits === false ? placement.hint : 'Inspect the placement if needed, then call route_pcb.' };
       }
       case 'generate_pcb': case 'route_pcb': {
@@ -863,7 +877,7 @@ const Engine = (() => {
           && (input.board_height == null || +input.board_height === S.board.h);
         if ((name === 'generate_pcb' && existingBoard && (input.keep_placement || (!input.start_over && !input.auto_size && sameSize && Pcb.placed().length)))
             || (name === 'route_pcb' && !selectedNets && Pcb.pendingFootprints().length)) {
-          return exec('update_pcb_from_schematic', { route: input.route, time_limit_s: input.time_limit_s }, mode);
+          return exec('update_pcb_from_schematic', { route: input.route, time_limit_s: input.time_limit_s }, mode, detailedDrc);
         }
         const place = name === 'generate_pcb' ? { w: input.board_width, h: input.board_height, fit: !!input.auto_size } : null;
         const noRoute = input.route === false, ropt = input.time_limit_s ? { time_limit_s: +input.time_limit_s } : {};
@@ -917,7 +931,7 @@ const Engine = (() => {
         if (!noRoute && !input.keep_dangling_vias) { stale = Model.mutate(() => Pcb.removeDanglingVias(ropt.onlyNets)); }
         env.ui('show-pcb');
         const d = Pcb.drc();
-        return Object.assign({}, r, { dangling_vias_removed: stale.length ? stale : undefined, drc: { summary: d.summary, top: d.violations.filter(v => v.severity === 'error').slice(0, 8).map(v => v.msg) } });
+        return Object.assign({}, r, { dangling_vias_removed: stale.length ? stale : undefined, drc: detailedDrc ? drcReport(d, { full: true }, 8) : { summary: d.summary, top: d.violations.filter(v => v.severity === 'error').slice(0, 8).map(v => v.msg) } });
       }
       case 'update_pcb_from_schematic': {
         const sync = Model.mutate(() => Pcb.syncFromSchematic()), todo = Pcb.status().unrouted;
@@ -931,7 +945,7 @@ const Engine = (() => {
         const st = Pcb.status(), d = Pcb.drc();
         const note = sync.no_room.length ? 'Make room for the unplaced parts before routing.'
           : sync.no_footprint.length ? 'Assign footprints before routing.' : undefined;
-        return Object.assign(sync, { rerouted, routed: st.routed, total: st.nets, unrouted: st.unrouted, drc: d.summary, note });
+        return Object.assign(sync, { rerouted, routed: st.routed, total: st.nets, unrouted: st.unrouted, drc: detailedDrc ? drcReport(d, { full: true }, 8) : d.summary, note });
       }
       case 'place_footprint': { const r = Model.mutate(() => Pcb.placeFootprint(input.ref, input)); env.ui('show-pcb'); return Object.assign(r, { note: 'Tracks are kept; run route_pcb to connect anything left unrouted.' }); }
       case 'view_design': {
@@ -978,14 +992,7 @@ const Engine = (() => {
         const u = Object.assign({}, input); if (u.net_widths) { u.netWidths = u.net_widths; delete u.net_widths; } delete u.all_pcbs;
         return Model.mutate(() => input.all_pcbs ? Pcb.setRulesAll(u) : Pcb.setRules(u));
       }
-      case 'run_drc': {
-        // counts + the first violations; full: true lists up to 80, types filters
-        const d = Pcb.drc({ as: input.as }), by = {}; for (const v of d.violations) by[v.type] = (by[v.type] || 0) + 1;
-        let v = d.violations.slice().sort((a, b) => (a.severity === 'error' ? 0 : 1) - (b.severity === 'error' ? 0 : 1));
-        if (input.types && input.types.length) v = v.filter(x => input.types.includes(x.type));
-        const n = input.full ? 80 : +(input.limit || 5);
-        return { summary: d.summary, errors: d.errors, warnings: d.warnings, by_type: by, violations: v.slice(0, n).map(x => input.full ? x : { type: x.type, severity: x.severity, msg: x.msg.split(' — ')[0], at: x.x != null ? [x.x, x.y] : undefined }), more: v.length > n ? v.length - n : undefined };
-      }
+      case 'run_drc': return drcReport(Pcb.drc({ as: input.as }), input);
       case 'create_part':
       case 'update_part': {
         const old = name === 'update_part' ? (Model.S.lib[input.key] || env.myLib().find(p => p.key === input.key)) : null;
@@ -1111,7 +1118,7 @@ const Engine = (() => {
 - Exact add_components JSON: ${addExample}. Replace LIB_EXAMPLE with the returned key. For a real part, use get_part.add_components_input and omit type and footprint. If a chip has no library entry, use create_part with verified pins and pads, then send its add_components_input to add_components.
 - For a My Library part, use its exact key in "lcsc": if get_design shows "LIB:LIB_EXAMPLE", send {"lcsc":"LIB_EXAMPLE"}.
 - Build in this order: add every part in ONE add_components call, connect every net in ONE connect call, then run_erc and fix what it reports.
-- PCB: for a new layout, use quick_place_pcb first. Then route_pcb and run_drc. Move individual parts only if refinement is needed.
+- PCB: start a new layout with quick_place_pcb {"route":true} to place, route and check DRC. Omit route when you need to inspect or adjust placement before routing. Use run_drc for additional violations if the report has more. Fix routing and DRC issues before finishing.
 - Schematic changed after the PCB exists (parts added / removed, nets or footprints changed): update_pcb_from_schematic — it auto-places new parts inside the outline on either usable side and routes incomplete nets. If a part cannot fit, make room or enlarge the outline.
 - When a tool returns an error, read it and call again with the fix; do not repeat the same call.
 - Questions about a chip, module or part number: answer only from what search_parts / get_part (or web_search) returned — never from memory. If they found nothing, say so.

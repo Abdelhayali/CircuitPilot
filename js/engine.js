@@ -27,20 +27,21 @@ const Engine = (() => {
   const pinList = { type: 'array', items: { type: 'string' }, description: 'Pin references "REF.PIN" — PIN is a pin number or pin name, e.g. "R1.1", "Q1.B", "U1.VCC"' };
   const pinDefs = { type: 'array', items: { type: 'object', required: ['num', 'name'], properties: { num: { type: 'string' }, name: { type: 'string' }, side: { type: 'string', enum: ['L', 'R', 'T', 'B'], description: 'Symbol side (default alternates L/R)' } } } };
   const fpSpec = { description: 'Footprint: a generator name (' + Lib.FOOTPRINT_PATTERNS.join(', ') + ') or {"pads":[{"num","x","y","w","h","shape":"rect|round|oval","drill"?}]} in mm, centred on the part.', anyOf: [{ type: 'string' }, { type: 'object', properties: { name: { type: 'string' }, pads: { type: 'array', items: { type: 'object' } } } }] };
+  const addExample = '{"components":[{"ref":"U1","lcsc":"LIB_EXAMPLE"},{"ref":"R1","type":"resistor","value":"10k"}]}';
   const TOOLS = [
     { name: 'search_parts', ro: true, description: 'Search real components by part number or keywords, e.g. "ESP32-C3", "AMS1117 3.3", "USB-C 16pin", "10k 0603". Searches the JLCPCB catalogue (stock, price, Basic/Extended), the EasyEDA official library (about 1.6 million LCSC parts incl. modules), the EasyEDA community library (user-made parts, keys EE-…), the open KiCad-format libraries — KiCad official, SparkFun, Digi-Key (keys OL:…; custom parts without LCSC number, check the footprint) — and My Library at once; only parts that have a footprint are returned. Returns LCSC codes (Cxxxx) / library keys. Prefer in-stock JLCPCB parts and Basic parts; source "easyeda" parts have no stock data (C99… codes are library placeholders, not orderable).', input_schema: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, limit: { type: 'number', description: 'default 10, max 30' } } } },
-    { name: 'get_part', ro: true, description: 'Load a database part (LCSC code) or a My Library part (key): returns its exact pin list (number:name) and PCB footprint. Call before adding it with add_components {lcsc}.', input_schema: { type: 'object', required: ['lcsc'], properties: { key: { type: 'string', description: 'a My Library part key instead of an LCSC code' },  lcsc: { type: 'string', description: 'LCSC code (e.g. C2838502) or library key (LIB_...)' } } } },
+    { name: 'get_part', ro: true, description: 'Load an exact part. Returns its pins, a footprint label, and add_components_input ready to send to add_components.', input_schema: { type: 'object', required: ['lcsc'], properties: { key: { type: 'string', description: 'a My Library part key instead of an LCSC code' },  lcsc: { type: 'string', description: 'LCSC code (e.g. C2838502) or library key (LIB_...)' } } } },
     { name: 'get_design', ro: true, description: 'Return the full current design: every component (type, value, position, footprint, pins as num:name=net) and all nets.', input_schema: { type: 'object', properties: {} } },
     { name: 'list_parts', ro: true, description: 'List the built-in component types with their pins (number:name), default value and footprints.', input_schema: { type: 'object', properties: {} } },
     {
-      name: 'add_components', description: 'Add parts to the schematic. Give each part a built-in type or a database lcsc code. For a generic header use type "connector" and pins in number order. Returns assigned refs.',
+      name: 'add_components', description: 'Add parts. Example: ' + addExample + ' Replace LIB_EXAMPLE with the key from get_part. For an lcsc entry omit type and footprint.',
       input_schema: {
         type: 'object', required: ['components'], properties: {
           components: {
             type: 'array', items: {
               type: 'object', properties: {
                 type: { type: 'string', enum: types, description: 'Built-in type (use "connector" for headers). Omit only when using lcsc.' },
-                lcsc: { type: 'string', description: 'LCSC code or exact My Library part key. For LIB:my_key, pass "my_key" here.' },
+                lcsc: { type: 'string', description: 'Exact key from get_part or create_part. Example: "LIB_EXAMPLE". Omit footprint.' },
                 ref: { type: 'string', description: 'Optional reference designator, e.g. R1. Auto-assigned if omitted.' },
                 value: { type: 'string', description: 'Part value or part number, e.g. 10k, 100n, NE555' },
                 x: { type: 'number', description: 'Schematic X (grid 10). Typical spacing between parts 80-160.' },
@@ -48,7 +49,7 @@ const Engine = (() => {
                 rot: { type: 'number', enum: [0, 90, 180, 270] },
                 sheet: { type: 'number', description: 'schematic sheet number (1 = first sheet; see add_sheet)' },
                 pins: { type: 'array', items: { type: 'string' }, description: 'ONLY for type "ic" or "connector": pin names in pin-number order (index 0 = pin 1).' },
-                footprint: { type: 'string', description: 'Optional footprint: ' + Lib.FOOTPRINT_PATTERNS.join(', ') }
+                footprint: { type: 'string', description: 'Built-in footprint only (e.g. 0603). Omit when using lcsc. Names: ' + Lib.FOOTPRINT_PATTERNS.join(', ') }
               }
             }
           }
@@ -362,7 +363,10 @@ const Engine = (() => {
         if (!mine.length && !db.length && !ol.length) return `No parts found for "${input.query}"` + (j.error ? ` (online search failed: ${j.error})` : '');
         return { source: j.source + (ol.length ? '+open' : ''), results: [...mine, ...db, ...ol] };
       }
-      case 'get_part': return partSummary(await loadPart(input.lcsc || input.key));
+      case 'get_part': {
+        const part = partSummary(await loadPart(input.lcsc || input.key));
+        return { add_components_input: { components: [part.add_as] }, ...part };
+      }
       case 'get_design': return Model.summary();
       case 'list_parts': return partsInfo();
       case 'list_my_parts': return env.myLib().map(partSummary);
@@ -404,6 +408,13 @@ const Engine = (() => {
           if (p && keyOf(p)) known.set(keyOf(p), p);
         }
         const knownParts = [...known.values()];
+        const lookupHint = s => {
+          const matches = knownPartFor({ value: s.value }, knownParts);
+          if (matches.length === 1) return 'Use this entry and omit footprint: '
+            + JSON.stringify({ ref: s.ref, lcsc: keyOf(matches[0]) }) + '.';
+          return 'Call search_parts ' + JSON.stringify({ query: s.value || s.ref || '', limit: 3 })
+            + ', then get_part and use its add_components_input.';
+        };
         const problems = new Map(), libs = {}, notes = [];
         const list = (Array.isArray(input.components) ? input.components : [input]).map((s, i) => {
           const spec = { ...s };
@@ -456,18 +467,19 @@ const Engine = (() => {
             const header = /^PinHeader_1x([1-9]\d*)$/i.exec(s.footprint || '');
             if (header && Array.isArray(s.pins) && s.pins.length) s.footprint = 'PinHeader_1x' + header[1];
             if (!s.part && s.footprint && !Lib.footprint(s.footprint)) {
-              problems.set(i, `unknown footprint "${s.footprint}". Look up the part and copy get_part.add_as, or use create_part with verified pins and pads.`);
+              problems.set(i, `unknown footprint "${s.footprint}". ${lookupHint(s)}`);
               continue;
             }
             if (!s.part && header && +header[1] === 1 && (s.type === 'battery' || /^B(?:T)?\d+$/i.test(s.ref || ''))) {
-              problems.set(i, 'a battery needs both terminals. Use a verified library part or specify type "battery" with a compatible two-pad footprint.');
+              problems.set(i, 'a battery needs both terminals. Use a verified part key, or for a generic two-pin connection use '
+                + JSON.stringify({ ref: s.ref, type: 'battery', footprint: 'PinHeader_1x2' }) + '.');
               continue;
             }
             try { added.push(Model.addComponent(s)); }
             catch (e) {
               const needsKey = !s.type && !s.part && e.message.includes('give a built-in "type"');
               const prefix = s.ref ? s.ref + ': ' : '';
-              problems.set(i, needsKey ? `missing "type" or "lcsc". Use search_parts ${JSON.stringify({ query: s.value || s.ref || '' })}, then copy get_part.add_as into this component.`
+              problems.set(i, needsKey ? 'missing "type" or "lcsc". ' + lookupHint(s)
                 : prefix && e.message.startsWith(prefix) ? e.message.slice(prefix.length) : e.message);
             }
           }
@@ -475,7 +487,8 @@ const Engine = (() => {
             const details = [...problems].sort(([a], [b]) => a - b).slice(0, 10)
               .map(([i, error]) => `${list[i].ref || 'Component ' + (i + 1)}: ${error}`);
             if (problems.size > details.length) details.push(`… and ${problems.size - details.length} more component errors.`);
-            throw new Error('No components were added. Fix these entries before retrying:\n' + details.join('\n'));
+            throw new Error('No components were added. Exact add_components JSON shape (use a real key):\n' + addExample
+              + '\nFor lcsc entries, omit type and footprint. Fix these entries:\n' + details.join('\n'));
           }
           Model.spaceOut();   // keep room for net labels between parts, whatever coordinates were asked for
           const out = added.map(c => ({ ref: c.ref, type: c.type, value: c.value, x: c.x, y: c.y, sheet: Model.sheetOf(c) + 1, footprint: c.footprint, pins: Lib.type(c.type).pins(c).map(p => p.num + ':' + p.name).join(' ') }));
@@ -973,7 +986,8 @@ const Engine = (() => {
         let saved = false;
         if (input.save_to_library !== false) { try { await env.savePart(def); saved = true; } catch (e) { } }
         const padNums = new Set((def.footprint.pads || []).map(p => p.num));
-        return { key: def.key, pins: def.pins.length, pads: def.footprint.pads.length, placed_instances_updated: used, saved_to_library: saved, pins_without_pad: def.pins.filter(p => !padNums.has(p.num)).map(p => p.num) };
+        return { ...(name === 'create_part' ? { add_components_input: { components: [{ lcsc: def.key }] } } : {}),
+          key: def.key, pins: def.pins.length, pads: def.footprint.pads.length, placed_instances_updated: used, saved_to_library: saved, pins_without_pad: def.pins.filter(p => !padNums.has(p.num)).map(p => p.num) };
       }
       case 'set_knowledge_folder': {
         const path = String(input.path || '').trim();
@@ -1074,7 +1088,7 @@ const Engine = (() => {
 - Ground is the net GND; supplies are +3V3, +5V, +12V, VIN, VBAT. Give important signals clear names (OUT, LED_A, SDA, SCL).
 - Real ICs, modules and connectors: search_parts, then get_part, then add_components with {"lcsc": "Cxxxx"}, and connect with the pin names get_part returned. Simple parts (resistor, capacitor, LED, diode, transistor) use the built-in types with a value and footprint (0603 by default).
 - In add_components, give every part a type or lcsc. For a generic header use {"type":"connector","pins":["SIG","GND"],"footprint":"PinHeader_1x2"}. List pins in number order.
-- Copy get_part.add_as into each database component. If a chip has no library entry, use create_part with verified pins and pad geometry, then use its returned key as lcsc.
+- Exact add_components JSON: ${addExample}. Replace LIB_EXAMPLE with the returned key. For a real part, use get_part.add_components_input and omit type and footprint. If a chip has no library entry, use create_part with verified pins and pads, then send its add_components_input to add_components.
 - For a My Library part, use its exact key in "lcsc": if get_design shows "LIB:LIB_EXAMPLE", send {"lcsc":"LIB_EXAMPLE"}.
 - Build in this order: add every part in ONE add_components call, connect every net in ONE connect call, then run_erc and fix what it reports.
 - PCB: generate_pcb (once, for a new board), then run_drc. For routing failures, inspect the placement and adjust the parts around the affected nets.

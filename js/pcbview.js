@@ -99,7 +99,7 @@ const PcbView = (() => {
   }
   function renderLayers() {
     const actL = ui.tool === 'line' ? lineLayer() : ui.active;
-    $('#layerRows').innerHTML = LAYERS.filter(l => !l.inner || Pcb.rules().layers === 4).map(l => `<div class="lrow${actL === l.id ? ' act' : ''}${ui.layers[l.id].on ? '' : ' off'}" data-l="${l.id}" title="${l.copper ? 'Click to make active (T / B)' : ''}">
+    $('#layerRows').innerHTML = LAYERS.filter(l => !l.inner || Pcb.rules().layers === 4).map(l => `<div class="lrow${actL === l.id ? ' act' : ''}${ui.layers[l.id].on ? '' : ' off'}" data-l="${l.id}" title="${l.copper ? 'Click to make active. Select prefers this side. Alt-click selects the other side.' : ''}">
       <span class="lact">${actL === l.id ? '✎' : ''}</span>
       <label class="lsw" style="background:${ui.layers[l.id].color}"><input type="color" value="${ui.layers[l.id].color}"></label>
       <span class="lname">${l.name}</span><span class="leye" title="Show / hide">${ui.layers[l.id].on ? '👁' : '—'}</span></div>`).join('');
@@ -347,6 +347,82 @@ const PcbView = (() => {
     boxEl.style.display = ''; boxEl.setAttribute('x', Math.min(b.x0, b.x1)); boxEl.setAttribute('y', Math.min(b.y0, b.y1));
     boxEl.setAttribute('width', Math.abs(b.x1 - b.x0)); boxEl.setAttribute('height', Math.abs(b.y1 - b.y0));
   }
+  function footprintHit(e) {
+    const other = ui.active === 'B' ? 'F' : 'B', preferred = e.altKey ? other : ui.active;
+    let fallback;
+    for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
+      const ref = el.dataset.ref || el.dataset.pref, c = ref && Model.comp(ref);
+      if (!c?.pcb || !partVisible(c)) continue;
+      const hit = { ref, net: el.dataset.net || null };
+      if ((Pcb.isBottom(c) ? 'B' : 'F') === preferred) return hit;
+      fallback ||= hit;
+    }
+    return fallback;
+  }
+  function outlineEdges() {
+    const b = Model.S.board, shape = b.shape || { type: 'rect' };
+    if (!vis('OL') || !b.w || !b.h || b.panel) return null;
+    const points = shape.type === 'polygon' ? shape.pts : [[0, 0], [b.w, 0], [b.w, b.h], [0, b.h]];
+    return { points, shape };
+  }
+  function beginOutline(pt, handle) {
+    const outline = outlineEdges();
+    if (!outline) return false;
+    const { points, shape } = outline;
+    let index = handle == null ? -1 : +handle, distance = 6 / vp.s;
+    if (index < 0) points.forEach((a, i) => {
+      const b = points[(i + 1) % points.length];
+      const d = shape.type === 'ellipse' ? Math.hypot(pt.x - (a[0] + b[0]) / 2, pt.y - (a[1] + b[1]) / 2) : G.ptSeg([pt.x, pt.y], a, b);
+      if (d < distance) { index = i; distance = d; }
+    });
+    if (index < 0) return false;
+    const a = points[index], b = points[(index + 1) % points.length], len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (!len) return false;
+    ui.sel = null; ui.multi.clear(); ui.item = { k: 'outline', i: index }; ui.hlNet = null; ui.labelOf = null;
+    drag = { kind: 'outline', board: Model.S.board, points, shape, index, x0: pt.x, y0: pt.y, normal: [(b[1] - a[1]) / len, (a[0] - b[0]) / len] };
+    ui.onSelect(null); render();
+    return true;
+  }
+  function previewOutline(pt) {
+    const d = drag, { points, shape, index, normal: [nx, ny], board } = d;
+    const delta = snapG((pt.x - d.x0) * nx + (pt.y - d.y0) * ny);
+    d.preview = null;
+    if (!delta) return;
+    const j = (index + 1) % points.length;
+    const next = points.map(([x, y], i) => i === index || i === j ? [+(x + delta * nx).toFixed(4), +(y + delta * ny).toFixed(4)] : [x, y]);
+    if (shape.type !== 'polygon') {
+      const [[x, y], , [right, bottom]] = next, w = right - x, h = bottom - y;
+      d.invalid = w < 1 || h < 1;
+      d.preview = { points: d.invalid ? next : Pcb.boardPoly({ w, h, shape }).map(p => [p[0] + x, p[1] + y]),
+        input: { shape: shape.type, corner_radius: shape.r, bounds: [x, y, right, bottom] }, w, h };
+      return;
+    }
+    const end = i => (i + 1) % next.length;
+    const changed = [(index + next.length - 1) % next.length, index, j];
+    d.invalid = changed.some(i => {
+      const a = next[i], b = next[end(i)];
+      return Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.05 ||
+        next.some((c, k) => k !== i && k !== end(i) && end(k) !== i && G.segSegDist(a, b, c, next[end(k)]) < 1e-5);
+    });
+    const w = Math.max(...next.map(p => p[0])) - Math.min(...next.map(p => p[0]));
+    const h = Math.max(...next.map(p => p[1])) - Math.min(...next.map(p => p[1]));
+    const signedArea = pts => pts.reduce((sum, a, i) => sum + a[0] * pts[end(i)][1] - a[1] * pts[end(i)][0], 0);
+    d.invalid ||= w < 1 || h < 1 || signedArea(next) * signedArea(points) <= 0;
+    d.preview = { points: d.invalid ? next : Pcb.boardPoly({ ...board, shape: { ...shape, pts: next } }),
+      input: { shape: 'polygon', points: next, corner_radius: shape.r, normalize: true }, w, h };
+  }
+  function finishOutline() {
+    const d = drag;
+    drag = null;
+    if (!d.preview || d.board !== Model.S.board) { renderLive(); return; }
+    if (d.invalid) { App.toast('The outline would cross itself or be too small.'); renderLive(); return; }
+    try {
+      const result = Model.mutate(() => Pcb.setBoardShape(d.preview.input));
+      if (result.offset_applied) vp.panBy(-result.offset_applied[0] * vp.s, -result.offset_applied[1] * vp.s);
+      App.toast(result.outside.length ? 'Outside the outline: ' + result.outside.join(', ') + ' · run DRC to check copper.' : 'Board outline updated · run DRC to check edge clearances.');
+    } catch (err) { App.toast(err.message); }
+    render();
+  }
   function down(e) {
     const pt = vp.toWorld(e.clientX, e.clientY);
     // a DRC marker (drawn under labels, so found by position): that problem in the DRC list
@@ -355,7 +431,7 @@ const PcbView = (() => {
       ui.drc.violations.forEach((v, i) => { if (v.x == null) return; const d = Math.hypot(v.x - pt.x, v.y - pt.y); if (d <= r && d < bd) { bd = d; bi = i; } });
       if (bi >= 0) { ui.onDrc(bi); return; }
     }
-    if (e.button === 2) { const el = e.target.closest('[data-ref],[data-pref]'); rdown = { x: e.clientX, y: e.clientY, ref: el ? el.dataset.ref || el.dataset.pref : null }; pan = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
+    if (e.button === 2) { rdown = { x: e.clientX, y: e.clientY, ref: ui.tool === 'select' ? footprintHit(e)?.ref : null }; pan = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
     if (e.button === 1) { pan = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
     if (ui.tool === 'track') {
       const sp = snapPoint(pt, ui.route ? ui.route.layer : null);
@@ -403,7 +479,9 @@ const PcbView = (() => {
       render(); return;
     }
     // select
-    const el = e.target.closest('[data-k],[data-ref]');
+    const el = e.target.closest('[data-k],[data-ref],[data-pref]');
+    const part = !el?.dataset.k || el.dataset.lk === 'part' ? footprintHit(e) : null;
+    if (el?.dataset.k === 'outline-edge' && beginOutline(pt, el.dataset.i)) return;
     ui.hlAt = [pt.x, pt.y];
     if (el && el.dataset.k === 't') {
       const i = +el.dataset.i, sg = +el.dataset.s, t = Model.S.pcb.traces[i];
@@ -423,14 +501,16 @@ const PcbView = (() => {
       const cx = +el.dataset.cx, cy = +el.dataset.cy;
       drag = { kind: 'lsize', lk: el.dataset.lk, ref: el.dataset.lref, i: +el.dataset.i, cx, cy, h0: +el.dataset.h, d0: Math.max(0.2, Math.hypot(pt.x - cx, pt.y - cy)), moved: false }; return;
     }
-    if (el && el.dataset.k === 'lbl' && !(el.dataset.lk === 'part' && Model.comp(el.dataset.lref) && !partVisible(Model.comp(el.dataset.lref)))) {
+    const labelPart = el?.dataset.lk === 'part' ? Model.comp(el.dataset.lref) : null;
+    if (el?.dataset.k === 'lbl' && (el.dataset.lk !== 'part' || (labelPart && partVisible(labelPart) && !e.altKey &&
+        (!part || Pcb.isBottom(Model.comp(part.ref)) === Pcb.isBottom(labelPart))))) {
       const lk = el.dataset.lk, cx = +el.dataset.cx, cy = +el.dataset.cy;
       if (lk === 'part') { const c = Model.comp(el.dataset.lref); ui.item = null; ui.multi = new Set([c.ref]); ui.sel = c.ref; ui.labelOf = c.ref; ui.hlNet = null; ui.onSelect(c.ref); }
       else { ui.sel = null; ui.multi = new Set(); ui.hlNet = null; ui.item = lk === 'board' ? { k: 'blbl' } : lk === 'fabid' ? { k: 'flbl' } : { k: 'txt', i: +el.dataset.i }; ui.onSelect(null); }
       drag = { kind: 'label', lk, ref: el.dataset.lref, i: +el.dataset.i, ox: pt.x - cx, oy: pt.y - cy, moved: false }; render(); return;
     }
-    let ref = el && (el.dataset.ref || el.dataset.pref);
-    if (ref && Model.comp(ref) && !partVisible(Model.comp(ref))) ref = null;   // its side is hidden
+    if (!e.altKey && !el?.dataset.pref && !el?.dataset.k && beginOutline(pt)) return;
+    const ref = part?.ref;
     ui.labelOf = null;   // clicking anything but a label: R / + / − act on parts again
     if (ref) {
       const c = Model.comp(ref); ui.item = null;
@@ -439,7 +519,7 @@ const PcbView = (() => {
         setSelection([...m].sort((a, b) => (a === c.ref ? -1 : b === c.ref ? 1 : 0))); return;
       }
       if (!(ui.multi.size > 1 && ui.multi.has(c.ref))) ui.multi = new Set([c.ref]);   // otherwise keep the group
-      ui.sel = c.ref; ui.hlNet = el.dataset.net || null; ui.onSelect(c.ref);
+      ui.sel = c.ref; ui.hlNet = part.net; ui.onSelect(c.ref);
       drag = { kind: 'fp', x0: pt.x, y0: pt.y, orig: selected().map(r => { const o = Model.comp(r); return [o, o.pcb.x, o.pcb.y]; }), moved: false }; render();
       drag.ends = attachedEnds(drag.orig.map(o => o[0].ref)); return;
     }
@@ -501,6 +581,7 @@ const PcbView = (() => {
     const pt = vp.toWorld(e.clientX, e.clientY);
     if (ui.box) { ui.box.x1 = pt.x; ui.box.y1 = pt.y; drawBox(); return; }
     if (drag) {
+      if (drag.kind === 'outline') { previewOutline(pt); renderLive(); return; }
       if (drag.kind === 'fp') {
         const g = Math.max(ui.grid, 0.05), dx = Math.round((pt.x - drag.x0) / g) * g, dy = Math.round((pt.y - drag.y0) / g) * g, [c0, x0, y0] = drag.orig[0] || [];
         if (c0 && c0.pcb && (Math.abs(c0.pcb.x - (x0 + dx)) > 1e-6 || Math.abs(c0.pcb.y - (y0 + dy)) > 1e-6)) {
@@ -553,6 +634,7 @@ const PcbView = (() => {
     coord();
   }
   function up(e) {
+    if (drag?.kind === 'outline' && e.button === 0) { finishOutline(); return; }
     if (ui.box) {
       const b = ui.box, x0 = Math.min(b.x0, b.x1), x1 = Math.max(b.x0, b.x1), y0 = Math.min(b.y0, b.y1), y1 = Math.max(b.y0, b.y1);
       ui.box = null; drawBox();
@@ -601,6 +683,7 @@ const PcbView = (() => {
     if (k === ' ') { ui.angle = ui.angle === '45' ? '90' : ui.angle === '90' ? 'any' : '45'; persist(); syncBar(); renderLive(); App.toast('Routing angle: ' + (ui.angle === 'any' ? 'any' : ui.angle + '°')); return true; }
     if (k === '/') { ui.flip = !ui.flip; renderLive(); return true; }
     if (k === 'Backspace' && ui.route) return backspace();
+    if (k === 'Escape' && drag?.kind === 'outline') { drag = null; renderLive(); return true; }
     if (k === 'Escape' && (ui.arc || ui.poly)) { ui.arc = null; ui.poly = null; renderLive(); return true; }
     if (k === 'Backspace' && ui.poly) { ui.poly.pts.pop(); if (!ui.poly.pts.length) ui.poly = null; renderLive(); return true; }
     if (k === 'Escape') { if (ui.route) finishRoute(); else if (ui.measure) { ui.measure = null; render(); } else if (ui.tool !== 'select') setTool('select'); else { ui.sel = null; ui.item = null; ui.hlNet = null; ui.onSelect(null); render(); } return true; }
@@ -670,7 +753,7 @@ const PcbView = (() => {
   }
   const selectAll = () => setSelection(Pcb.placed().map(c => c.ref));
   function deleteItem() {
-    const it = ui.item; if (!it) return; ui.item = null; ui.hlNet = null;
+    const it = ui.item; if (!it || it.k === 'outline') return; ui.item = null; ui.hlNet = null;
     Model.mutate(() => {
       const S = Model.S;
       if (it.k === 'v') S.pcb.vias.splice(it.i, 1);
@@ -704,7 +787,7 @@ const PcbView = (() => {
     const S = Model.S, cs = Pcb.placed();
     if (cs.length && !(S.fab && S.fab.id) && !S.locked) setTimeout(() => { if (Pcb.placed().length && !(Model.S.fab && Model.S.fab.id)) Model.mutate(() => Pcb.ensureFabId()); }, 0);
     cache.pads = allPads();
-    if (!cs.length || !S.board.w) { world.innerHTML = '<text x="0" y="0" text-anchor="middle" fill="#888" style="font-size:2.4px">No PCB yet — click “Generate PCB”, or ask the Copilot to make the board</text>'; renderLiveLayer(); return; }
+    if (!S.board.w || !S.board.h) { world.innerHTML = '<text x="0" y="0" text-anchor="middle" fill="#888" style="font-size:2.4px">No PCB yet — click “Generate PCB”, or ask the Copilot to make the board</text>'; renderLiveLayer(); return; }
     const out = [], hl = ui.hlNet;
     svg.classList.toggle('hlmode', !!hl);   // highlighted net: everything else is dimmed
     // footprint hit areas (bottom), so copper on top stays clickable
@@ -814,6 +897,20 @@ const PcbView = (() => {
     }
     if (hl) out.push(netHighlight(hl));
     out.push(...lblHits);   // text grab areas on top of everything (DRC marks, selection outlines)
+    if (ui.item?.k === 'outline' && ui.tool === 'select') {
+      const outline = outlineEdges();
+      if (outline) {
+        const { points } = outline, size = 9 / vp.s;
+        out.push('<g class="outline-handles">');
+        points.forEach(([x, y], i) => {
+          const [bx, by] = points[(i + 1) % points.length];
+          const color = ui.item.i === i ? '#73dcff' : '#172537';
+          const cursor = x === bx ? 'ew-resize' : y === by ? 'ns-resize' : 'move';
+          out.push('<rect data-k="outline-edge" data-i="' + i + '" x="' + ((x + bx - size) / 2) + '" y="' + ((y + by - size) / 2) + '" width="' + size + '" height="' + size + '" rx="' + size / 5 + '" fill="' + color + '" stroke="#73dcff" stroke-width="' + 1.5 / vp.s + '" style="cursor:' + cursor + '"><title>Drag to move this outline edge</title></rect>');
+        });
+        out.push('</g>');
+      }
+    }
     out.push('<g id="pcbLive"></g>');
     world.innerHTML = out.join('');
     names();
@@ -857,6 +954,10 @@ const PcbView = (() => {
   function renderLiveLayer() {
     const live = world && world.querySelector('#pcbLive'); if (!live) return;
     const out = [], R = ui.route, c = ui.cursor;
+    if (drag?.kind === 'outline' && drag.preview) {
+      const { points } = drag.preview;
+      out.push('<path d="M' + points.map(p => p.join(' ')).join('L') + 'Z" fill="none" stroke="' + (drag.invalid ? '#ff6666' : '#73dcff') + '" stroke-width="2" stroke-dasharray="6 4" vector-effect="non-scaling-stroke" pointer-events="none"/>');
+    }
     if (R) {
       for (const d of R.done) out.push(`<polyline points="${d.pts.map(p => p.join(',')).join(' ')}" stroke="${col(d.layer)}" stroke-width="${d.w}" class="rprev"/>`);
       for (const v of R.vias) out.push(`<circle cx="${v.x}" cy="${v.y}" r="${Pcb.rules().viaDiameter / 2}" fill="${col('MU')}"/><circle cx="${v.x}" cy="${v.y}" r="${Pcb.rules().viaDrill / 2}" fill="#111"/>`);
@@ -898,6 +999,10 @@ const PcbView = (() => {
     const c = ui.cursor, R = ui.route;
     let s = c ? `X ${c.x.toFixed(3)}  Y ${c.y.toFixed(3)} mm` : '';
     s += ` · <b style="color:${col(ui.active)}">${LNAME[ui.active]}</b> · ${(TOOLS.find(t => t.id === ui.tool) || {}).name}`;
+    if (drag?.kind === 'outline' && drag.preview) {
+      const { w, h } = drag.preview;
+      s += ' · ' + (drag.invalid ? 'Invalid outline' : w.toFixed(2) + ' × ' + h.toFixed(2) + ' mm') + ' · Esc cancels';
+    } else if (ui.item?.k === 'outline') s += ' · Drag an edge to resize';
     if (ui.tool === 'track' || ui.tool === 'arc') s += ` · width ${R ? R.w : curWidth(null)} mm · ${ui.angle === 'any' ? 'any angle' : ui.angle + '°'}`;
     if (R) s += ` · net <b>${esc(R.net || '(none)')}</b>`;
     if (R && R.bad) s += ` · <span class="bad">⚠ ${R.bad.d <= 0 ? 'short' : 'clearance ' + R.bad.d.toFixed(3) + ' mm'} to ${esc(R.bad.what)} (rule ${R.bad.need || Pcb.rules().clearance})</span>`;
@@ -912,6 +1017,11 @@ const PcbView = (() => {
     const it = ui.item; if (!it) return false;
     const S = Model.S, nets = Object.keys(S.nets).sort();
     const netSel = cur => `<select id="ppNet"><option value="">(no net)</option>${nets.map(n => `<option ${n === cur ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
+    if (it.k === 'outline') {
+      const { w, h } = S.board;
+      el.innerHTML = '<div class="ph">Board outline</div><div>' + w.toFixed(3) + ' × ' + h.toFixed(3) + ' mm</div><div class="muted small">Drag an edge or its handle to resize. The preview snaps to the PCB grid.</div>';
+      return true;
+    }
     if (it.k === 'txt') {
       const t = (S.pcb.texts || [])[it.i]; if (!t) return false;
       el.innerHTML = `<div class="ph">Silkscreen text</div>
@@ -1072,13 +1182,13 @@ const PcbView = (() => {
   const fit = () => { const S = Model.S; vp && vp.fit(S.board.w ? [0, 0, S.board.w, S.board.h] : [-30, -20, 30, 20], 4); };
   function exportSVG() {
     const S = Model.S;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 ${S.board.w + 4} ${S.board.h + 4}" width="${(S.board.w + 4) * 10}" height="${(S.board.h + 4) * 10}" style="background:#000"><style>.fphit{fill:none}.trk{stroke-linecap:round}.selbox,.selline,.lblhit,.lblsize,.nethl{display:none}</style><rect x="-2" y="-2" width="${S.board.w + 4}" height="${S.board.h + 4}" fill="#000"/>${world.innerHTML.replace(/<g id="pcbLive">.*?<\/g>$/, '')}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 ${S.board.w + 4} ${S.board.h + 4}" width="${(S.board.w + 4) * 10}" height="${(S.board.h + 4) * 10}" style="background:#000"><style>.fphit{fill:none}.trk{stroke-linecap:round}.selbox,.selline,.lblhit,.lblsize,.nethl,.outline-handles{display:none}</style><rect x="-2" y="-2" width="${S.board.w + 4}" height="${S.board.h + 4}" fill="#000"/>${world.innerHTML.replace(/<g id="pcbLive">.*?<\/g>$/, '')}</svg>`;
   }
   // keep the item selection valid after undo/redo or external edits
   function validate() {
     const S = Model.S;
     const it = ui.item, gone = it && (it.k === 'v' ? !S.pcb.vias[it.i] : it.k === 'pour' ? !(S.pcb.pours || [])[it.i] : it.k === 'ko' ? !(S.pcb.keepouts || [])[it.i] : it.k === 'koa' ? !Pcb.epKeepouts().some(q => q.epRef === it.ref) : it.k === 'h' ? !(S.pcb.holes || [])[it.i]
-      : it.k === 'txt' ? !(S.pcb.texts || [])[it.i] : it.k === 'ln' ? !(S.pcb.lines || [])[it.i] : it.k === 'blbl' || it.k === 'flbl' ? false : !S.pcb.traces[it.i]);   // t / T: tracks
+      : it.k === 'txt' ? !(S.pcb.texts || [])[it.i] : it.k === 'ln' ? !(S.pcb.lines || [])[it.i] : it.k === 'outline' ? !outlineEdges() : it.k === 'blbl' || it.k === 'flbl' ? false : !S.pcb.traces[it.i]);   // t / T: tracks
     if (gone) ui.item = null;
     if (ui.sel && !Model.comp(ui.sel)) ui.sel = null;
     for (const r of [...ui.multi]) if (!Model.comp(r)) ui.multi.delete(r);

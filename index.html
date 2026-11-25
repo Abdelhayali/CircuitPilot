@@ -38,7 +38,7 @@
         <button data-exp="easyedaproj" title="Schematic + PCB for EasyEDA Pro (File → Import → EasyEDA (Standard)) or EasyEDA Standard">EasyEDA project: schematic + PCB (.zip)</button>
         <button data-exp="easyeda">Schematic for EasyEDA (.json)</button>
         <button data-exp="easyedapcb">PCB for EasyEDA (.json)</button>
-        <button data-exp="easyedarules" title="This board's design rules for EasyEDA Pro (Design → Design Rule → Import), so EasyEDA Pro checks what the board was routed with instead of its own 6 mil defaults">EasyEDA Pro design rules (.json)</button>
+        <button data-exp="easyedarules" title="This board's design rules for EasyEDA Pro (Design → Design Rule → Import), so EasyEDA Pro checks what the board was routed with instead of its own 0.1524 mm spacing default">EasyEDA Pro design rules (.json)</button>
         <button data-exp="pcbpdf" title="Printable PCB drawing: top / bottom / both layers with tracks, assembly drawings and parts list (1:1 when it fits A4)">PCB drawing (.pdf)</button>
         <button data-exp="pcbsvg">PCB image (.svg)</button>
       </div>
@@ -423,20 +423,20 @@
 <div id="rulesModal" class="hidden modal">
   <div class="dlg wide">
     <div class="row-h"><h2>Design rules <span id="rPcbName" class="muted small"></span></h2><button id="rulesClose">✕</button></div>
-    <p class="muted small">The autorouter follows these rules and DRC checks the board against them. The default is JLCPCB 2-layer rules at no extra cost: 0.2 mm tracks (JLCPCB can go down to 0.1 mm), 0.1 mm gaps, 0.45 / 0.3 mm vias — verify current limits at <a href="https://jlcpcb.com/capabilities/pcb-capabilities" target="_blank" rel="noopener">jlcpcb.com/capabilities</a>.</p>
+    <p class="muted small">The autorouter follows these rules and DRC checks the board against them. New boards use EasyEDA Pro by default: 0.254 mm tracks, 0.1524 mm clearance, and 0.61 mm vias with 0.305 mm drills. Fabrication limits: <a href="https://jlcpcb.com/capabilities/pcb-capabilities" target="_blank" rel="noopener">jlcpcb.com/capabilities</a>.</p>
     <label>Preset <select id="rPreset"></select></label>
     <div class="rgrid">
       <div class="rh">Routing rules</div>
-      <label title="JLCPCB makes tracks down to 0.1 mm (4 mil) at no extra cost — use it on very tight boards; with Neck down the router already narrows a track to the fab minimum where 0.2 mm does not fit">Trace width <span class="hint">JLCPCB: down to 0.1</span><input data-r="traceWidth" type="number" step="0.01" min="0.05"><span>mm</span></label>
+      <label title="JLCPCB makes tracks down to 0.1 mm at no extra cost — use it on very tight boards; with Neck down the router already narrows a track to the fab minimum where 0.2 mm does not fit">Trace width <span class="hint">JLCPCB: down to 0.1</span><input data-r="traceWidth" type="number" step="0.001" min="0.05"><span>mm</span></label>
       <label class="chk"><input data-r="powerWider" type="checkbox"> Wider tracks for power / GND nets</label>
       <label>Power / GND trace width<input data-r="powerTraceWidth" type="number" step="0.01" min="0.05"><span>mm</span></label>
-      <label title="Track to track (EasyEDA Pro preset: 6 mil / 0.1524 mm)">Clearance track–track<input data-r="clearance" type="number" step="0.005" min="0.05"><span>mm</span></label>
-      <label title="Track or via to a pad, SMD or through-hole (EasyEDA Pro preset 0.1524 mm, JLCPCB minimum 0.1 mm)">Clearance to pads<input data-r="padClearance" type="number" step="0.005" min="0"><span>mm</span></label>
-      <label title="Track, pad or via to a via (EasyEDA Pro preset 0.1524 mm; JLCPCB also wants 0.2 mm from the via hole)">Clearance to vias<input data-r="viaClearance" type="number" step="0.005" min="0"><span>mm</span></label>
+      <label title="Track to track (EasyEDA Pro preset: 0.1524 mm)">Clearance track–track<input data-r="clearance" type="number" step="0.0001" min="0.05"><span>mm</span></label>
+      <label title="Track or via to a pad, SMD or through-hole (EasyEDA Pro preset 0.1524 mm, JLCPCB minimum 0.1 mm)">Clearance to pads<input data-r="padClearance" type="number" step="0.0001" min="0"><span>mm</span></label>
+      <label title="Track, pad or via to a via (EasyEDA Pro preset 0.1524 mm; JLCPCB also wants 0.2 mm from the via hole)">Clearance to vias<input data-r="viaClearance" type="number" step="0.0001" min="0"><span>mm</span></label>
       <label title="Copper pour to other nets' copper (EasyEDA Pro default 0.254 mm)">Copper pour clearance<input data-r="pourClearance" type="number" step="0.01" min="0"><span>mm</span></label>
       <label title="Minimum space between part outlines on the same side (0 = off). DRC warns below it; automatic placement keeps it">Gap between parts<input data-r="partGap" type="number" step="0.05" min="0"><span>mm</span></label>
       <label>Via diameter<input data-r="viaDiameter" type="number" step="0.01" min="0.1"><span>mm</span></label>
-      <label>Via drill<input data-r="viaDrill" type="number" step="0.01" min="0.1"><span>mm</span></label>
+      <label>Via drill<input data-r="viaDrill" type="number" step="0.001" min="0.1"><span>mm</span></label>
       <label>Copper to board edge<input data-r="edgeClearance" type="number" step="0.05" min="0"><span>mm</span></label>
       <label>Copper layers<select data-r="layers"><option value="2">2 (top + bottom, vias)</option><option value="4">4 (top, inner planes In1 + In2, bottom)</option><option value="1">1 (top only)</option></select></label>
       <label title="4 layers: the net of the solid copper plane on inner layer 1">Inner plane In1 net<input data-r="planeIn1" data-kind="text" placeholder="GND"></label>
@@ -608,9 +608,9 @@
 <script src="js/model.js?v=202611252350"></script>
 <script src="js/schematic.js?v=202611170600"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611252350"></script>
+<script src="js/pcb.js?v=202611252352"></script>
 <script src="js/cnc.js?v=202611071200"></script>
-<script src="js/pcbview.js?v=202611252350"></script>
+<script src="js/pcbview.js?v=202611252352"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
 <script src="js/shape3d.js?v=202611170400"></script>
 <script src="js/easyeda.js?v=202611252350"></script>
@@ -625,7 +625,7 @@
 <script src="js/pcb3d.js?v=202611240100"></script>
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
-<script src="js/engine.js?v=202611252351"></script>
+<script src="js/engine.js?v=202611252352"></script>
 <script src="js/ai.js?v=202611252351"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
@@ -635,8 +635,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611252351"></script>
-<script src="js/app.js?v=202611252350"></script>
+<script src="js/welcome.js?v=202611252352"></script>
+<script src="js/app.js?v=202611252352"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

@@ -260,7 +260,7 @@ const App = (() => {
       download(fname('-pcb.easyeda.json'), EasyEDA.exportPcb(), 'application/json');
       setTimeout(() => download(fname('-RULES_EasyEDA-Pro.json'), EasyEDA.proRulesText(), 'application/json'), 700);   // the board's rules for EasyEDA Pro (Design → Design Rule → Import)
       { const rn = Pcb.easyedaRuleNote ? Pcb.easyedaRuleNote() : ''; if (rn) setTimeout(() => toast('⚠ ' + rn, 30000), 9000); }
-      toast('EasyEDA PCB saved: footprints, tracks, vias, copper pours and the board outline. EasyEDA Pro: File → Import → EasyEDA (Standard) · Standard: File → Open → EasyEDA Source · the copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B) · EasyEDA Pro checks with its own rules: set the clearance to ' + Pcb.rules().clearance + ' mm (Design → Design Rule) or it reports gaps under 6 mil as errors' + pourWarn(), 20000);
+      toast('EasyEDA PCB saved: footprints, tracks, vias, copper pours and the board outline. EasyEDA Pro: File → Import → EasyEDA (Standard) · Standard: File → Open → EasyEDA Source · the copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B) · EasyEDA Pro checks with its own rules: set the clearance to ' + Pcb.rules().clearance + ' mm (Design → Design Rule) or it reports gaps under 0.1524 mm as errors' + pourWarn(), 20000);
       return;
     }
     const { ids, failed } = await linkEasyEDA(), S = Model.S;
@@ -284,7 +284,7 @@ const App = (() => {
     if (mode === 'project' && !pcb) notes.unshift('no PCB yet, so only the schematic is in the zip');
     if (pcb && Pcb.easyedaRuleNote) { const rn = Pcb.easyedaRuleNote(); if (rn) notes.push('⚠ ' + rn); }
     if (pcb && Pcb.rules().layers === 4) { const pm = Pcb.planeMap(); notes.push('4 layers: the inner planes (In1 ' + (pm.In1 || '-') + ', In2 ' + (pm.In2 || '-') + ') are not in the EasyEDA file — in EasyEDA Pro set 4 copper layers (Layer Manager) and make In1 / In2 planes of these nets; the Gerbers from CircuitPilot have them'); }
-    toast(`EasyEDA ${mode === 'project' ? 'project (schematic' + (pcb ? ' + PCB)' : ')') : 'schematic'} saved${pcbTag} — ${comps.length - noCode.length - failed.filter(r => comps.some(c => c.ref === r)).length}/${comps.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Pro: File → Import → EasyEDA (Standard) and choose the file · Standard: File → Open → EasyEDA Source${pcb && (Model.S.pcb.pours || []).length ? ' · The copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B)' : ''}${pcb ? ` · EasyEDA Pro checks with its own rules: set the clearance to ${Pcb.rules().clearance} mm (Design → Design Rule) or it reports gaps under 6 mil as errors` : ''}${pcb ? pourWarn() : ''}`, 20000);
+    toast(`EasyEDA ${mode === 'project' ? 'project (schematic' + (pcb ? ' + PCB)' : ')') : 'schematic'} saved${pcbTag} — ${comps.length - noCode.length - failed.filter(r => comps.some(c => c.ref === r)).length}/${comps.length} parts linked to EasyEDA footprints${notes.length ? ' · ' + notes.join(' · ') : ''}. EasyEDA Pro: File → Import → EasyEDA (Standard) and choose the file · Standard: File → Open → EasyEDA Source${pcb && (Model.S.pcb.pours || []).length ? ' · The copper pours arrive filled and connected as in CircuitPilot (no rebuild needed; after edits use Rebuild Copper Region, Shift+B)' : ''}${pcb ? ` · EasyEDA Pro checks with its own rules: set the clearance to ${Pcb.rules().clearance} mm (Design → Design Rule) or it reports gaps under 0.1524 mm as errors` : ''}${pcb ? pourWarn() : ''}`, 20000);
   }
 
   // ---------- screenshots for the AI (view_design): schematic, 2D PCB, 3D board, enclosure ----------
@@ -449,7 +449,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611252350');
+      worker = new Worker('js/route-worker.js?v=202611252352');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;
@@ -541,6 +541,7 @@ const App = (() => {
 
   const placementMessage = (placement, success) => {
     if (placement?.fits === false) return placement.hint || 'Some components need more room.';
+    if (placement?.restored) return placement.hint || success;
     if (!placement?.grown_from) return success;
     const { w, h } = placement.board;
     return `Board enlarged from ${placement.grown_from.join(' × ')} to ${w} × ${h} mm · ${success}`;

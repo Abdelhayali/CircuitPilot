@@ -1104,10 +1104,12 @@ const Pcb = (() => {
       sideBoxes[1] = cs.flatMap((c, i) => !c.pcb?.locked && !c.pcbEdge && !edgeInfo(c) &&
         !Lib.footprint(c.footprint).pads.some(p => p.drill) ? [footprints[i]] : []);
     }
-    const roomyGaps = opt.quick && !opt.tight_pack && !opt.compact ? [1, 0.75].map(scale => sideBoxes.map(boxes => {
+    const tightGap = Math.max(minGap, defaultGaps.at(-1));
+    const baseGap = opt.tight_pack ? tightGap : Math.max(minGap, defaultGaps[0]);
+    const roomyGaps = opt.quick && !opt.compact ? [1, 0.75].map(scale => sideBoxes.map(boxes => {
       const spare = (Math.sqrt(boardArea) - Math.sqrt(partArea(boxes))) / Math.sqrt(boxes.length || 1);
       const gap = Math.min(channelLimit, spare * 0.7) * scale;
-      return gap > Math.max(minGap, defaultGaps[0]) && partArea(boxes, gap) <= boardArea * 0.7 ? gap : Math.max(minGap, defaultGaps[0]);
+      return gap > Math.max(minGap, defaultGaps[0]) && partArea(boxes, gap) <= boardArea * 0.7 ? gap : baseGap;
     })).filter(gaps => gaps.some(gap => gap > Math.max(minGap, defaultGaps[0]))) : [];
     // locked parts stay exactly where they are; everything else is arranged around them
     const lockedSet = new Set(cs.filter(c => c.pcb && c.pcb.locked));
@@ -1195,10 +1197,16 @@ const Pcb = (() => {
     const setSide = (c, s, auto) => { if (s === 'B') c.pcb.side = 'B'; else delete c.pcb.side; if (auto && s === 'B') c.pcb.autoSide = true; else delete c.pcb.autoSide; };
     const okAt = (c, placed, gap, inset, strict, crossGap = gap) => boxInside(c, poly, inset) && !hit(c, placed, gap, strict, crossGap);
     const side0Of = new Map(cs.map(c => [c, isBottom(c) ? 'B' : 'F']));
+    const cornerTargets = new Map();
+    if (opt.tight_pack) for (const c of free) {
+      const { rot } = want.get(c);
+      const [left, top] = fpBox({ ...c, pcb: { x: 0, y: 0, rot, side: side0Of.get(c) } });
+      cornerTargets.set(c, { x: R.edgeClearance - left, y: R.edgeClearance - top, rot });
+    }
     function legalise(spacing, flip, final, corner = false) {
       const placed = [...lockedSet], failed = [];
       const gapOf = c => typeof spacing === 'number' ? spacing : spacing[isBottom(c) ? 1 : 0];
-      const crossGap = typeof spacing === 'number' ? spacing : Math.max(minGap, defaultGaps[0]);
+      const crossGap = typeof spacing === 'number' ? spacing : baseGap;
       boxC = new Map(); thC = new Map(); padC = new Map();
       for (const c of free) setSide(c, side0Of.get(c));
       // Check connectors at their final edge coordinates before accepting the placement.
@@ -1232,11 +1240,21 @@ const Pcb = (() => {
       const rest = free.slice().sort((p, q) => areaOf(q) - areaOf(p));
       const step = corner ? 0.25 : 0.5, maxR = Math.hypot(W, H);
       // nearest spot to where the part wants to be, on one side, both orientations; ok(c) decides what is allowed
-      const search = (c, w, ok) => {
+      const search = (c, w, inset, ok) => {
         let best = null;
         for (const rot of [w.rot, (w.rot + 90) % 360]) {
           c.pcb.rot = rot; let found = null;
-          for (let r = 0; r <= maxR && !found; r += step) {
+          let first = 0, last = maxR;
+          if (rectangular) {
+            const [left, top, right, bottom] = fpBox(c, inset);
+            const x0 = c.pcb.x - left, x1 = c.pcb.x + W - right;
+            const y0 = c.pcb.y - top, y1 = c.pcb.y + H - bottom;
+            if (x0 > x1 + 1e-6 || y0 > y1 + 1e-6) continue;
+            const near = Math.hypot(Math.max(0, x0 - w.x, w.x - x1), Math.max(0, y0 - w.y, w.y - y1));
+            first = Math.ceil((near - 1e-6) / step) * step;
+            last = Math.min(last, Math.hypot(Math.max(Math.abs(w.x - x0), Math.abs(w.x - x1)), Math.max(Math.abs(w.y - y0), Math.abs(w.y - y1))) + 1e-6);
+          }
+          for (let r = first; r <= last && !found; r += step) {
             const n = r === 0 ? 1 : Math.max(8, 4 * Math.ceil(2 * Math.PI * r / (4 * step)));
             for (let i = 0; i < n; i++) {
               const t = i / n * 2 * Math.PI;
@@ -1250,26 +1268,26 @@ const Pcb = (() => {
         return best;
       };
       for (const c of rest) {
-        const w = want.get(c), side0 = isBottom(c) ? 'B' : 'F';
+        const w = (corner ? cornerTargets : want).get(c), side0 = isBottom(c) ? 'B' : 'F';
         const find = (inset, strict) => {
           const gap = gapOf(c);
           const legal = q => okAt(q, placed, gap, inset, strict, crossGap);
           const opposite = opt.quick && !strict ? placed.filter(o => isBottom(o) !== isBottom(c)) : [];
           if (opposite.length) {
             // The body of a part may cover the other side, but prefer clear space between its SMD pads.
-            const clear = search(c, w, q => legal(q) && clearOfOppositePads(q, opposite));
+            const clear = search(c, w, inset, q => legal(q) && clearOfOppositePads(q, opposite));
             if (clear) return { ...clear, padsClear: true };
             // Falling back remains legal and is preferable to growing the board.
-            return search(c, w, legal);
+            return search(c, w, inset, legal);
           }
-          const best = search(c, w, legal);
+          const best = search(c, w, inset, legal);
           return best && { ...best, padsClear: true };
         };
         // its own side first, then (SMD parts on a 2+ layer board) the other side: top and bottom are both used.
         // Free board area first (nothing on either side there); under a part of the other side only when the board is full
         const other = side0 === 'B' ? 'F' : 'B', flipOk = flip && canFlip(c);
         if (opt.tight_pack || (opt.quick && (flip || typeof spacing !== 'number') && !noStack)) {
-          const inset = final ? R.edgeClearance : margin;
+          const inset = final || (opt.tight_pack && typeof spacing !== 'number') ? R.edgeClearance : margin;
           let best = find(inset, noStack), side = side0;
           if (flipOk && (!best || !best.padsClear || best.r >= 1.5)) {
             setSide(c, other, true);
@@ -1319,15 +1337,16 @@ const Pcb = (() => {
     const sides = twoSided ? (opt.tight_pack ? [true] : [false, true]) : [false];
     const passes = [...roomyGaps.flatMap(gap => sides.map(flip => [gap, flip])),
       ...sides.flatMap(flip => gaps.map(gap => [gap, flip]))];
-    for (let i = 0; i < passes.length; i++) { failed = legalise(passes[i][0], passes[i][1], i === passes.length - 1); if (!failed.length) break; }
+    for (let i = 0; i < passes.length; i++) {
+      const [spacing, flip] = passes[i];
+      failed = legalise(spacing, flip, i === passes.length - 1);
+      // A large module can need to sit to one side to leave room for edge parts.
+      // Try that arrangement while keeping the routing room on the other layer.
+      if (failed.length && opt.tight_pack && typeof spacing !== 'number') failed = legalise(spacing, flip, false, true);
+      if (!failed.length) break;
+    }
     if (opt.tight_pack && failed.length) {
       // A centred part can leave two unusably narrow strips. Try packing from a corner before resizing.
-      for (const c of free) {
-        c.pcb.rot = want.get(c).rot;
-        setSide(c, side0Of.get(c));
-        const [left, top] = fpBox(c);
-        want.set(c, { x: c.pcb.x - left + R.edgeClearance, y: c.pcb.y - top + R.edgeClearance, rot: c.pcb.rot });
-      }
       failed = legalise(passes.at(-1)[0], twoSided, true, true);
     }
     for (const c of cs) if (failed.includes(c.ref)) delete c.pcb;

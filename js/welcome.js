@@ -9,6 +9,7 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      'Local AI reuses exact parts it already looked up, reports all component errors together, and skips identical failed retries',
       'Chat shows the model’s generation speed in tokens per second as it responds',
       'Quick place keeps footprints from stacking in the board view and lists parts that need more room',
       'Update from schematic automatically places new parts inside the PCB outline, using the bottom side for suitable parts when the top is full. Optimize is paused for now',

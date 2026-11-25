@@ -182,7 +182,7 @@ DESIGN MODEL
 - Connectivity is by named nets. Pins are referenced "REF.PIN" with the pin number or name ("R1.1", "Q1.B", "U1.VCC"). A name shared by several pins (e.g. "U1.GND") connects all of them.
 - Nets named GND or supply names (VCC, VDD, +5V, +3V3, +12V, VBAT, VIN ...) render as power symbols. Give meaningful names to important signals (OUT, LED_K, SDA, TRIG ...); otherwise any name is fine.
 - Pin numbering: resistor/capacitor/inductor 1,2; electrolytic 1=+ 2=-; diode/LED/zener/schottky 1=K(cathode) 2=A(anode); npn/pnp 1=B 2=E 3=C; nmos/pmos 1=G 2=S 3=D; regulator 1=IN 2=GND 3=OUT; opamp 2=IN- 3=IN+ 4=V- 6=OUT 7=V+; potentiometer 1, 2=W(wiper), 3; battery 1=+ 2=-.
-- COMPONENT DATABASE: for real ICs, modules, regulators, connectors (ESP32, STM32, AMS1117, CH340, USB-C, etc.) use search_parts → pick an in-stock part (prefer Basic parts) → get_part → add_components with {"lcsc": "Cxxxx"}. This gives the exact pinout and real footprint; connect using the pin names returned by get_part. Built-in types (resistor, capacitor, LED, diode, transistor, regulator, …) automatically get a real JLCPCB part's footprint and pinout (pins matched by name); match_jlcpcb_parts fills in part numbers per value for assembly.
+- COMPONENT DATABASE: for real ICs, modules, regulators, connectors (ESP32, STM32, AMS1117, CH340, USB-C, etc.) use search_parts → pick an in-stock part (prefer Basic parts) → get_part → copy its add_as fields into that entry in add_components. This gives the exact pinout and real footprint; connect using the pin names returned by get_part. Built-in types (resistor, capacitor, LED, diode, transistor, regulator, …) automatically get a real JLCPCB part's footprint and pinout (pins matched by name); match_jlcpcb_parts fills in part numbers per value for assembly.
 - CUSTOM PARTS: if a part is not in the database (or the user asks), create it with create_part (pins + footprint generator or explicit pads), then add_components {lcsc: <returned key>}. Fix wrong pinouts/footprints with update_part.
 - PROJECT KNOWLEDGE: when the project has a knowledge folder, follow its requirements, conventions and guides. Use knowledge_search / knowledge_read for details not included below.
 - PCB WORKFLOW: on a new design use generate_pcb. After adding, removing, rewiring or changing parts on an existing PCB, use update_pcb_from_schematic first. It finds room inside the outline on either usable side and routes incomplete nets. If parts cannot fit, make room or enlarge the board. Inspect the result with run_drc and adjust placement around nets that fail.
@@ -580,7 +580,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     if (settings.includeContext) history[history.length - 1].ctx = designContext();   // the design as it is now, kept with this message (prompt cache, below)
     persist();
     controller = new AbortController();
-    const repeats = new Map(); let stuck = null;
+    const repeats = new Map(); let stuck = null, failedComponentBatch = null, repeatedComponentBatch = false;
     await probeContext(model);
     // compact mode (small models): a part number in the request that is not in the design yet is looked up first, as a
     // normal search_parts call — the model then answers from the database instead of from memory
@@ -650,7 +650,13 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         const results = [];
         for (const tc of r.toolCalls) {
           let content, error = false, image = null;
-          try {
+          const batchKey = tc.name === 'add_components' ? JSON.stringify(tc.input || {}) : null;
+          const sameBatch = batchKey !== null && failedComponentBatch?.key === batchKey;
+          if (sameBatch) {
+            content = failedComponentBatch.content + '\n\nThe same component list was sent again. This retry was skipped.';
+            error = true;
+            repeatedComponentBatch = true;
+          } else try {
             if (tc.input && tc.input.__parse_error) throw new Error('Could not parse tool arguments as JSON');
             live = { phase: 'tool', since: Date.now(), name: tc.name, input: tc.input };
             hooks.onLive && hooks.onLive();
@@ -658,12 +664,15 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
             if (out && typeof out === 'object' && out.__image) { image = out.__image; const rest = Object.assign({}, out); delete rest.__image; content = JSON.stringify(rest); }
             else content = typeof out === 'string' ? out : JSON.stringify(out);
           } catch (e) { content = 'Error: ' + e.message; error = true; }
+          if (!error) { failedComponentBatch = null; repeatedComponentBatch = false; }
+          else if (batchKey !== null && !sameBatch) failedComponentBatch = { key: batchKey, content };
           if (lite && content.length > 3000) content = content.slice(0, 3000) + ' …(cut)';   // as in the fine-tune data
           // loop guard (small models can repeat a failing call many times): the same call or the same error again → say
           // so in the result; the 4th time the run stops and the user is told
-          {
+          if (!sameBatch) {
             let a = ''; try { a = JSON.stringify(tc.input || {}); } catch (e2) { }
-            const sig = error ? tc.name + '|E|' + content.slice(0, 160) : tc.name + '|' + a, n = (repeats.get(sig) || 0) + 1;
+            const sig = error ? tc.name + '|E|' + (batchKey === null ? content.slice(0, 160) : content) : tc.name + '|' + a;
+            const n = (repeats.get(sig) || 0) + 1;
             repeats.set(sig, n);
             if (n >= 2) content += error
               ? `\n\nThis same error happened ${n} times. Do NOT repeat the call: change the arguments as the error says, use another tool (search_parts, get_part, get_design), or tell the user what is missing.`
@@ -677,8 +686,11 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         for (const tc of r.toolCalls) if (!results.find(x => x.id === tc.id)) results.push({ id: tc.id, name: tc.name, content: 'Cancelled by user', error: true });
         history.push({ role: 'tool', results }); persist();
         if (controller.signal.aborted) break;
-        if (stuck) {
-          const m = { role: 'assistant', text: `⚠ Stopped: the AI repeated the same tool call 4 times without progress (${stuck}). Press **▶ Continue** (or type "continue") to let it go on with another approach, say it differently, add that part yourself (Parts panel), or use a larger model for this step.`, toolCalls: [], model: 'CircuitPilot', mode, canContinue: 'stuck' };
+        if (stuck || repeatedComponentBatch) {
+          const text = repeatedComponentBatch
+            ? '⚠ Stopped: the AI sent the same invalid component list again. Open the last add_components result to see what each part needs, then press **▶ Continue** to try again.'
+            : `⚠ Stopped: the AI repeated the same tool call 4 times without progress (${stuck}). Press **▶ Continue** (or type "continue") to let it go on with another approach, say it differently, add that part yourself (Parts panel), or use a larger model for this step.`;
+          const m = { role: 'assistant', text, toolCalls: [], model: 'CircuitPilot', mode, canContinue: 'stuck' };
           history.push(m); persist(); hooks.onAssistant(m, null);
           break;
         }

@@ -180,9 +180,21 @@ const Engine = (() => {
     return partCache[up];
   }
   const keyOf = m => m.key || m.lcsc;
+  const partName = value => String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  function knownPartFor(spec, parts) {
+    const value = partName(spec.value), footprint = String(spec.footprint || '').trim();
+    if (!value) return [];
+    const label = /^(.*?)\s+\((\d+) pads?\)$/i.exec(footprint);
+    const packageName = partName(label ? label[1] : footprint);
+    return parts.filter(p => p.pins?.length && p.footprint?.pads?.length
+      && [p.name, p.mfr_part].some(name => partName(name) === value)
+      && (!packageName || partName(p.footprint.name) === packageName)
+      && (!label || p.footprint.pads.length === +label[2]));
+  }
   function partSummary(m) {
     return {
       key: keyOf(m), name: m.name, manufacturer: m.manufacturer, mfr_part: m.mfr_part, package: m.package, ref_prefix: m.prefix,
+      add_as: { lcsc: keyOf(m) },
       pins: (m.pins || []).map(p => p.num + ':' + p.name).join(' '),
       footprint: m.footprint ? `${m.footprint.name} (${m.footprint.pads.length} pads)` : 'none', datasheet: m.datasheet || undefined
     };
@@ -387,33 +399,49 @@ const Engine = (() => {
       case 'update_pcb_text': return Model.mutate(() => Pcb.updateText(+input.index, input));
       case 'remove_pcb_text': return Model.mutate(() => Pcb.removeText(+input.index));
       case 'add_components': {
-        const list = (Array.isArray(input.components) ? input.components : [input]).map(s => {
+        const known = new Map();
+        for (const p of [...Object.values(partCache), ...env.myLib(), ...Object.values(Model.S.lib)]) {
+          if (p && keyOf(p)) known.set(keyOf(p), p);
+        }
+        const knownParts = [...known.values()];
+        const problems = new Map(), libs = {}, notes = [];
+        const list = (Array.isArray(input.components) ? input.components : [input]).map((s, i) => {
           const spec = { ...s };
-          // A footprint ID from get_design points to a known part, with its own symbol and pins.
           if (!spec.type && !spec.lcsc && !spec.part) {
             const id = /^(?:LIB:(\S+)|LCSC:(C\d+))$/i.exec(String(spec.footprint || '').trim());
-            if (id) spec.part = id[1] || id[2];
+            if (id) {
+              spec.part = id[1] || id[2];
+            } else {
+              const matches = knownPartFor(spec, knownParts);
+              if (matches.length === 1) {
+                spec.part = keyOf(matches[0]);
+                notes.push(`${spec.ref || spec.value}: used the previously loaded part ${spec.part}`);
+              } else if (matches.length > 1) {
+                problems.set(i, `choose one exact "lcsc" key: ${matches.map(keyOf).slice(0, 5).join(', ')}`);
+              } else if (/^TP\d+$/i.test(spec.ref || '') && /^PinHeader_1x1$/i.test(spec.footprint || '') && spec.pins == null) {
+                Object.assign(spec, { type: 'connector', footprint: 'PinHeader_1x1', pins: ['1'] });
+              }
+            }
           }
           return spec;
         });
-        const libs = {}, notes = [];
         // simple built-in parts (their pins do not depend on the part number): a wrong "lcsc" must not block them —
         // small models put values (104 = 100 nF) or references (C1) there
         const SIMPLE = ['resistor', 'capacitor', 'capacitor_polarized', 'inductor', 'potentiometer', 'fuse', 'crystal', 'diode', 'schottky', 'zener', 'led', 'npn', 'pnp', 'nmos', 'pmos', 'switch', 'battery', 'buzzer'];
-        for (const s of list) if (s.lcsc || s.part) {
+        for (const [i, s] of list.entries()) if (s.lcsc || s.part) {
           const code = String(s.lcsc || s.part).trim(), simple = SIMPLE.includes(s.type) && s.value;
           if (simple && (/^[A-Z]{1,2}\d{1,3}$/i.test(code) || code.toUpperCase() === String(s.ref || '').toUpperCase())) {
             notes.push(`${s.ref || s.type} ${s.value}: ignored "${code}" — that is a value code or a reference, not an LCSC part number; added a built-in ${s.type}`);
             delete s.lcsc; delete s.part; continue;
           }
-          try { const m = await loadPart(code); libs[keyOf(m)] = m; s.part = keyOf(m); delete s.lcsc; }
+          try { const m = known.get(code) || await loadPart(code); libs[keyOf(m)] = m; s.part = keyOf(m); delete s.lcsc; }
           catch (e) {
             if (simple) { notes.push(`${s.ref || s.type} ${s.value}: could not load "${code}" — added a built-in ${s.type} instead`); delete s.lcsc; delete s.part; continue; }
-            throw new Error(e.message + '. For simple parts give {"type": "capacitor", "value": "100n"} without lcsc: lcsc is only a real LCSC number from search_parts (e.g. C14663), never a value (104) or a reference (C1)');
+            problems.set(i, e.message);
           }
         }
         // built-in symbols get the real JLCPCB part behind them (unless a footprint was given)
-        for (const s of list) if (s.type && !s.lcsc && !s.part && !s.footprint && Lib.dbDefault(s.type, s.value)) {
+        for (const [i, s] of list.entries()) if (!problems.has(i) && s.type && !s.lcsc && !s.part && !s.footprint && Lib.dbDefault(s.type, s.value)) {
           try { s.dbPart = await loadPart(Lib.dbDefault(s.type, s.value).lcsc); } catch (e) { /* database unavailable → generated footprint */ }
         }
         // sheet numbers are 1-based for the AI; sheets are created on demand
@@ -422,7 +450,33 @@ const Engine = (() => {
           const need = Math.max(0, ...list.map(s => (s.sheet || 0) + 1));
           if (need > 1) { const sh = (Model.S.sheets && Model.S.sheets.length ? Model.S.sheets : [{ name: 'Main' }]).slice(); while (sh.length < need) sh.push({ name: 'Sheet ' + (sh.length + 1) }); Model.S.sheets = sh; }
           for (const [k, m] of Object.entries(libs)) if (!Model.S.lib[k]) Model.setLibPart(k, m);
-          const added = list.map(s => Model.addComponent(s));
+          const added = [];
+          for (const [i, s] of list.entries()) {
+            if (problems.has(i)) continue;
+            const header = /^PinHeader_1x([1-9]\d*)$/i.exec(s.footprint || '');
+            if (header && Array.isArray(s.pins) && s.pins.length) s.footprint = 'PinHeader_1x' + header[1];
+            if (!s.part && s.footprint && !Lib.footprint(s.footprint)) {
+              problems.set(i, `unknown footprint "${s.footprint}". Look up the part and copy get_part.add_as, or use create_part with verified pins and pads.`);
+              continue;
+            }
+            if (!s.part && header && +header[1] === 1 && (s.type === 'battery' || /^B(?:T)?\d+$/i.test(s.ref || ''))) {
+              problems.set(i, 'a battery needs both terminals. Use a verified library part or specify type "battery" with a compatible two-pad footprint.');
+              continue;
+            }
+            try { added.push(Model.addComponent(s)); }
+            catch (e) {
+              const needsKey = !s.type && !s.part && e.message.includes('give a built-in "type"');
+              const prefix = s.ref ? s.ref + ': ' : '';
+              problems.set(i, needsKey ? `missing "type" or "lcsc". Use search_parts ${JSON.stringify({ query: s.value || s.ref || '' })}, then copy get_part.add_as into this component.`
+                : prefix && e.message.startsWith(prefix) ? e.message.slice(prefix.length) : e.message);
+            }
+          }
+          if (problems.size) {
+            const details = [...problems].sort(([a], [b]) => a - b).slice(0, 10)
+              .map(([i, error]) => `${list[i].ref || 'Component ' + (i + 1)}: ${error}`);
+            if (problems.size > details.length) details.push(`… and ${problems.size - details.length} more component errors.`);
+            throw new Error('No components were added. Fix these entries before retrying:\n' + details.join('\n'));
+          }
           Model.spaceOut();   // keep room for net labels between parts, whatever coordinates were asked for
           const out = added.map(c => ({ ref: c.ref, type: c.type, value: c.value, x: c.x, y: c.y, sheet: Model.sheetOf(c) + 1, footprint: c.footprint, pins: Lib.type(c.type).pins(c).map(p => p.num + ':' + p.name).join(' ') }));
           return notes.length ? out.concat([{ note: notes.join('; ') }]) : out;
@@ -1011,7 +1065,7 @@ const Engine = (() => {
   // The full tool list is ~23k tokens — too much for a small model's context and speed. Compact mode sends the core
   // design tools with short descriptions and a short system prompt. The fine-tune data (finetune/) is made with exactly
   // this, so keep them in step: change LITE here, then make the dataset again.
-  const LITE_NAMES = ['search_parts', 'get_part', 'get_design', 'add_components', 'update_component', 'remove_components', 'connect', 'disconnect', 'rename_net',
+  const LITE_NAMES = ['search_parts', 'get_part', 'get_design', 'add_components', 'create_part', 'update_component', 'remove_components', 'connect', 'disconnect', 'rename_net',
     'add_sheet', 'organize_schematic', 'run_erc', 'generate_pcb', 'update_pcb_from_schematic', 'route_pcb', 'pcb_status', 'run_drc', 'get_pcb_layout', 'place_footprint',
     'place_in_free_area', 'check_placement', 'set_board_shape', 'add_mounting_holes', 'add_copper_pour', 'add_track', 'add_via', 'remove_tracks',
     'get_design_rules', 'set_design_rules', 'match_jlcpcb_parts', 'web_search'];
@@ -1020,6 +1074,7 @@ const Engine = (() => {
 - Ground is the net GND; supplies are +3V3, +5V, +12V, VIN, VBAT. Give important signals clear names (OUT, LED_A, SDA, SCL).
 - Real ICs, modules and connectors: search_parts, then get_part, then add_components with {"lcsc": "Cxxxx"}, and connect with the pin names get_part returned. Simple parts (resistor, capacitor, LED, diode, transistor) use the built-in types with a value and footprint (0603 by default).
 - In add_components, give every part a type or lcsc. For a generic header use {"type":"connector","pins":["SIG","GND"],"footprint":"PinHeader_1x2"}. List pins in number order.
+- Copy get_part.add_as into each database component. If a chip has no library entry, use create_part with verified pins and pad geometry, then use its returned key as lcsc.
 - For a My Library part, use its exact key in "lcsc": if get_design shows "LIB:LIB_EXAMPLE", send {"lcsc":"LIB_EXAMPLE"}.
 - Build in this order: add every part in ONE add_components call, connect every net in ONE connect call, then run_erc and fix what it reports.
 - PCB: generate_pcb (once, for a new board), then run_drc. For routing failures, inspect the placement and adjust the parts around the affected nets.

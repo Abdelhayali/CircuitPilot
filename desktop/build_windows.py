@@ -112,7 +112,7 @@ def main():
     data = [("index.html", "."), ("styles.css", "."), ("js", "js"), ("data", "data"), ("mcp", "mcp"), ("LICENSE", "."), ("NOTICE", ".")]
     args = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--name", "CircuitPilot", "--icon", ico,
             "--distpath", DIST, "--workpath", os.path.join(BUILD, "pyinstaller"), "--specpath", BUILD, "--paths", ROOT,
-            "--hidden-import", "server", "--hidden-import", "desktop_link", "--hidden-import", "jlcapi", "--hidden-import", "localai"]
+            "--hidden-import", "server", "--hidden-import", "desktop_link", "--hidden-import", "jlcapi", "--hidden-import", "localai", "--hidden-import", "updater"]
     # packages on the build PC that CircuitPilot does not use (pypdf / python-docx / lxml / cryptography stay: datasheets)
     for mod in ("numpy", "PIL", "pygame", "matplotlib", "scipy", "pandas", "tkinter", "IPython", "jupyter"):
         args += ["--exclude-module", mod]
@@ -130,6 +130,9 @@ def main():
     lic = os.path.join(os.path.dirname(node), "LICENSE")
     if os.path.exists(lic):
         shutil.copy2(lic, os.path.join(APP, "node", "LICENSE"))
+    # the release tag this build is published as (CP_VERSION=v2026.11.25.6): the app compares it with the latest release
+    with open(os.path.join(APP, "version.txt"), "w", encoding="utf-8") as f:
+        f.write(os.environ.get("CP_VERSION") or "dev")
     with open(os.path.join(APP, "README.txt"), "w", encoding="utf-8") as f:
         f.write("CircuitPilot for Windows\n\nDouble-click CircuitPilot.exe. Your projects are kept in %LOCALAPPDATA%\\CircuitPilot.\n"
                 "Claude Desktop: in CircuitPilot open Settings -> Claude Desktop -> Connect (or run CircuitPilot.exe --connect-claude),\n"

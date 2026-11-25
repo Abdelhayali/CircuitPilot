@@ -9,6 +9,8 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      'App updates (Windows app): when a new version is released, CircuitPilot asks you — Download update → Install and restart (checked with SHA-256; your projects and settings stay). What’s new → ⬆ Check for updates',
+      'Local AI: every NVIDIA card is found — cards in compute-only (TCC) mode such as a Tesla V100 are listed with the reason, and “Get the NVIDIA CUDA engine” (750 MB, once) runs the model on all of them (GPU split works across both)',
       'Quick place keeps every part inside the board outline: when the top side is full, SMD parts go to the bottom (through-hole parts and connectors stay on top); a board too small for all parts gets overlaps inside the outline (listed), never parts outside it. A new quick place on a bigger board brings them back to the top',
       'When the AI stops (it repeated a call 4 times, 40 steps, an error or Stop): ▶ Continue button — or type "continue"',
       'Follow-up questions: the start of the prompt stays the same for the whole chat, so llama.cpp / Maya re-read only the new question (measured with Inkling-2-Mini on Maya: 2 s instead of 48 s)',
@@ -88,7 +90,7 @@ const Welcome = (() => {
     el.querySelectorAll('.wel-tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
     const seen = store.get('cp.seenVersion');
     $('#welBody').innerHTML = t === 'new'
-      ? CHANGELOG.map((c, i) => `<div class="wel-ver${i === 0 ? ' cur' : ''}"><b>v${esc(c.v)}</b> <span class="muted small">${esc(c.date)}</span>${i === 0 ? ' <span class="badge basic">latest</span>' : seen && c.v > seen ? ' <span class="badge basic">new for you</span>' : ''}<ul>${c.items.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')
+      ? '<div style="text-align:right;margin-bottom:6px"><button class="small" onclick="window.CPUpdate && CPUpdate.check()">⬆ Check for updates</button></div>' + CHANGELOG.map((c, i) => `<div class="wel-ver${i === 0 ? ' cur' : ''}"><b>v${esc(c.v)}</b> <span class="muted small">${esc(c.date)}</span>${i === 0 ? ' <span class="badge basic">latest</span>' : seen && c.v > seen ? ' <span class="badge basic">new for you</span>' : ''}<ul>${c.items.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')
       : `<ol class="wel-steps">
           <li><b>Connect an AI</b> — CircuitPilot's free AI (sign in with GitHub, no key) or your own key: Gemini, Claude, OpenAI, Ollama …</li>
           <li><b>New project</b>, then tell the copilot what to build, e.g. <i>“ESP32-C3 with USB-C, LiPo charger and a status LED”</i></li>

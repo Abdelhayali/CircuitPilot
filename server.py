@@ -352,7 +352,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self._send(200, json.dumps(desktop_link.connect()).encode(), "application/json")
             except Exception as e:
                 return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
-        if path.startswith("/api/localai/"):   # local AI (Windows app): models, downloads, the model server, its settings
+        if path.startswith(("/api/localai/", "/api/update/")):   # local AI / app updates (Windows app)
             if not self._authed():
                 return self._send(401, b'{"error":"login required"}', "application/json")
             # it can start programs on this PC: only CircuitPilot's own page may call it — a custom header (other sites'
@@ -361,11 +361,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             host = self.headers.get("Host") or ""
             if self.headers.get("X-CircuitPilot-App") != "1" or (origin and urllib.parse.urlparse(origin).netloc != host):
                 return self._send(403, b'{"error":"only the CircuitPilot app may do this"}', "application/json")
-            import localai
+            mod = __import__("updater" if path.startswith("/api/update/") else "localai")
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
-                return self._send(200, json.dumps(localai.api(path.rsplit("/", 1)[1], body)).encode(), "application/json")
+                return self._send(200, json.dumps(mod.api(path.rsplit("/", 1)[1], body)).encode(), "application/json")
             except Exception as e:
                 return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
         if path == "/api/parts/archive/download":   # start downloading a parts archive (progress: GET /api/parts/archive)

@@ -316,7 +316,7 @@
           <label class="la-check"><input id="laNoMmap" type="checkbox"> No mmap</label>
           <label class="la-wide">More llama-server options <input id="laExtra" placeholder="any option, e.g. --temp 0.7 --top-k 20 -ot exps=CPU" spellcheck="false"></label>
           <label class="la-wide">Models folder <span class="row" style="gap:6px"><input id="laDir" placeholder="default: %LOCALAPPDATA%\CircuitPilot\models" style="flex:1" spellcheck="false"><button id="laDirBrowse">Browse…</button></span></label>
-          <label class="la-wide">llama.cpp <span class="row" style="gap:6px"><select id="laEngine"><option value="builtin">built in (Vulkan: NVIDIA, AMD, Intel)</option><option value="custom">my llama-server.exe (e.g. a CUDA build)</option></select><input id="laExe" placeholder="C:\…\llama-server.exe" style="flex:1" spellcheck="false"><button id="laExeBrowse">Browse…</button></span></label>
+          <label class="la-wide">llama.cpp <span class="row" style="gap:6px"><select id="laEngine"><option value="builtin">built in (Vulkan: NVIDIA, AMD, Intel)</option><option value="cuda">NVIDIA CUDA (every NVIDIA card, also TCC / Tesla)</option><option value="custom">my llama-server.exe (e.g. a CUDA build)</option></select><input id="laExe" placeholder="C:\…\llama-server.exe" style="flex:1" spellcheck="false"><button id="laExeBrowse">Browse…</button></span></label>
           <label class="la-wide">External engine command (models marked “own engine”, e.g. Inkling-2-Mini on Maya) <input id="laExtCmd" placeholder="e.g. D:\DualGPU\start-maya.bat 64k-new {port}" spellcheck="false"><span class="small muted">{port} = the port CircuitPilot gives it, {model} = the model file, {ctx} = the context. It must serve an OpenAI-compatible API on that port.</span></label>
           <label class="la-wide">… started in folder <input id="laExtCwd" placeholder="(optional)" spellcheck="false"></label>
         </div>
@@ -624,8 +624,9 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611242200"></script>
-<script src="js/app.js?v=202611251500"></script>
+<script src="js/welcome.js?v=202611251600"></script>
+<script src="js/app.js?v=202611251600"></script>
+<script src="js/update.js?v=202611251600"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

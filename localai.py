@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -28,6 +29,11 @@ STATE = os.path.join(DATA, "localai.json")
 FROZEN = bool(getattr(sys, "frozen", False))
 APP_DIR = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(os.path.abspath(__file__))
 NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+# NVIDIA CUDA build of the same llama.cpp (CUDA 12.4: still runs Volta / V100, and sees compute-only TCC cards that Vulkan
+# cannot), downloaded on demand from the llama.cpp release and checked against its published SHA-256
+CUDA_DIR = os.path.join(DATA, "llama-cuda", LLAMA_BUILD)
+CUDA_ZIPS = [(f"llama-{LLAMA_BUILD}-bin-win-cuda-12.4-x64.zip", 358130713, "a7061f8f59053cc1bb2a62a93fde609ad58401b61ff6fbad57469da9a6d41229"),
+             ("cudart-llama-bin-win-cuda-12.4-x64.zip", 391443627, "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6")]
 
 # catalog: Hugging Face repo + file; size and SHA-256 come from Hugging Face's own file list when downloading
 CATALOG = [
@@ -134,6 +140,9 @@ def runtime(st=None):
     s = st["settings"]
     if s.get("engine") == "custom" and s.get("server_exe"):
         return s["server_exe"] if os.path.isfile(s["server_exe"]) else None
+    if s.get("engine") == "cuda":
+        exe = os.path.join(CUDA_DIR, "llama-server.exe")
+        return exe if os.path.isfile(exe) else None
     for p in (os.environ.get("CP_LLAMA_SERVER"), os.path.join(APP_DIR, "llama", "llama-server.exe"),
               os.path.join(APP_DIR, "build", "llama", LLAMA_BUILD, "llama-server.exe")):
         if p and os.path.isfile(p):
@@ -156,8 +165,112 @@ def devices(refresh=False):
                     out.append({"id": m.group(1), "name": m.group(2), "mib": int(m.group(3)), "free_mib": int(m.group(4))})
         except Exception:
             pass
+    # NVIDIA cards this engine does not list (Vulkan cannot use compute-only TCC cards such as a Tesla V100)
+    seen = [d["name"].lower() for d in out]
+    cuda = bool(exe) and os.path.dirname(exe) == CUDA_DIR
+    for g in _nvidia():
+        n = g["name"].lower()
+        hit = next((x for x in seen if n in x or x in n), None)
+        if hit:
+            seen.remove(hit)
+            continue
+        why = "compute-only (TCC) mode: the Vulkan engine cannot use it" if g["tcc"] else "not seen by this engine"
+        out.append({"id": "", "name": g["name"], "mib": g["mib"], "free_mib": g["free_mib"], "missing": True,
+                    "why": why + ("" if cuda else " — get the NVIDIA CUDA engine")})
     _dev_cache.update(t=time.time(), list=out)
     return out
+
+
+def _nvidia():
+    """NVIDIA cards from nvidia-smi: [{name, tcc, mib, free_mib}] ([] without an NVIDIA driver)"""
+    try:
+        r = subprocess.run(["nvidia-smi", "--query-gpu=name,driver_model.current,memory.total,memory.free", "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=20, creationflags=NOWIN)
+        out = []
+        for l in r.stdout.splitlines():
+            f = [x.strip() for x in l.split(",")]
+            if len(f) == 4 and f[0]:
+                out.append({"name": f[0], "tcc": f[1].upper() == "TCC", "mib": int(f[2]) if f[2].isdigit() else 0, "free_mib": int(f[3]) if f[3].isdigit() else 0})
+        return out
+    except Exception:
+        return []
+
+
+def cuda_present():
+    return os.path.isfile(os.path.join(CUDA_DIR, "llama-server.exe")) and os.path.isfile(os.path.join(CUDA_DIR, "ggml-cuda.dll"))
+
+
+def get_cuda():
+    with _lock:
+        if _dl["active"]:
+            raise ValueError("another download is running — wait for it or pause it")
+        if cuda_present():
+            return status()
+        _dl.update(active=True, id="cuda-engine", bytes=0, total=sum(z[1] for z in CUDA_ZIPS), phase="downloading", error=None, cancel=False, speed=0)
+    threading.Thread(target=_get_cuda, daemon=True).start()
+    return status()
+
+
+def _get_cuda():
+    import zipfile
+    try:
+        tmp = CUDA_DIR + ".download"
+        os.makedirs(tmp, exist_ok=True)
+        done, t0, b0 = 0, time.time(), None
+        for name, size, sha in CUDA_ZIPS:
+            dest = os.path.join(tmp, name)
+            have = os.path.getsize(dest) if os.path.isfile(dest) else 0
+            if have > size:
+                os.remove(dest); have = 0
+            if b0 is None:
+                b0 = done + have
+            if have < size:
+                url = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_BUILD}/{name}"
+                req = urllib.request.Request(url, headers={"User-Agent": "CircuitPilot", **({"Range": f"bytes={have}-"} if have else {})})
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    if have and r.status != 206:
+                        have = 0
+                    with open(dest, "ab" if have else "wb") as f:
+                        while True:
+                            if _dl["cancel"]:
+                                _dl.update(phase="paused", active=False)
+                                return
+                            chunk = r.read(1 << 20)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            have += len(chunk)
+                            dt = time.time() - t0
+                            _dl.update(bytes=done + have, speed=int((done + have - b0) / dt) if dt > 1 else 0)
+            _dl.update(phase="checking")
+            h = hashlib.sha256()
+            with open(dest, "rb") as f:
+                for chunk in iter(lambda: f.read(8 << 20), b""):
+                    h.update(chunk)
+            if h.hexdigest() != sha:
+                os.remove(dest)
+                raise IOError(f"{name} does not match its published SHA-256 (deleted) — click again to download it again")
+            done += size
+            _dl.update(phase="downloading", bytes=done)
+        _dl.update(phase="unpacking")
+        os.makedirs(CUDA_DIR, exist_ok=True)
+        for name, _, _ in CUDA_ZIPS:
+            with zipfile.ZipFile(os.path.join(tmp, name)) as z:
+                for n in z.namelist():   # the server and its DLLs, not the other tools
+                    b = os.path.basename(n)
+                    if b and (b.lower().endswith(".dll") or b in ("llama-server.exe", "LICENSE")):
+                        with z.open(n) as src, open(os.path.join(CUDA_DIR, b), "wb") as dst:
+                            shutil.copyfileobj(src, dst, 8 << 20)
+        for name, _, _ in CUDA_ZIPS:
+            os.remove(os.path.join(tmp, name))
+        os.rmdir(tmp)
+        st = _load()
+        st["settings"].update(engine="cuda", gpus=[])
+        _save(st)
+        _dev_cache.update(list=None)
+        _dl.update(phase="done", active=False, bytes=_dl["total"])
+    except Exception as e:
+        _dl.update(phase="error", error=str(e), active=False)
 
 
 def _healthy(port):
@@ -194,7 +307,7 @@ def status():
                       {"present": _present(m), "partial": part, "where": m["files"][0]})
     return {
         "models": models, "active": st["active"], "settings": st["settings"], "models_dir": models_dir(st),
-        "runtime": bool(runtime(st)), "runtime_path": runtime(st), "llama_build": LLAMA_BUILD, "devices": _dev_cache["list"],
+        "runtime": bool(runtime(st)), "runtime_path": runtime(st), "llama_build": LLAMA_BUILD, "devices": _dev_cache["list"], "cuda": cuda_present(),
         "download": {k: _dl[k] for k in ("active", "id", "bytes", "total", "phase", "error", "speed")},
         "server": {"running": running, "ready": running and _healthy(_srv["port"]), "port": _srv["port"], "id": _srv["id"], "alias": _srv["alias"],
                    "engine": _srv["engine"], "url": f"http://127.0.0.1:{_srv['port']}/v1" if running else None,
@@ -377,13 +490,14 @@ def delete(mid):
 
 # ---------- settings ----------
 NUM = {"ngl": (0, 999), "ctx": (512, 1048576), "threads": (0, 512), "batch": (0, 65536), "ubatch": (0, 65536), "start_timeout": (30, 3600)}
-CHOICE = {"device": ("auto", "gpu", "cpu"), "split_mode": ("layer", "row", "none"), "engine": ("builtin", "custom"),
+CHOICE = {"device": ("auto", "gpu", "cpu"), "split_mode": ("layer", "row", "none"), "engine": ("builtin", "cuda", "custom"),
           "kv": ("f16", "bf16", "f32", "q8_0", "q5_1", "q5_0", "q4_1", "q4_0", "iq4_nl"), "flash": ("auto", "on", "off")}
 
 
 def settings(body):
     st = _load()
     s = st["settings"]
+    engine0 = s.get("engine")
     for k, v in (body or {}).items():
         if k in NUM:
             lo, hi = NUM[k]
@@ -391,6 +505,10 @@ def settings(body):
         elif k in CHOICE:
             if v not in CHOICE[k]:
                 raise ValueError(f"{k}: one of {', '.join(CHOICE[k])}")
+            if k == "engine" and v == "cuda" and not cuda_present():
+                raise ValueError("get the NVIDIA CUDA engine first (Graphics cards → Get the CUDA engine)")
+            if k == "engine" and v != s.get("engine"):
+                _dev_cache.update(list=None)
             s[k] = v
         elif k in ("thinking", "mlock", "no_mmap"):
             s[k] = bool(v)
@@ -412,6 +530,8 @@ def settings(body):
             s[k] = str(v or "")[:2000]
         elif k == "active":
             _find(st, v); st["active"] = v
+    if s.get("engine") != engine0:
+        s["gpus"] = []   # Vulkan0 / CUDA0 names differ between engines
     _save(st)
     return status()
 
@@ -542,6 +662,8 @@ def api(op, body=None):
         return download(body.get("id") or _load()["active"])
     if op == "cancel":
         return cancel()
+    if op == "get_cuda":
+        return get_cuda()
     if op == "start":
         return start(body.get("id"))
     if op == "stop":

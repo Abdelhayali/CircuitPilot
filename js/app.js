@@ -2150,19 +2150,29 @@ const App = (() => {
     function renderGpus(devs, sel) {
       if (!devs) { $('#laGpus').textContent = 'click Detect'; return; }
       if (!devs.length) { $('#laGpus').textContent = 'none found (the model runs on the processor)'; return; }
-      $('#laGpus').innerHTML = devs.map(d => `<label class="la-check" style="display:inline-flex;margin-right:10px"><input type="checkbox" class="laGpu" value="${esc(d.id)}"${!sel.length || sel.includes(d.id) ? ' checked' : ''}> ${esc(d.id)}: ${esc(d.name)} (${(d.mib / 1024).toFixed(0)} GB)</label>`).join('');
+      const st = laState || {}, dl = st.download && st.download.active && st.download.id === 'cuda-engine';
+      $('#laGpus').innerHTML = devs.map(d => d.missing
+        ? `<span class="la-check" style="display:inline-flex;margin-right:10px;opacity:.75" title="${esc(d.why)}">✗ ${esc(d.name)} (${(d.mib / 1024).toFixed(0)} GB): ${esc(d.why)}</span>`
+        : `<label class="la-check" style="display:inline-flex;margin-right:10px"><input type="checkbox" class="laGpu" value="${esc(d.id)}"${!sel.length || sel.includes(d.id) ? ' checked' : ''}> ${esc(d.id)}: ${esc(d.name)} (${(d.mib / 1024).toFixed(0)} GB)</label>`).join('')
+        + (devs.some(d => d.missing) && !st.cuda && !dl ? ' <button id="laGetCuda" class="small" title="llama.cpp ' + esc(st.llama_build || '') + ' for NVIDIA CUDA 12.4 (about 750 MB from the llama.cpp release on GitHub, checked with SHA-256). It uses every NVIDIA card, including compute-only (TCC) ones like the Tesla V100.">Get the NVIDIA CUDA engine (750 MB)</button>' : '')
+        + (devs.some(d => d.missing) && st.cuda && st.settings && st.settings.engine !== 'cuda' ? ' <span class="small">→ choose “NVIDIA CUDA” under llama.cpp below and Save</span>' : '');
     }
     async function refreshLocal(first) {
       clearTimeout(localPoll);
       let s; try { s = await localApi('status'); } catch (e) { laMsg('✗ ' + e.message, 'bad'); return; }
+      const wasCuda = laState && laState.download && laState.download.active && laState.download.id === 'cuda-engine';
       laState = s; renderModels_(s);
       if (first) fillSettings(s);
+      if (wasCuda && !s.download.active) {   // the CUDA engine just arrived (the server switched to it): show every card
+        fillSettings(s); $('#laDetect').click();
+        if (s.cuda) toast('✓ NVIDIA CUDA engine installed — every NVIDIA card is usable. Start the model again to use it.', 8000);
+      }
       const d = s.download, sv = s.server, m = s.models.find(x => x.id === s.active) || {};
       $('#laStart').classList.toggle('hidden', !m.present || (sv.running && sv.id === s.active));
       $('#laStop').classList.toggle('hidden', !sv.running);
       $('#laStart').textContent = sv.running ? 'Switch to this model' : 'Start and connect';
       $('#laBar').classList.toggle('hidden', !d.active); if (d.active) $('#laBar').value = d.total ? d.bytes / d.total : 0;
-      if (d.active) laMsg(d.phase === 'checking' ? 'Checking the downloaded file (SHA-256)…' : `Downloading ${(s.models.find(x => x.id === d.id) || {}).name || ''}… ${GB(d.bytes)} of ${d.total ? GB(d.total) : '?'}${d.speed ? ' · ' + (d.speed / 1e6).toFixed(1) + ' MB/s' : ''}`);
+      if (d.active) laMsg(d.phase === 'checking' ? 'Checking the downloaded file (SHA-256)…' : d.phase === 'unpacking' ? 'Unpacking the NVIDIA CUDA engine…' : `Downloading ${d.id === 'cuda-engine' ? 'the NVIDIA CUDA engine' : (s.models.find(x => x.id === d.id) || {}).name || ''}… ${GB(d.bytes)} of ${d.total ? GB(d.total) : '?'}${d.speed ? ' · ' + (d.speed / 1e6).toFixed(1) + ' MB/s' : ''}`);
       else if (d.error) laMsg('✗ ' + d.error, 'bad');
       else if (sv.ready) { laMsg(`✓ ${sv.alias} is running on this PC — the copilot uses it, no internet needed.`, 'good'); connectLocal(sv); }
       else if (sv.running) laMsg(`Starting ${sv.alias} (loading it into the graphics card or memory: up to a few minutes for big models) … ${sv.seconds} s`);
@@ -2191,6 +2201,7 @@ const App = (() => {
     $('#laBrowse').onclick = async () => { try { const r = await localApi('browse', { kind: 'gguf' }); if (r.path) await localDo('add_local', { path: r.path }); } catch (e) { laMsg('✗ ' + e.message, 'bad'); } };
     $('#laDirBrowse').onclick = async () => { const r = await localApi('browse', { kind: 'folder' }).catch(e => (laMsg('✗ ' + e.message, 'bad'), {})); if (r.path) $('#laDir').value = r.path; };
     $('#laExeBrowse').onclick = async () => { const r = await localApi('browse', { kind: 'exe' }).catch(e => (laMsg('✗ ' + e.message, 'bad'), {})); if (r.path) { $('#laExe').value = r.path; $('#laEngine').value = 'custom'; } };
+    $('#laGpus').addEventListener('click', e => { if (e.target.id === 'laGetCuda') { e.target.disabled = true; localDo('get_cuda'); } });
     $('#laDetect').onclick = async () => { $('#laGpus').textContent = 'detecting…'; const r = await localApi('devices').catch(e => ({ devices: [] })); renderGpus(r.devices, (laState && laState.settings.gpus) || []); };
     $('#laSave').onclick = async () => {
       const num = id => +$(id).value || 0, gpus = [...document.querySelectorAll('.laGpu')], sel = gpus.filter(x => x.checked).map(x => x.value);

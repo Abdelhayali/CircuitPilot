@@ -6,7 +6,9 @@ itself when Claude needs it; in the Python setup it uses the node on PATH and st
 """
 import json
 import os
+from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -82,3 +84,75 @@ def connect(port=None):
         json.dump(data, f, indent=2)
     return {"connected": True, "config": path, "entry": data["mcpServers"]["circuitpilot"],
             "next": "Quit Claude Desktop completely (also from the system tray) and open it again, then ask it to design a board."}
+
+
+def _codex_path():
+    if sys.platform != "win32":
+        return shutil.which("codex")
+    # Codex for Windows ships its CLI even when it hasn't been added to PATH.
+    cli = shutil.which("codex.exe")
+    if cli:
+        return cli
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        candidates = (Path(local) / "OpenAI" / "Codex" / "bin").glob("*/codex.exe")
+        latest = max(candidates, key=lambda path: path.stat().st_mtime, default=None)
+        if latest:
+            return str(latest)
+    return None
+
+
+def _codex_run(cli, *args):
+    result = subprocess.run([cli, "mcp", *args], cwd=os.path.expanduser("~"),
+                            capture_output=True, encoding="utf-8", errors="replace",
+                            timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if result.returncode:
+        # Don't include Codex settings or command output in a browser error.
+        raise RuntimeError("Codex could not update or read its MCP settings. Check Settings → MCP Servers in Codex.")
+    return result.stdout
+
+
+def _codex_entry(port):
+    entry = _entry(port)
+    entry["env"]["CP_DATA_DIR"] = os.environ.get("CP_DATA_DIR") or ROOT
+    return entry
+
+
+def _codex_registration(cli, entry):
+    servers = json.loads(_codex_run(cli, "list", "--json"))
+    server = next((server for server in servers if server["name"] == "circuitpilot"), None)
+    if server is None:
+        return False, False
+    transport = server["transport"]
+    env = transport.get("env") or {}
+    points_here = (
+        transport.get("type") == "stdio"
+        and os.path.normcase(transport.get("command") or "") == os.path.normcase(entry["command"] or "")
+        and [os.path.normcase(arg) for arg in transport.get("args") or []] == [os.path.normcase(entry["args"][0])]
+        and all(env.get(key) == value for key, value in entry["env"].items())
+    )
+    return True, points_here and server["enabled"]
+
+
+def codex_status(port):
+    cli = _codex_path()
+    entry = _codex_entry(port)
+    connected, ready = _codex_registration(cli, entry) if cli else (False, False)
+    return {"codex_installed": bool(cli), "node": bool(entry["command"]),
+            "connected": connected, "points_here": ready}
+
+
+def codex_connect(port):
+    cli = _codex_path()
+    if not cli:
+        raise RuntimeError("Install the Codex app on this PC, then try again.")
+    entry = _codex_entry(port)
+    if not entry["command"]:
+        raise RuntimeError("Node.js was not found. The CircuitPilot Windows app includes it.")
+    _, ready = _codex_registration(cli, entry)
+    if not ready:
+        args = ["add", "circuitpilot"]
+        for key, value in entry["env"].items():
+            args += ["--env", f"{key}={value}"]
+        _codex_run(cli, *args, "--", entry["command"], *entry["args"])
+    return {"connected": True, "next": "Restart Codex and open a new chat to use the CircuitPilot tools."}

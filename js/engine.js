@@ -33,14 +33,14 @@ const Engine = (() => {
     { name: 'get_design', ro: true, description: 'Return the full current design: every component (type, value, position, footprint, pins as num:name=net) and all nets.', input_schema: { type: 'object', properties: {} } },
     { name: 'list_parts', ro: true, description: 'List the built-in component types with their pins (number:name), default value and footprints.', input_schema: { type: 'object', properties: {} } },
     {
-      name: 'add_components', description: 'Add one or more components to the schematic. Returns the assigned refs. Overlapping placements are nudged automatically.',
+      name: 'add_components', description: 'Add parts to the schematic. Give each part a built-in type or a database lcsc code. For a generic header use type "connector" and pins in number order. Returns assigned refs.',
       input_schema: {
         type: 'object', required: ['components'], properties: {
           components: {
             type: 'array', items: {
               type: 'object', properties: {
-                type: { type: 'string', enum: types, description: 'Built-in type. Omit when using lcsc.' },
-                lcsc: { type: 'string', description: 'LCSC code of a database part, or key of a My Library / custom part. Gives the real pinout and footprint.' },
+                type: { type: 'string', enum: types, description: 'Built-in type (use "connector" for headers). Omit only when using lcsc.' },
+                lcsc: { type: 'string', description: 'LCSC code or exact My Library part key. For LIB:my_key, pass "my_key" here.' },
                 ref: { type: 'string', description: 'Optional reference designator, e.g. R1. Auto-assigned if omitted.' },
                 value: { type: 'string', description: 'Part value or part number, e.g. 10k, 100n, NE555' },
                 x: { type: 'number', description: 'Schematic X (grid 10). Typical spacing between parts 80-160.' },
@@ -386,7 +386,15 @@ const Engine = (() => {
       case 'update_pcb_text': return Model.mutate(() => Pcb.updateText(+input.index, input));
       case 'remove_pcb_text': return Model.mutate(() => Pcb.removeText(+input.index));
       case 'add_components': {
-        const list = Array.isArray(input.components) ? input.components : [input];
+        const list = (Array.isArray(input.components) ? input.components : [input]).map(s => {
+          const spec = { ...s };
+          // A footprint ID from get_design points to a known part, with its own symbol and pins.
+          if (!spec.type && !spec.lcsc && !spec.part) {
+            const id = /^(?:LIB:(\S+)|LCSC:(C\d+))$/i.exec(String(spec.footprint || '').trim());
+            if (id) spec.part = id[1] || id[2];
+          }
+          return spec;
+        });
         const libs = {}, notes = [];
         // simple built-in parts (their pins do not depend on the part number): a wrong "lcsc" must not block them —
         // small models put values (104 = 100 nF) or references (C1) there
@@ -1013,6 +1021,8 @@ const Engine = (() => {
 - Pins are "REF.PIN" with the pin number or name ("R1.1", "Q1.B", "U1.VCC"). Built-in pin numbers: resistor / capacitor / inductor 1, 2; LED / diode 1 = K (cathode), 2 = A (anode); electrolytic 1 = +, 2 = -; npn / pnp 1 = B, 2 = E, 3 = C; nmos / pmos 1 = G, 2 = S, 3 = D; regulator 1 = IN, 2 = GND, 3 = OUT; opamp 2 = IN-, 3 = IN+, 4 = V-, 6 = OUT, 7 = V+; battery 1 = +, 2 = -; potentiometer 1, 2 = wiper, 3.
 - Ground is the net GND; supplies are +3V3, +5V, +12V, VIN, VBAT. Give important signals clear names (OUT, LED_A, SDA, SCL).
 - Real ICs, modules and connectors: search_parts, then get_part, then add_components with {"lcsc": "Cxxxx"}, and connect with the pin names get_part returned. Simple parts (resistor, capacitor, LED, diode, transistor) use the built-in types with a value and footprint (0603 by default).
+- In add_components, give every part a type or lcsc. For a generic header use {"type":"connector","pins":["SIG","GND"],"footprint":"PinHeader_1x2"}. List pins in number order.
+- For a My Library part, use its exact key in "lcsc": if get_design shows "LIB:LIB_EXAMPLE", send {"lcsc":"LIB_EXAMPLE"}.
 - Build in this order: add every part in ONE add_components call, connect every net in ONE connect call, then run_erc and fix what it reports.
 - PCB: generate_pcb (once, for a new board), then run_drc. If nets stay unrouted, optimize_pcb.
 - Schematic changed after the PCB exists (parts added / removed, nets or footprints changed): update_pcb_from_schematic — it keeps the placement and tracks and only places / routes what changed. Do not call generate_pcb again.

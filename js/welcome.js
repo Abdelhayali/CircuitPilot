@@ -9,6 +9,8 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      'Connect to Codex from Settings to use CircuitPilot’s design tools in a Codex chat',
+      'Local AI can add standard pin headers with named pins and saved library parts from their footprint IDs',
       '💭 Reasoning menu next to the model for local models (Local AI, Ollama, LM Studio, Colab): Auto, Off, Low, Medium or High thinking before each answer',
       '⬆ Update button in the top bar (Windows app): checks for a new version; it lights up when one is out',
       'Quick place keeps parts apart: free board area first (nothing on either side), bottom parts go under top parts only when the board is full, and a part that does not fit goes where it overlaps the least; about 3× faster on full boards',

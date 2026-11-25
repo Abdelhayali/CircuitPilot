@@ -137,6 +137,7 @@ def main():
         f.write("CircuitPilot for Windows\n\nDouble-click CircuitPilot.exe. Your projects are kept in %LOCALAPPDATA%\\CircuitPilot.\n"
                 "Claude Desktop: in CircuitPilot open Settings -> Claude Desktop -> Connect (or run CircuitPilot.exe --connect-claude),\n"
                 "then quit Claude Desktop completely and open it again.\n\n"
+                "Codex: open Settings -> Codex -> Connect to Codex, then restart Codex and open a new chat.\n\n"
                 "pcbgo-v1 on this PC (offline AI): Connect AI -> Run pcbgo-v1 on this PC -> Download (2.8 GB, once) -> Start.\n"
                 "The model is kept in %LOCALAPPDATA%\\CircuitPilot\\models.\n\n"
                 f"Includes Node.js {ver} (MIT licence, node/LICENSE) to run the Claude Desktop connection,\n"

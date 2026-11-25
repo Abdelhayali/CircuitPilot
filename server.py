@@ -333,6 +333,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             elif path == "/api/parts/claude-desktop":
                 import desktop_link
                 out = desktop_link.status()
+            elif path == "/api/parts/codex":
+                import desktop_link
+                out = desktop_link.codex_status(self.server.server_port)
             elif path.startswith("/api/parts/get/"):
                 out = partsdb.get_part(path.rsplit("/", 1)[1])
             else:
@@ -346,6 +349,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path.startswith("/api/jlc/"):
             return self._jlc(path)
+        if path == "/api/parts/codex/connect" and self.command == "POST":
+            if not self._authed():
+                return self._send(401, b'{"error":"login required"}', "application/json")
+            host = self.headers.get("Host") or ""
+            origin = self.headers.get("Origin") or ""
+            local_hosts = {f"{name}:{self.server.server_port}" for name in ("localhost", "127.0.0.1", "[::1]")}
+            if (self.client_address[0] not in ("127.0.0.1", "::1") or host not in local_hosts
+                    or self.headers.get("X-CircuitPilot-App") != "1" or (origin and origin != "http://" + host)):
+                return self._send(403, b'{"error":"Open CircuitPilot on this PC to connect Codex."}', "application/json")
+            import desktop_link
+            try:
+                return self._send(200, json.dumps(desktop_link.codex_connect(self.server.server_port)).encode(), "application/json")
+            except Exception as e:
+                return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
         if path == "/api/parts/claude-desktop/connect":   # add CircuitPilot to Claude Desktop's MCP servers
             if not self._authed():
                 return self._send(401, b'{"error":"login required"}', "application/json")

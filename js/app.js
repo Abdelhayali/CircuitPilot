@@ -1155,7 +1155,7 @@ const App = (() => {
     $('#sMax').value = s.maxTokens; $('#sCtxWin').value = +s.contextWindow > 0 ? s.contextWindow : ''; $('#sCtx').checked = !!s.includeContext; $('#sCompact').value = s.compactTools === true ? 'on' : s.compactTools === false ? 'off' : 'auto'; $('#sWeb').checked = s.webAccess !== false; $('#sBrave').value = s.braveKey || ''; $('#sRelay').value = s.relayUrl || '';
     $('#presets').innerHTML = Object.entries(AI.PRESETS).map(([n, u]) => `<button data-u="${esc(u)}">${esc(n)}</button>`).join('');
     $('#modal').classList.remove('hidden');
-    archiveUi(); claudeUi();
+    archiveUi(); claudeUi(); codexUi();
   }
   // Settings → Claude Desktop (desktop version only: writes Claude Desktop's MCP settings on this PC)
   async function claudeUi() {
@@ -1168,6 +1168,30 @@ const App = (() => {
       try { const r = await AI.partsApi('claude-desktop/connect', { method: 'POST' }); toast('CircuitPilot added to Claude Desktop. ' + r.next, 12000); }
       catch (e) { toast('Could not connect Claude Desktop: ' + e.message, 9000); }
       claudeUi();
+    };
+  }
+  async function codexUi() {
+    const box = $('#sCodex');
+    if (document.body.classList.contains('static-web')) {
+      box.innerHTML = '<div class="muted small">Open the CircuitPilot Windows app to connect Codex.</div>'; return;
+    }
+    let st;
+    try { st = await AI.partsApi('codex'); }
+    catch (e) { box.innerHTML = `<div class="dberr">${esc(e.message)}</div>`; return; }
+    let state = 'Ready to connect';
+    if (!st.codex_installed) state = 'Install the Codex app on this PC to connect';
+    else if (!st.node) state = 'Node.js is required. The CircuitPilot Windows app includes it';
+    else if (st.points_here) state = '✓ Connected to this CircuitPilot';
+    else if (st.connected) state = 'Connect again to use this CircuitPilot';
+    box.innerHTML = `<div class="row archrow"><div class="small ${st.points_here ? 'good' : 'muted'}" style="flex:1">${state}</div><button type="button" ${st.codex_installed && st.node ? '' : 'disabled'}>${st.connected && !st.points_here ? 'Reconnect to Codex' : 'Connect to Codex'}</button></div>`;
+    const button = box.querySelector('button');
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const r = await AI.partsApi('codex/connect', { method: 'POST', headers: { 'X-CircuitPilot-App': '1' } });
+        toast('CircuitPilot connected to Codex. ' + r.next, 12000);
+      } catch (e) { toast('Could not connect to Codex: ' + e.message, 9000); }
+      codexUi();
     };
   }
   // Settings → Parts archives: status, download / update, progress

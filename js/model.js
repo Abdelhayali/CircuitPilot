@@ -165,6 +165,16 @@ const Model = (() => {
       if (!lp) throw new Error(`Part ${code} is not loaded — call get_part (database) or create_part first`);
       spec = Object.assign({}, spec, { type: 'part', lcsc: code, footprint: fpNameFor(code) });
     }
+    // A standard pin-header footprint and ordered pin names identify a generic connector.
+    if (!spec.type && !lp && Array.isArray(spec.pins) && spec.pins.length) {
+      const header = /^PinHeader_1x([1-9]\d*)$/i.exec(spec.footprint || '');
+      if (header) {
+        if (+header[1] !== spec.pins.length) {
+          throw new Error(`${spec.ref || 'Connector'}: ${spec.footprint} needs ${header[1]} pin names in pin-number order; got ${spec.pins.length}.`);
+        }
+        spec = Object.assign({}, spec, { type: 'connector', footprint: 'PinHeader_1x' + header[1] });
+      }
+    }
     // no type given (AI models often send only {value: "4.7k"}): infer the simple ones from the value / reference
     if (!spec.type && !lp) {
       const v = String(spec.value || '').trim(), r = String(spec.ref || '').toUpperCase();
@@ -175,7 +185,7 @@ const Model = (() => {
       if (t) spec = Object.assign({}, spec, { type: t });
     }
     const d = Lib.type(spec.type);
-    if (!d) throw new Error(spec.type ? `Unknown type "${spec.type}". Types: ${Lib.types().join(', ')}` : `Give each component a "type" (${Lib.types().join(', ')}) or "lcsc" for a database part — e.g. {"type": "resistor", "value": "4.7k"}`);
+    if (!d) throw new Error(spec.type ? `Unknown type "${spec.type}". Types: ${Lib.types().join(', ')}` : `${spec.ref || spec.value || 'Component'}: give a built-in "type" (for example "connector" for a header or "resistor" for a resistor), or "lcsc" for a database part. Types: ${Lib.types().join(', ')}`);
     const prefix = lp ? (lp.prefix || 'U').replace(/[^A-Z]/gi, '') || 'U' : d.prefix;
     let ref = spec.ref || nextRef(prefix);
     if (comp(ref)) { if (spec.ref) throw new Error(`Ref ${ref} already exists`); ref = nextRef(prefix); }

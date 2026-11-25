@@ -678,7 +678,7 @@ const Pcb = (() => {
     const S = Model.S; if (!S.pcbs || !S.pcbs.length) { S.pcbs = [{ name: 'PCB 1' }]; S.activePcb = 0; }
     const nm = String(name || 'PCB ' + (S.pcbs.length + 1)).trim().slice(0, 40);
     if (pcbList().some(p => p.name.toLowerCase() === nm.toLowerCase())) throw new Error('There is already a PCB called ' + nm);
-    S.pcbs.push({ name: nm, board: { w: 0, h: 0 }, pcb: Model.blank().pcb, parts: {} });
+    S.pcbs.push({ name: nm, board: { w: 0, h: 0 }, pcb: Model.blank().pcb, parts: {}, rules: { preset: Model.DEFAULT_PCB_PRESET } });
     return S.pcbs.length - 1;
   }
   function renamePcb(v, name) {
@@ -988,7 +988,46 @@ const Pcb = (() => {
     return out;
   }
 
+  function quickPlace(opt) {
+    const S = Model.S, copy = o => JSON.parse(JSON.stringify(o));
+    const board = copy(S.board), pcb = copy(S.pcb);
+    const original = S.components.map(c => [c, c.pcb && copy(c.pcb)]);
+    const restore = () => {
+      S.board = copy(board);
+      S.pcb = copy(pcb);
+      for (const [c, at] of original) { if (at) c.pcb = copy(at); else delete c.pcb; }
+    };
+    const options = { ...opt, grow_to_fit: false };
+    const panel = !!S.board.panel || boardSheetsOn();
+    let result = autoPlace(options);
+    if (result.fits !== false) return result;
+    const from = [S.board.w, S.board.h];
+    let [w, h] = from;
+    if (!panel && w > 0 && h > 0 && !result.overlapping?.length) {
+      const gap = 2 * Math.max(0.8, rules().edgeClearance + 0.4);
+      const sizes = S.components
+        .filter(c => onActivePcb(c))
+        .map(c => Lib.footprint(c.footprint)?.box).filter(Boolean)
+        .map(b => [b[2] - b[0] + gap, b[3] - b[1] + gap]);
+      const partArea = sizes.reduce((total, [a, b]) => total + a * b, 0);
+      let scale = Math.max(1.2, Math.sqrt(1.35 * partArea / (w * h)),
+        ...sizes.map(([a, b]) => Math.min(Math.max(a / w, b / h), Math.max(b / w, a / h))));
+      for (let i = 0; i < 4; i++) {
+        w = Math.ceil(w * scale * 10) / 10;
+        h = Math.ceil(h * scale * 10) / 10;
+        restore();
+        result = autoPlace({ ...options, fit: false, w, h, tries: 1, anneal_s: 0.4 });
+        if (result.fits) return { ...result, grown_from: from };
+        scale = 1.25;
+      }
+    }
+    const hint = result.hint || 'Some components need more room on the board.';
+    restore();
+    return { ...result, board: boardBrief(), placed: placed().length, restored: true, hint: hint + ' Previous placement kept.' };
+  }
+
   function autoPlace(opt = {}) {
+    if (opt.grow_to_fit) return quickPlace(opt);
     const S = Model.S;
     if (!opt._region && boardSheetsOn()) return placeByBoards(opt);
     const given = +opt.w > 0 && +opt.h > 0;
@@ -1614,8 +1653,17 @@ const Pcb = (() => {
     if (!sizes.size) return `No vias (rule: ${R.viaDiameter}/${R.viaDrill} mm)`;
     return [...sizes.values()].map(v => `Vias ${v.d} mm diameter / ${v.drill} mm hole: ${costsExtra(v) ? 'COSTS EXTRA at JLCPCB — choose the matching via size when ordering' : 'JLCPCB standard, no extra cost'}`).join('; ');
   }
+  // EasyEDA Pro's documented 6 mil copper gap, 10 mil default trace width,
+  // 5 mil minimum trace width and 0.61 / 0.305 mm default via.
+  const EASYEDA_PRO_LIMITS = {
+    clearance: 0.1524, padClearance: 0.1524, viaClearance: 0.1524, pourClearance: 0.254,
+    edgeClearance: 0.3, minEdgeClearance: 0.3, minTraceWidth: 0.127, minViaDiameter: 0.5, minViaDrill: 0.3,
+  };
   const RULE_PRESETS = {
-    jlcpcb_free_min: { label: 'JLCPCB 2-layer — small, no extra cost, clean in EasyEDA Pro DRC (0.2 mm tracks, 0.105 / 0.16 mm gaps, vias 0.45/0.3) — default', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.105, padClearance: 0.16, viaClearance: 0.16, pourClearance: 0.26, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
+    easyeda_pro: { label: 'EasyEDA Pro — default (6 mil spacing, 10 mil tracks)', values: {
+      ...JLC_MIN, ...EASYEDA_PRO_LIMITS, traceWidth: 0.254, powerTraceWidth: 0.3, viaDiameter: 0.61, viaDrill: 0.305, layers: 2, neckDown: true,
+    } },
+    jlcpcb_free_min: { label: 'JLCPCB 2-layer — small, no extra cost (0.2 mm tracks, 0.105 / 0.16 mm gaps, vias 0.45/0.3)', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.105, padClearance: 0.16, viaClearance: 0.16, pourClearance: 0.26, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.3, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_tight: { label: 'JLCPCB 2-layer — tightest at no extra cost (0.1 mm everywhere; EasyEDA Pro needs its rules lowered)', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.1, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.2, layers: 2, neckDown: true, ...JLC_MIN } },
     jlcpcb_4layer: { label: 'JLCPCB 4-layer — top, GND / power planes inside, bottom; no extra cost (0.2 mm tracks, 0.105 / 0.16 mm gaps, vias 0.45/0.3; fab minimum 0.09 mm)', values: { traceWidth: 0.2, powerTraceWidth: 0.3, clearance: 0.105, padClearance: 0.16, viaClearance: 0.16, pourClearance: 0.26, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.3, layers: 4, neckDown: true, ...JLC_MIN_4 } },
     jlcpcb_4layer_tight: { label: 'JLCPCB 4-layer — tightest at no extra cost (0.09 mm gaps, 0.15 mm tracks, vias 0.45/0.3; EasyEDA Pro needs its rules lowered)', values: { traceWidth: 0.15, powerTraceWidth: 0.3, clearance: 0.09, viaDiameter: 0.45, viaDrill: 0.3, edgeClearance: 0.2, layers: 4, neckDown: true, ...JLC_MIN_4 } },
@@ -1627,7 +1675,7 @@ const Pcb = (() => {
     cnc3018: { label: 'CNC milling — 3018 / GRBL desktop CNC (1 layer, 0.9 mm tracks, 0.4 mm gaps, 0.8 / 1.0 mm drills, no vias)', values: { traceWidth: 0.9, powerTraceWidth: 1.0, powerWider: false, clearance: 0.4, padClearance: 0.4, viaClearance: 0.4, pourClearance: 0.6, viaDiameter: 2.0, viaDrill: 0.8, edgeClearance: 1.5, layers: 1, neckDown: true, minTraceWidth: 0.5, minClearance: 0.4, minViaDrill: 0.8, minViaDiameter: 1.8, minAnnularRing: 0.5, minPthRing: 0.35, minHoleToHole: 1.0, minEdgeClearance: 1.5, minHoleSize: 0.8, pourMinArea: 2, trackStyle: '45', pourUnderSmd: false, smdPadRelief: true, cnc: true } },
     home: { label: 'Home etching (1 layer)', values: { traceWidth: 0.4, powerTraceWidth: 0.8, clearance: 0.4, viaDiameter: 1.2, viaDrill: 0.6, edgeClearance: 1.0, layers: 1, neckDown: true, minTraceWidth: 0.3, minClearance: 0.3, minViaDrill: 0.5, minViaDiameter: 1.0, minAnnularRing: 0.25, minHoleToHole: 0.8, minEdgeClearance: 0.8, minHoleSize: 0.6, pourUnderSmd: false, smdPadRelief: true } },
   };
-  const DEFAULT_PRESET = 'jlcpcb_free_min';
+  const DEFAULT_PRESET = Model.DEFAULT_PCB_PRESET;
   // JLCPCB measures tracks against drill holes too: via hole to track ≥ minHoleToTrack (0.2), plated hole to track
   // ≥ minPthToTrack (0.28). As a copper gap: that minus the ring width — 0.125 mm for a 0.45 / 0.3 via
   // gaps per object kind: tracks to tracks = clearance; anything to a pad = padClearance; anything to a via = viaClearance;
@@ -2491,22 +2539,21 @@ const Pcb = (() => {
   const bboxOf = s => s.k === 'seg' ? [Math.min(s.a[0], s.b[0]) - s.r, Math.min(s.a[1], s.b[1]) - s.r, Math.max(s.a[0], s.b[0]) + s.r, Math.max(s.a[1], s.b[1]) + s.r]
     : s.k === 'circ' ? [s.c[0] - s.r, s.c[1] - s.r, s.c[0] + s.r, s.c[1] + s.r] : [s.cx - s.hw, s.cy - s.hh, s.cx + s.hw, s.cy + s.hh];
 
-  // as: 'easyeda' — the numbers EasyEDA Pro checks (6 mil = 0.1524 mm next to pads and vias, 10 mil pour gap), so the
-  // two tools list the same spots; track-to-track keeps the board's own gap when it is tighter (EasyEDA accepts it)
+  // Compare a board against the same supported limits as the EasyEDA Pro routing preset.
   function drc(o = {}) {
-    if (o.as === 'easyeda') {
-      const S = Model.S, keep = S.rules, R0 = rules();
-      S.rules = Object.assign({}, keep, { clearance: Math.min(R0.clearance, EASYEDA_CL), padClearance: EASYEDA_CL, viaClearance: EASYEDA_CL, pourClearance: 0.254 });
-      let d; try { d = drcI(); } finally { S.rules = keep; }
-      d.violations = d.violations.filter(v => v.type !== 'rules');
-      return Object.assign(d, { as: 'easyeda', summary: 'EasyEDA Pro rules (0.152 mm at pads / vias, 0.254 mm pour): ' + d.summary });
-    }
-    return drcI();
+    if (o.as !== 'easyeda') return drcI();
+    const S = Model.S, keep = S.rules;
+    S.rules = { ...rules(), ...EASYEDA_PRO_LIMITS };
+    try {
+      const d = drcI(true);
+      return { ...d, as: 'easyeda', summary: 'EasyEDA Pro rule check · ' + d.summary };
+    } finally { S.rules = keep; }
   }
-  function drcI() {
+  function drcI(compareEasyEDA = false) {
     const S = Model.S, R = rules(), idx = Model.pinIndex(), cs = placed(), out = [];
+    const strictSpacing = compareEasyEDA || R.preset === 'easyeda_pro';
     const add = (type, msg, x, y, severity = 'error') => out.push({ type, severity, msg, x: +(+x).toFixed(2), y: +(+y).toFixed(2) });
-    for (const w of ruleWarnings(R)) out.push({ type: 'rules', severity: 'warning', msg: w });
+    if (!compareEasyEDA) for (const w of ruleWarnings(R)) out.push({ type: 'rules', severity: 'warning', msg: w });
     if (!S.board.w) return { violations: out, summary: 'No PCB' };
     const missing = S.components.filter(c => !c.pcb && onActivePcb(c) && Lib.footprint(c.footprint));
     for (const c of missing) out.push({ type: 'unplaced', severity: 'error', msg: `${c.ref} is unplaced — update from schematic or make room on the PCB` });
@@ -2541,7 +2588,7 @@ const Pcb = (() => {
       if (pa.some(q => inPoly(q[0], q[1], pb)) || pb.some(q => inPoly(q[0], q[1], pa))) add('pour', `Copper pours ${A.net} and ${B.net} overlap on ${A.layer === 'F' ? 'TopLayer' : A.layer === 'B' ? 'BottomLayer' : A.layer} (short; give one a higher priority)`, pa[0][0], pa[0][1]);
     }
     for (const t of S.pcb.traces) {
-      if (t.w < R.minTraceWidth - 1e-6) add('trace-width', `Trace on ${t.net} is ${t.w} mm (fab minimum ${R.minTraceWidth})`, t.pts[0][0], t.pts[0][1]);
+      if (t.w < R.minTraceWidth - 1e-6) add('trace-width', `Trace on ${t.net} is ${t.w} mm (minimum ${R.minTraceWidth})`, t.pts[0][0], t.pts[0][1]);
       for (let i = 1; i < t.pts.length; i++) objs.push({ s: { k: 'seg', a: t.pts[i - 1], b: t.pts[i], r: t.w / 2 }, net: t.net || '~t' + S.pcb.traces.indexOf(t), layers: [t.layer], what: `trace ${t.net || '(no net)'}`, x: (t.pts[i - 1][0] + t.pts[i][0]) / 2, y: (t.pts[i - 1][1] + t.pts[i][1]) / 2 });
     }
     const costWarned = new Set();
@@ -2560,6 +2607,7 @@ const Pcb = (() => {
     }
     for (const v of S.pcb.vias) {
       objs.push({ s: { k: 'circ', c: [v.x, v.y], r: v.d / 2 }, net: v.net || '~v' + S.pcb.vias.indexOf(v), layers: ['F', 'B'], what: `via ${v.net || '(no net)'}`, drill: v.drill, ring: (v.d - v.drill) / 2, x: v.x, y: v.y });
+      if (v.d < R.minViaDiameter - 1e-6) add('via', `Via diameter ${v.d} < ${R.minViaDiameter} mm`, v.x, v.y);
       if (v.drill < R.minViaDrill - 1e-6) add('via', `Via drill ${v.drill} < ${R.minViaDrill} mm`, v.x, v.y);
       if ((v.d - v.drill) / 2 < R.minAnnularRing - 1e-6) add('via', `Via annular ring ${((v.d - v.drill) / 2).toFixed(3)} < ${R.minAnnularRing} mm`, v.x, v.y);
       if (costsExtra(v) && !costWarned.has(v.d + '/' + v.drill)) { costWarned.add(v.d + '/' + v.drill); add('via-cost', costNote(v), v.x, v.y, 'warning'); }
@@ -2650,10 +2698,10 @@ const Pcb = (() => {
           else if (both && !A.drill && !B.drill && d > 0 && d < (+R.minPadToPad || 0) - 1e-3) {
             // SMD pads of two different parts: placement makes the gap, so it is an error; inside one footprint (fine pitch) a warning
             const refOf = q => q.what.slice(4).split('.')[0], own = refOf(A) === refOf(B);
-            add('pad-to-pad', `${A.what} and ${B.what} are ${d.toFixed(3)} mm apart (JLCPCB minimum ${R.minPadToPad} mm between SMD pads of different nets)${own ? ' — inside one footprint: check its pad size / pitch' : ' — move the parts apart'}`, (A.x + B.x) / 2, (A.y + B.y) / 2, own ? 'warning' : 'error');
+            add('pad-to-pad', `${A.what} and ${B.what} are ${d.toFixed(3)} mm apart (JLCPCB minimum ${R.minPadToPad} mm between SMD pads of different nets)${own ? ' — inside one footprint: check its pad size / pitch' : ' — move the parts apart'}`, (A.x + B.x) / 2, (A.y + B.y) / 2, own && !strictSpacing ? 'warning' : 'error');
           }
           else add(d <= 0 ? 'short' : 'clearance', `${d <= 0 ? 'Short' : 'Clearance ' + d.toFixed(3) + ' mm'} between ${A.what} and ${B.what} (rule ${pc})`, (A.x + B.x) / 2, (A.y + B.y) / 2,
-            both ? 'warning' : (d < R.minClearance || d <= 0 ? 'error' : 'warning'));
+            strictSpacing || (!both && (d < R.minClearance || d <= 0)) ? 'error' : 'warning');
         }
       }
     }
@@ -3408,25 +3456,18 @@ const Pcb = (() => {
   const strokeLines = (A, b, X, layer) => { for (const l of Model.S.pcb.lines || []) if (l.layer === layer && l.pts.length > 1) { b.push(A('C,' + l.w.toFixed(6)) + '*'); b.push(X(...l.pts[0]) + 'D02*'); for (const q of l.pts.slice(1)) b.push(X(...q) + 'D01*'); } };
 
   // ---------- EasyEDA Pro's own rule ----------
-  // EasyEDA Pro checks an imported board against ITS default rule (6 mil = 0.1524 mm between all copper), not the rules
-  // in the file. A board routed tighter (e.g. jlcpcb_tight, 0.1 mm — fine for JLCPCB) then shows spacing "errors" there.
-  const EASYEDA_CL = 0.1524;
   function easyedaRuleCheck() {
-    const S = Model.S, R = rules(); if (!placed().length || !S.board.w) return null;
-    // EasyEDA Pro's default spacing next to pads and vias is 6 mil; between two tracks it accepts tighter gaps (that is
-    // how the jlcpcb_free_min preset is made: 0.105 mm between tracks, 0.16 mm next to pads and vias)
-    if (Math.min(padCl(R), viaCl(R)) >= EASYEDA_CL - 1e-6) return { below: 0, rule: EASYEDA_CL, project: Math.min(padCl(R), viaCl(R)) };
-    const keep = S.rules;
-    S.rules = Object.assign({}, keep, { padClearance: Math.max(padCl(R), EASYEDA_CL), viaClearance: Math.max(viaCl(R), EASYEDA_CL) });
-    let d; try { d = drc(); } finally { S.rules = keep; }
-    const v = d.violations.filter(x => x.type === 'clearance'), gaps = v.map(x => +((/Clearance ([\d.]+) mm/.exec(x.msg) || [])[1])).filter(x => isFinite(x));
-    return { below: v.length, rule: EASYEDA_CL, project: Math.min(padCl(R), viaCl(R)), smallest: gaps.length ? Math.min(...gaps) : null };
+    const R = rules();
+    if (!placed().length || !Model.S.board.w) return null;
+    const rule = EASYEDA_PRO_LIMITS.clearance, project = Math.min(R.clearance, padCl(R), viaCl(R));
+    if (project >= rule - 1e-6) return { below: 0, rule, project };
+    const v = drc({ as: 'easyeda' }).violations.filter(x => x.type === 'clearance');
+    const gaps = v.map(x => +((/Clearance ([\d.]+) mm/.exec(x.msg) || [])[1])).filter(Number.isFinite);
+    return { below: v.length, rule, project, smallest: gaps.length ? Math.min(...gaps) : null };
   }
   function easyedaRuleNote() {
     const c = easyedaRuleCheck(); if (!c || !c.below) return '';
-    return 'EasyEDA Pro will list spacing errors (' + c.below + ' spots here are closer than 0.152 mm to a pad or via; EasyEDA counts every track piece, so its number is larger): it checks its own default rule (0.152 mm / 6 mil), not this board\'s rules (' + c.project + ' mm next to pads and vias' + (c.smallest ? ', closest gap ' + c.smallest.toFixed(3) + ' mm' : '') + ' — fine for JLCPCB, which makes 0.1 mm). ' +
-      'To clear them in EasyEDA Pro: Design → Design Rule → Import, choose the RULES_…_EasyEDA-Pro.json that comes with the EasyEDA export (this board\'s own rules), then run DRC again. ' +
-      'Or route the board with the jlcpcb_free_min preset (0.16 mm next to pads and vias), which EasyEDA Pro accepts as it is.';
+    return `EasyEDA Pro's 6 mil spacing check flags ${c.below} gaps. To use that spacing, select EasyEDA Pro in Rules and re-route. To use this board's own rules in EasyEDA Pro, import the exported RULES_…_EasyEDA-Pro.json under Design → Design Rule and run DRC.`;
   }
 
   function gerbers() {

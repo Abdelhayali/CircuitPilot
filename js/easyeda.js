@@ -417,12 +417,15 @@ const EasyEDA = (() => {
   }
   const isEasyEDA = j => { try { return !!unwrap(j); } catch (e) { return /EasyEDA schematic/.test(e.message) ? 'schematic' : false; } };
   // EasyEDA Pro design rules (Design → Design Rule → Import) made from this board's own rules, so EasyEDA Pro checks what the
-  // board was routed with instead of its 6 mil defaults. Values are rounded DOWN to 0.001 mm (a gap exactly at the rule passes).
+  // board was routed with instead of its 6 mil defaults. Preserve the EasyEDA Pro preset's four-decimal spacing in the exported rules.
   function proRules() {
-    const S = Model.S, R = Pcb.rules(), rd = v => Math.floor(v * 1000 + 1e-6) / 1000;
+    const S = Model.S, R = Pcb.rules(), pro = R.preset === 'easyeda_pro', precision = pro ? 10000 : 1000;
+    const rd = v => Math.floor(v * precision + 1e-6) / precision;
     const cl = R.clearance, pc = Math.max(cl, +R.padClearance || 0), vc = Math.max(cl, +R.viaClearance || 0), zc = Math.max(cl, +R.pourClearance || 0);
-    const vias = S.pcb.vias || [], vd = Math.min(R.viaDiameter, ...vias.map(v => +v.d || R.viaDiameter)), vh = Math.min(R.viaDrill, ...vias.map(v => +v.drill || R.viaDrill));
-    const tw = Math.min(R.traceWidth, ...(S.pcb.traces || []).map(t => +t.w || R.traceWidth));
+    const vias = S.pcb.vias || [];
+    const vd = pro ? R.minViaDiameter : Math.min(R.viaDiameter, ...vias.map(v => +v.d || R.viaDiameter));
+    const vh = pro ? R.minViaDrill : Math.min(R.viaDrill, ...vias.map(v => +v.drill || R.viaDrill));
+    const tw = pro ? R.minTraceWidth : Math.min(R.traceWidth, ...(S.pcb.traces || []).map(t => +t.w || R.traceWidth));
     const holeCu = Math.min(+R.minHoleToTrack || 0.2, (vd - vh) / 2 + vc, 0.176);   // drill hole edge to copper of another net
     const cols = ['Track', 'SMD Pad', 'TH Pad', 'SMD Test Point', 'TH Test Point', 'Via', 'Fill Region/Teardrop', 'Copper/Plane Zone', 'Slot Region', 'Line', 'Text/Image', 'Board Outline'];
     const rows = cols.concat(['Hole']), PAD = /Pad|Test Point/, COPPER = new Set(['Track', 'SMD Pad', 'TH Pad', 'SMD Test Point', 'TH Test Point', 'Via', 'Fill Region/Teardrop', 'Line', 'Text/Image']);

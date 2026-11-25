@@ -9,6 +9,10 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      'New PCBs use the EasyEDA Pro preset for routing and design rule checks',
+      'The AI starts new PCB layouts with Quick place before adjusting individual footprints',
+      'PCB text, board names and board codes can rotate with buttons in their properties',
+      'Quick place can overlap surface-mount parts on opposite sides. It enlarges a board that is too small and keeps the prior layout if placement fails',
       'Component adding repairs stray package labels when the exact library part is known and fixes one-pin generic battery headers',
       'Part lookup and component errors give the AI ready-to-copy JSON for adding parts',
       'Local AI reuses exact parts it already looked up, reports all component errors together, and skips identical failed retries',

@@ -449,7 +449,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611252220');
+      worker = new Worker('js/route-worker.js?v=202611252350');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;
@@ -463,7 +463,7 @@ const App = (() => {
         }
         worker.terminate(); worker = null; $('#routeBusy').classList.add('hidden');
         if (m.type === 'error') { reject(new Error(m.message)); return; }
-        Model.mutate(() => {
+        if (!m.placement?.restored) Model.mutate(() => {
           const S = Model.S;
           for (const [ref, pcb] of m.positions) {
             const c = Model.comp(ref);
@@ -539,6 +539,12 @@ const App = (() => {
     toast(`Files saved to Downloads. On JLCPCB click “Add gerber file” and choose ${fname('-gerbers.zip')} (board ${b.w}×${b.h} mm, layers detected automatically).${asm ? ' For assembly turn on “PCB Assembly” and upload the BOM and CPL .csv files — check part rotations in the preview.' : ''}`, 20000);
   }
 
+  const placementMessage = (placement, success) => {
+    if (placement?.fits === false) return placement.hint || 'Some components need more room.';
+    if (!placement?.grown_from) return success;
+    const { w, h } = placement.board;
+    return `Board enlarged from ${placement.grown_from.join(' × ')} to ${w} × ${h} mm · ${success}`;
+  };
   // AI placement: the copilot plans the floor plan with place_footprints, then routes and fixes what is left
   // AI place: ONE model request (compact parts + nets list → JSON floor plan), then legalise + short polish + route.
   // Much faster than a tool-calling conversation, and works with small / local models.
@@ -565,9 +571,9 @@ const App = (() => {
     const quick = why => {
       report(`**AI place → quick place instead.** ${why}`);
       const place = S.board.w > 0 ? { w: S.board.w, h: S.board.h } : { fit: true };
-      return runRouter({ place: { ...place, no_stack: true }, opt: { noRoute: true } }).then(({ placement }) => {
+      return runRouter({ place: { ...place, grow_to_fit: true }, opt: { noRoute: true } }).then(({ placement }) => {
         Pcb.fit();
-        toast(placement.fits === false ? placement.hint : 'Placed with quick place — press Route', placement.fits === false ? 12000 : 6000);
+        toast(placementMessage(placement, 'Placed with quick place — press Route'), placement.fits === false ? 12000 : 6000);
       });
     };
     if (!AI.modelReady()) return quick('No AI model is set up in this browser (⚙ Settings → API key / model). Settings are stored per browser, so a phone or another browser needs its own.');
@@ -711,7 +717,7 @@ const App = (() => {
     const items = d.violations;
     $('#props').innerHTML = `<div class="ph">Design rule check · <span class="${d.errors ? 'bad' : d.warnings ? 'warn' : 'good'}">${esc(d.summary || '')}</span></div>
       <div class="muted small">Rules: ${esc(Pcb.RULE_PRESETS[Pcb.rules().preset] ? Pcb.RULE_PRESETS[Pcb.rules().preset].label : 'custom')}</div>
-      <div class="seg small" style="margin:4px 0" title="EasyEDA Pro checks its own numbers (0.152 mm next to pads and vias, 0.254 mm pour gap) instead of this board's rules — pick it to see the same list as EasyEDA's DRC"><button data-drcas="" class="${Pcb.ui.drcAs ? '' : 'on'}">This board's rules</button><button data-drcas="easyeda" class="${Pcb.ui.drcAs ? 'on' : ''}">As EasyEDA Pro checks</button></div>` +
+      <div class="seg small" style="margin:4px 0" title="Compare with the EasyEDA Pro preset’s supported spacing, width and via limits"><button data-drcas="" class="${Pcb.ui.drcAs ? '' : 'on'}">This board's rules</button><button data-drcas="easyeda" class="${Pcb.ui.drcAs ? 'on' : ''}">As EasyEDA Pro checks</button></div>` +
       (items.length ? '<ul class="erc drc">' + items.map((v, i) => `<li class="${v.severity === 'error' ? 'error' : 'warn'}" data-v="${i}">${esc(v.msg)}</li>`).join('') + '</ul>' : '<div class="good">✓ No violations</div>');
     $('#props').querySelectorAll('[data-v]').forEach(li => li.onclick = () => gotoDrc(+li.dataset.v));
     $('#props').querySelectorAll('[data-drcas]').forEach(b => b.onclick = () => { Pcb.ui.drcAs = b.dataset.drcas || undefined; showDrc(); });
@@ -1794,12 +1800,12 @@ const App = (() => {
     $('#compSearch').oninput = compShow;
     $('#compSearch').onkeydown = e => { if (e.key === 'Enter') compGo(compHits[0]); if (e.key === 'Escape') $('#compModal').classList.add('hidden'); };
     const routeMsg = r => r && r.routing && r.routing.stopped ? `Stopped — kept the best routing found (${r.routing.unrouted ? r.routing.unrouted + ' nets unrouted' : 'all nets routed'})` : r && r.routing ? `Routed ${r.routing.routed}/${r.routing.total} nets${r.routing.failed.length ? ' — unrouted: ' + r.routing.failed.join(', ') : ''}${r.routing.necked_down && r.routing.necked_down.length ? ' · necked down: ' + r.routing.necked_down.join(', ') : ''}${r.routing.seconds ? ` · ${r.routing.seconds}s` : ''}` : 'Placed — press Route';
-    const runPcb = async (place, noRoute) => { try { const r = await runRouter({ place, opt: { noRoute } }); Pcb.fit(); const pl = r && r.placement, bad = pl && pl.fits === false; toast(bad ? pl.hint : routeMsg(r), bad ? 12000 : 6000); if (!noRoute) showDrc(); } catch (e) { toast(e.message); } };
+    const runPcb = async (place, noRoute) => { try { const r = await runRouter({ place, opt: { noRoute } }); Pcb.fit(); const pl = r && r.placement, bad = pl && pl.fits === false; toast(placementMessage(pl, routeMsg(r)), bad ? 12000 : 6000); if (!noRoute) showDrc(); } catch (e) { toast(e.message); } };
     // empty Board W×H boxes = size the board to the parts; otherwise the outline is kept and the parts are fitted inside
     const boardWH = () => { const w = +$('#boardW').value || 0, h = +$('#boardH').value || 0; return w > 0 && h > 0 ? { w, h } : { fit: true }; };
     $('#btnGen').onclick = () => runPcb(boardWH(), false);
     $('#btnPlace').onclick = () => {};   // menu: AI place / quick place
-    $$('[data-place]').forEach(b => b.onclick = () => { document.activeElement && document.activeElement.blur(); if (b.dataset.place === 'ai') aiPlace(); else runPcb({ ...boardWH(), no_stack: true }, true); });
+    $$('[data-place]').forEach(b => b.onclick = () => { document.activeElement && document.activeElement.blur(); if (b.dataset.place === 'ai') aiPlace(); else runPcb({ ...boardWH(), grow_to_fit: true }, true); });
     $('#btnRoute').onclick = () => {
       if (Pcb.pendingFootprints().length) {
         const r = updateFromSchematic();

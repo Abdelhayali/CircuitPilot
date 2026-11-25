@@ -453,6 +453,7 @@ const PcbView = (() => {
   function selectedLabel() {
     if (ui.item && ui.item.k === 'txt') return { lk: 'text', i: ui.item.i };
     if (ui.item && ui.item.k === 'blbl') return { lk: 'board' };
+    if (ui.item && ui.item.k === 'flbl') return { lk: 'fabid' };
     if (ui.labelOf && !ui.item && ui.sel === ui.labelOf) return { lk: 'part', ref: ui.sel };
     return null;
   }
@@ -605,15 +606,27 @@ const PcbView = (() => {
     if (k === 'Escape') { if (ui.route) finishRoute(); else if (ui.measure) { ui.measure = null; render(); } else if (ui.tool !== 'select') setTool('select'); else { ui.sel = null; ui.item = null; ui.hlNet = null; ui.onSelect(null); render(); } return true; }
     if ((k === 'Delete' || k === 'Backspace') && ui.item) { deleteItem(); return true; }
     const lt = selectedLabel();
-    if (lt && (k === 'r' || k === '+' || k === '=' || k === '-')) {
-      const l = Pcb.silkInfo().find(x => x.kind === lt.lk && (lt.lk === 'part' ? x.ref === lt.ref : lt.lk === 'text' ? x.index === lt.i : true));
-      if (l) Model.mutate(() => setLabel(lt, k === 'r' ? { rotation: ((l.rotation || 0) + (e.shiftKey ? 270 : 90)) % 360 } : { size: Math.max(0.6, Math.round((l.size + (k === '-' ? -0.2 : 0.2)) * 10) / 10) }));
+    if (lt && k === 'r') { rotateLabel(e.shiftKey ? -90 : 90); return true; }
+    if (lt && (k === '+' || k === '=' || k === '-')) {
+      const l = selectedSilkInfo(lt);
+      if (l) Model.mutate(() => setLabel(lt, { size: Math.max(0.6, Math.round((l.size + (k === '-' ? -0.2 : 0.2)) * 10) / 10) }));
       return true;
     }
     if (k === 'r' && selected().length) { rotate(); return true; }
     if ((k === 'Delete' || k === 'Backspace') && selected().length) { del(); return true; }
     if ((k === '+' || k === '=' || k === '-') && ui.tool === 'track') { const w = Math.max(0.05, +((ui.width || curWidth(ui.route && ui.route.net)) + (k === '-' ? -0.05 : 0.05)).toFixed(3)); ui.width = w; $('#pWidth').value = w; if (ui.route) ui.route.w = w; renderLive(); coord(); return true; }
     return false;
+  }
+  const selectedSilkInfo = lt => Pcb.silkInfo().find(l => l.kind === lt.lk
+    && (lt.lk === 'part' ? l.ref === lt.ref : lt.lk === 'text' ? l.index === lt.i : true));
+  function rotateLabel(degrees) {
+    const lt = selectedLabel(), l = lt && selectedSilkInfo(lt);
+    if (l) Model.mutate(() => setLabel(lt, { rotation: l.rotation + degrees }));
+  }
+  const rotateButtons = '<button type="button" data-rotate-silk="90" title="Rotate counter-clockwise (R)">↺ Rotate 90°</button>'
+    + '<button type="button" data-rotate-silk="-90" title="Rotate clockwise (Shift+R)">↻ Rotate 90°</button>';
+  function bindRotateButtons(el) {
+    el.querySelectorAll('[data-rotate-silk]').forEach(b => b.onclick = () => rotateLabel(+b.dataset.rotateSilk));
   }
   function rotate() { const refs = selected(); Model.mutate(() => { for (const r of refs) { const c = Model.comp(r); c.pcb.rot = ((c.pcb.rot || 0) + 90) % 360; } }); }
   // a part is one object in schematic and PCB: deleting it on the board removes it from the design
@@ -908,11 +921,11 @@ const PcbView = (() => {
         <label>Side<select id="ptS"><option value="F" ${t.side !== 'B' ? 'selected' : ''}>Top</option><option value="B" ${t.side === 'B' ? 'selected' : ''}>Bottom (mirrored)</option></select></label>
         <label>X (mm)<input id="ptX" type="number" step="${ui.grid}" value="${t.x}"></label><label>Y (mm)<input id="ptY" type="number" step="${ui.grid}" value="${t.y}"></label>
         <div class="muted small">Drag the text to move it, drag its corner square to resize · R rotates 90° · + / − change the size. 1 mm is the smallest size JLCPCB prints clearly.</div>
-        <div class="row"><button id="ppDel" class="danger">Delete text (Del)</button></div>`;
+        <div class="row">${rotateButtons}<button id="ppDel" class="danger">Delete text (Del)</button></div>`;
       const upd = o => Model.mutate(() => Pcb.updateText(it.i, o));
       $('#ptT').onchange = e => upd({ text: e.target.value }); $('#ptH').onchange = e => upd({ size: +e.target.value }); $('#ptR').onchange = e => upd({ rotation: +e.target.value || 0 }); $('#ptS').onchange = e => upd({ side: e.target.value });
       $('#ptX').onchange = e => upd({ x: +e.target.value }); $('#ptY').onchange = e => upd({ y: +e.target.value });
-      $('#ppDel').onclick = deleteItem;
+      $('#ppDel').onclick = deleteItem; bindRotateButtons(el);
       return true;
     }
     if (it.k === 'ln') {
@@ -935,11 +948,11 @@ const PcbView = (() => {
         <label>Size (mm)<input id="pbH" type="number" step="0.1" min="0.6" value="${L.h || ''}" placeholder="1.2"></label>
         <label>Rotation (°)<input id="pbR" type="number" step="15" value="${L.rot || 0}"></label>
         <label class="chk"><input type="checkbox" id="pbHide" ${L.hide ? 'checked' : ''}> Hide</label>
-        <div class="row"><button id="pbAuto">Automatic position</button></div>
+        <div class="row">${rotateButtons}<button id="pbAuto">Automatic position</button></div>
         <div class="muted small">Empty text = the project name. Drag it on the board to move it.</div>`;
       const upd = o => Model.mutate(() => Pcb.setSilkLabel('board', o));
       $('#pbT').onchange = e => upd({ text: e.target.value }); $('#pbH').onchange = e => upd({ size: +e.target.value || 1.2 }); $('#pbHide').onchange = e => upd({ hidden: e.target.checked });
-      $('#pbAuto').onclick = () => upd({ auto: true }); $('#pbR').onchange = e => upd({ rotation: +e.target.value || 0 });
+      $('#pbAuto').onclick = () => upd({ auto: true }); $('#pbR').onchange = e => upd({ rotation: +e.target.value || 0 }); bindRotateButtons(el);
       return true;
     }
     if (it.k === 'flbl') {
@@ -952,11 +965,11 @@ const PcbView = (() => {
         <label>Size (mm)<input id="pfH" type="number" step="0.1" min="0.6" value="${L.h || ''}" placeholder="1.0"></label>
         <label>Rotation (°)<input id="pfR" type="number" step="15" value="${L.rot || 0}"></label>
         <label class="chk"><input type="checkbox" id="pfHide" ${L.hide ? 'checked' : ''}> Hide</label>
-        <div class="row"><button id="pfAuto">Automatic position</button></div>
+        <div class="row">${rotateButtons}<button id="pfAuto">Automatic position</button></div>
         <div class="muted small">Search this code in Projects to find the design and the revision a board was made from. ${revs.length ? 'Revisions: ' + revs.map(r => 'R' + r.rev).join(', ') + '.' : ''}</div>`;
       const upd = o => Model.mutate(() => Pcb.setSilkLabel('code', o));
       $('#pfS').onchange = e => upd({ side: e.target.value }); $('#pfH').onchange = e => upd({ size: +e.target.value || 1.0 }); $('#pfHide').onchange = e => upd({ hidden: e.target.checked });
-      $('#pfAuto').onclick = () => upd({ auto: true }); $('#pfR').onchange = e => upd({ rotation: +e.target.value || 0 });
+      $('#pfAuto').onclick = () => upd({ auto: true }); $('#pfR').onchange = e => upd({ rotation: +e.target.value || 0 }); bindRotateButtons(el);
       return true;
     }
     if (it.k === 'h') {

@@ -1,7 +1,8 @@
 'use strict';
 // Design state, connectivity, undo/redo, ERC and schematic auto-layout.
 const Model = (() => {
-  const blank = () => ({ name: 'Untitled', components: [], nets: {}, board: { w: 0, h: 0 }, pcb: { traces: [], vias: [], routed: {} }, connStyle: 'auto', lib: {} });
+  const DEFAULT_PCB_PRESET = 'easyeda_pro';
+  const blank = () => ({ name: 'Untitled', components: [], nets: {}, board: { w: 0, h: 0 }, pcb: { traces: [], vias: [], routed: {} }, rules: { preset: DEFAULT_PCB_PRESET }, connStyle: 'auto', lib: {} });
   let S = blank();
   const undoStack = [], redoStack = [], subs = [];
   let netCounter = 1;
@@ -29,7 +30,13 @@ const Model = (() => {
   }
   function load(obj, keepHistory) {
     if (keepHistory) begin(); else { undoStack.length = 0; redoStack.length = 0; }
-    S = Object.assign(blank(), typeof obj === 'string' ? JSON.parse(obj) : JSON.parse(JSON.stringify(obj)));
+    const data = typeof obj === 'string' ? JSON.parse(obj) : JSON.parse(JSON.stringify(obj));
+    S = Object.assign(blank(), data);
+    // Older boards could rely on the old implicit preset. Preserve those rules on load.
+    const legacy = (r, board) => !r?.preset && (board?.w > 0 || Object.keys(r || {}).length)
+      ? { ...r, preset: 'jlcpcb_free_min' } : r;
+    S.rules = legacy(data.rules, S.board) || { preset: DEFAULT_PCB_PRESET };
+    for (const p of S.pcbs || []) if (p.board?.w > 0 || p.rules) p.rules = legacy(p.rules, p.board);
     // custom parts placed by older versions lost their library key (drawn as an empty box): it is still in the footprint name
     for (const c of S.components || []) if (c.type === 'part' && !(S.lib || {})[c.lcsc]) { const m = /^(?:LCSC|LIB):(.+)$/.exec(c.footprint || ''); if (m && S.lib[m[1]]) c.lcsc = m[1]; }
     // stitching vias are automatic (older versions saved them as hand-placed, so rip-up and reroute kept stale ones)
@@ -606,7 +613,7 @@ const Model = (() => {
   }
 
   return {
-    get S() { return S; }, blank, subscribe: f => subs.push(f), emit, begin, mutate, load, undo, redo, snapshot,
+    get S() { return S; }, DEFAULT_PCB_PRESET, blank, subscribe: f => subs.push(f), emit, begin, mutate, load, undo, redo, snapshot,
     setLock: (tool, cb) => { lockedBy = tool || null; if (cb) onLocked = cb; }, get lockedBy() { return lockedBy; },
     canUndo: () => undoStack.length > 0, canRedo: () => redoStack.length > 0,
     comp, pinsWorld, bbox, pinIndex, netOf, resolvePins, addComponent, removeComponent, updateComponent, connect, disconnect,

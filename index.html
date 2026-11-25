@@ -279,6 +279,17 @@
     </div>
     <div id="chLocalPanel" class="hidden">
       <div class="row" style="gap:8px;align-items:center;margin-top:10px"><button id="clBack">← Back</button><h2 style="margin:0">Local AI on this PC</h2></div>
+      <div id="laNoEngine" class="hidden la-box" style="margin-top:10px">
+        <p style="margin:0 0 6px"><b>The website runs models with CircuitPilot's engine on your PC.</b> A web page cannot start programs by itself, so once:</p>
+        <ol class="small" style="margin:0 0 8px;padding-left:20px">
+          <li><a href="https://github.com/Abdelhayali/CircuitPilot/releases/latest" target="_blank" rel="noopener">Download CircuitPilot for Windows</a> (CircuitPilot-Windows.zip), unzip it anywhere.</li>
+          <li>Start <b>CircuitPilot.exe</b> and leave it open (it includes llama.cpp; the NVIDIA CUDA engine can be added in the panel).</li>
+          <li>Come back here: this panel connects by itself. If the browser asks to <b>allow access to devices on your local network</b>, allow it (it only talks to 127.0.0.1).</li>
+        </ol>
+        <p class="small muted" style="margin:0 0 8px">Then you choose the model (pcbgo-v1, Qwen, Gemma, any GGUF from Hugging Face or a file on your PC), the folder for the model files, graphics cards and llama.cpp settings — here or in the app — and the copilot on this website uses the model on your PC. Waiting for CircuitPilot on this PC…</p>
+        <button id="laRetry">↻ Check again</button>
+      </div>
+      <div id="laMain">
       <p class="small" style="margin:8px 0">Pick a model, download it once (resumable, checked with its SHA-256), then <b>Start</b>: it runs on this computer and the copilot uses it, also without internet.</p>
       <div id="laModels" class="la-list"></div>
       <div class="row" style="gap:8px;flex-wrap:wrap;margin:8px 0">
@@ -323,6 +334,7 @@
         <div class="row" style="gap:8px;margin-top:8px"><button id="laSave" class="primary">Save settings</button><span id="laSaved" class="small muted"></span></div>
         <p class="small muted">Quantised KV cache (q8_0, q4_0 …) halves or quarters its memory and needs flash attention. Two GPUs: select both and set the split, e.g. 60,40 for a 24 GB + 16 GB pair.</p>
       </details>
+      </div>
     </div>
     <div id="chColabPanel" class="hidden">
       <div class="row" style="gap:8px;align-items:center;margin-top:10px"><button id="ccBack">← Back</button><h2 style="margin:0">pcbgo-v1 on Google Colab</h2></div>
@@ -624,8 +636,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611251600"></script>
-<script src="js/app.js?v=202611251600"></script>
+<script src="js/welcome.js?v=202611251700"></script>
+<script src="js/app.js?v=202611251700"></script>
 <script src="js/update.js?v=202611251600"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

@@ -9,6 +9,9 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      'pcbgo.site: Run a model on this PC — the website uses CircuitPilot’s engine on your PC (start CircuitPilot.exe once): download models, choose their folder, graphics cards and llama.cpp settings from the website, and the copilot there runs on your own computer',
+      'Changing the board width / height keeps your tracks and vias (and the outline shape); what no longer fits is listed instead of deleted',
+      'Closing the CircuitPilot window ends the app: nothing stays in the background, and the local model server it started stops too (even if the app is killed)',
       'App updates (Windows app): when a new version is released, CircuitPilot asks you — Download update → Install and restart (checked with SHA-256; your projects and settings stay). What’s new → ⬆ Check for updates',
       'Local AI: every NVIDIA card is found — cards in compute-only (TCC) mode such as a Tesla V100 are listed with the reason, and “Get the NVIDIA CUDA engine” (750 MB, once) runs the model on all of them (GPU split works across both)',
       'Quick place keeps every part inside the board outline: when the top side is full, SMD parts go to the bottom (through-hole parts and connectors stay on top); a board too small for all parts gets overlaps inside the outline (listed), never parts outside it. A new quick place on a bigger board brings them back to the top',

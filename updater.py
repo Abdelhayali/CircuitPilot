@@ -155,14 +155,19 @@ def install(port=5173):
     exe = os.path.join(APP_DIR, "CircuitPilot.exe")
     bat = os.path.join(UPD, "install-update.bat")
     log = os.path.join(UPD, "install-update.log")
-    with open(bat, "w", encoding="utf-8") as f:
+    # ping, not timeout: timeout fails without a console. The app starts again with the arguments it has now (e.g. --port)
+    with open(bat, "w", encoding="utf-8", newline="") as f:
         f.write("@echo off\r\n"
-                f":wait\r\ntasklist /FI \"PID eq {os.getpid()}\" | find \"{os.getpid()}\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n"
+                f":wait\r\ntasklist /FI \"PID eq {os.getpid()}\" | find \"{os.getpid()}\" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)\r\n"
                 f"robocopy \"{src}\" \"{APP_DIR}\" /E /R:5 /W:1 /NP > \"{log}\"\r\n"
                 f"if %ERRORLEVEL% LSS 8 rmdir /S /Q \"{os.path.dirname(src)}\"\r\n"
-                f"start \"\" \"{exe}\"\r\n")
-    subprocess.Popen(["cmd", "/c", bat], creationflags=NOWIN | getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-                     close_fds=True, cwd=UPD)
+                f"start \"\" \"{exe}\" {subprocess.list2cmdline(sys.argv[1:])}\r\n")
+    # outside CircuitPilot's process tree and job, so it lives on after CircuitPilot closes
+    flags = NOWIN | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    try:
+        subprocess.Popen(["cmd", "/c", bat], creationflags=flags | 0x01000000, close_fds=True, cwd=UPD)   # CREATE_BREAKAWAY_FROM_JOB
+    except OSError:
+        subprocess.Popen(["cmd", "/c", bat], creationflags=flags, close_fds=True, cwd=UPD)
 
     def quit_app():
         time.sleep(1.5)   # let the answer reach the page

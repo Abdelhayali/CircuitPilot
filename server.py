@@ -44,6 +44,8 @@ def _job_lock(pid):
         return None
     return lk
 
+# the website may drive this PC's local AI engine (CORS, /api/localai/* only)
+SITE_ORIGINS = {"https://pcbgo.site", "https://www.pcbgo.site"}
 PROXY_RE = re.compile(r"^/llm-proxy/(\d{1,5})(/.*)?$")
 STATIC_RE = re.compile(r"^/(|index\.html|styles\.css|favicon\.ico|js/[\w.-]+\.js|js/vendor/(?:manifold\.(?:js|wasm)|TransformControls\.js)|data/kicad-footprints\.txt|data/open-parts\.txt|data/demo-ecg\.json)$")
 HOP_HEADERS = {"host", "origin", "referer", "connection", "content-length", "accept-encoding",
@@ -359,7 +361,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # pages cannot send it without a CORS preflight, which this server never allows) and a same-origin check
             origin = self.headers.get("Origin") or ""
             host = self.headers.get("Host") or ""
-            if self.headers.get("X-CircuitPilot-App") != "1" or (origin and urllib.parse.urlparse(origin).netloc != host):
+            site = origin in SITE_ORIGINS and path.startswith("/api/localai/")   # the website (see _site)
+            if self.headers.get("X-CircuitPilot-App") != "1" or (origin and urllib.parse.urlparse(origin).netloc != host and not site):
                 return self._send(403, b'{"error":"only the CircuitPilot app may do this"}', "application/json")
             mod = __import__("updater" if path.startswith("/api/update/") else "localai")
             try:
@@ -513,8 +516,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
 
+    def _site(self):
+        """the CircuitPilot website (pcbgo.site) may use the local AI engine of this PC: models, downloads, settings, start"""
+        p = self.path.split("?")[0]
+        return (self.headers.get("Origin") or "") in SITE_ORIGINS and (p.startswith("/api/localai/") or p == "/api/version")
+
+    def do_OPTIONS(self):   # CORS preflight: only the website, only the local-AI routes
+        if not self._site():
+            self.send_response(403); self.send_header("Content-Length", "0"); self.end_headers(); return
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin"))
+        self.send_header("Access-Control-Allow-Methods", "GET, POST")
+        self.send_header("Access-Control-Allow-Headers", "content-type, x-circuitpilot-app")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Vary", "Origin")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _send(self, code, body, ctype):
         self.send_response(code)
+        if self._site():
+            self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin"))
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.send_header("Vary", "Origin")
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

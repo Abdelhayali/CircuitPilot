@@ -69,12 +69,31 @@ def edge():
     return None
 
 
+def _no_background(prof):
+    """Edge must not keep running in the background when the CircuitPilot window is closed (else the app never ends)"""
+    try:
+        path = os.path.join(prof, "Local State")
+        st = {}
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                st = json.load(f)
+        if (st.get("background_mode") or {}).get("enabled") is False:
+            return
+        st.setdefault("background_mode", {})["enabled"] = False
+        os.makedirs(prof, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(st, f)
+    except Exception as e:
+        log("background mode", e)
+
+
 def open_window(url, wait=False):
     """the app in its own window; returns the window process (None when it fell back to the default browser)"""
     e = edge()
     if e:
         # a separate profile, so the window is its own process (we can tell when it is closed) and keeps its own storage
         prof = os.path.join(DATA, "window")
+        _no_background(prof)
         p = subprocess.Popen([e, f"--app={url}", f"--user-data-dir={prof}", "--no-first-run", "--no-default-browser-check", "--window-size=1500,950"])
         if wait:
             p.wait()
@@ -153,24 +172,19 @@ def main():
     if win is None:   # no Edge: the default browser shows the app; keep serving until the user says stop
         message("CircuitPilot", f"CircuitPilot is running at {url} in your browser.\n\nClick OK to stop it.")
     else:
-        win.wait()
-        # the window is closed; if another window or Claude Desktop still uses the server, keep it a little longer
-        while True:
-            time.sleep(20)
-            if not _in_use(a.port):
-                break
-    srv.shutdown()
+        win.wait()   # every CircuitPilot window is closed (they share this Edge process)
+    # closing the app ends it: the model server it started goes too (also kept in a kill-on-close job, see localai)
     log("stop")
-    return 0
-
-
-def _in_use(port):
-    """a CircuitPilot tab is still open (it polls the render bridge) or Claude is mid-task"""
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/render/tabs", timeout=2) as r:
-            return bool(json.loads(r.read() or b"{}").get("tabs"))
+        import localai
+        localai.stop()
     except Exception:
-        return False
+        pass
+    try:
+        srv.shutdown()
+    except Exception:
+        pass
+    os._exit(0)   # no thread (downloads, jobs) keeps the process alive in the background
 
 
 if __name__ == "__main__":

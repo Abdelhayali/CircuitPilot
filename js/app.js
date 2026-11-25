@@ -1824,7 +1824,24 @@ const App = (() => {
     };
     initRules();
     $('#btnUnroute').onclick = () => Model.mutate(() => { Model.S.pcb = Object.assign({}, Model.S.pcb, { traces: [], vias: [], routed: {} }); });
-    const setBoard = () => Model.mutate(() => { const w = +$('#boardW').value, h = +$('#boardH').value; if (w > 0 && h > 0) { Model.S.board = { w, h }; Model.S.pcb = Object.assign({}, Model.S.pcb, { traces: [], vias: [], routed: {} }); } });
+    // new board size: tracks, vias, pours and the outline's shape stay (a custom outline is scaled to the new size);
+    // anything the smaller board no longer holds is reported, not deleted
+    const setBoard = () => {
+      const w = +$('#boardW').value, h = +$('#boardH').value;
+      if (!(w > 0 && h > 0)) return;
+      Model.mutate(() => {
+        const b = Model.S.board, sh = b.shape;
+        if (sh && sh.type === 'polygon' && sh.pts && b.w > 0 && b.h > 0) {
+          const kx = w / b.w, ky = h / b.h;
+          Model.S.board = Object.assign({}, b, { w, h, shape: Object.assign({}, sh, { pts: sh.pts.map(q => [+(q[0] * kx).toFixed(3), +(q[1] * ky).toFixed(3)]) }) });
+        } else Model.S.board = Object.assign({}, b, { w, h });
+      });
+      const out = p => p[0] < -0.01 || p[1] < -0.01 || p[0] > w + 0.01 || p[1] > h + 0.01;
+      const P = Model.S.pcb, tOut = (P.traces || []).filter(t => (t.pts || []).some(q => out(Array.isArray(q) ? q : [q.x, q.y]))).length;
+      const vOut = (P.vias || []).filter(v => out([v.x, v.y])).length;
+      const cOut = Model.S.components.filter(c => c.pcb && c.pcb.placed !== false && c.pcb.x != null && out([c.pcb.x, c.pcb.y])).map(c => c.ref);
+      if (tOut || vOut || cOut.length) toast(`Board ${w} × ${h} mm — outside the new outline: ${[cOut.length ? cOut.length + ' part' + (cOut.length > 1 ? 's' : '') + ' (' + cOut.slice(0, 8).join(', ') + (cOut.length > 8 ? '…' : '') + ')' : '', tOut ? tOut + ' track' + (tOut > 1 ? 's' : '') : '', vOut ? vOut + ' via' + (vOut > 1 ? 's' : '') : ''].filter(Boolean).join(', ')}. Your routing is kept: move them in (Quick place keeps parts inside) and re-route what DRC reports.`, 9000);
+    };
     $('#boardW').onchange = setBoard; $('#boardH').onchange = setBoard;
     $$('[data-layer]').forEach(cb => cb.onchange = () => { Pcb.ui.show[cb.dataset.layer] = cb.checked; Pcb.render(); });
     $('#btnGerber').onclick = () => exportAs('gerber');
@@ -2109,8 +2126,13 @@ const App = (() => {
     const LOCAL_NAME = 'Local AI (this PC)', OLD_LOCAL = /^(pcbgo-v1 on this PC|Local AI \(this PC\))$/, GB = b => (b / 1e9).toFixed(b >= 1e10 ? 1 : 2) + ' GB';
     const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     let localPoll = null, laState = null;
+    // on the website (pcbgo.site) the panel drives the CircuitPilot engine on this PC (CircuitPilot.exe, port 5173)
+    const LA_SITE = /(^|\.)pcbgo\.site$/i.test(location.hostname), LA_BASE = LA_SITE ? 'http://127.0.0.1:5173' : '';
+    const LA_GET = 'https://github.com/Abdelhayali/CircuitPilot/releases/latest';
     async function localApi(op, body) {
-      const r = await fetch('/api/localai/' + op, op === 'status' ? { cache: 'no-store' } : { method: 'POST', headers: { 'content-type': 'application/json', 'X-CircuitPilot-App': '1' }, body: JSON.stringify(body || {}) });
+      let r;
+      try { r = await fetch(LA_BASE + '/api/localai/' + op, op === 'status' ? { cache: 'no-store' } : { method: 'POST', headers: { 'content-type': 'application/json', 'X-CircuitPilot-App': '1' }, body: JSON.stringify(body || {}) }); }
+      catch (e) { throw Object.assign(new Error(LA_SITE ? 'CircuitPilot is not running on this PC' : e.message), { noEngine: LA_SITE }); }
       const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j;
     }
     const laMsg = (t, cls) => { const st = $('#laStatus'); st.className = (cls || '') + ' small'; st.textContent = t; };
@@ -2159,7 +2181,8 @@ const App = (() => {
     }
     async function refreshLocal(first) {
       clearTimeout(localPoll);
-      let s; try { s = await localApi('status'); } catch (e) { laMsg('✗ ' + e.message, 'bad'); return; }
+      let s; try { s = await localApi('status'); $('#laNoEngine').classList.add('hidden'); $('#laMain').classList.remove('hidden'); }
+      catch (e) { if (e.noEngine) { $('#laNoEngine').classList.remove('hidden'); $('#laMain').classList.add('hidden'); if (!$('#chooseModal').classList.contains('hidden')) localPoll = setTimeout(() => refreshLocal(true), 4000); return; } laMsg('✗ ' + e.message, 'bad'); return; }
       const wasCuda = laState && laState.download && laState.download.active && laState.download.id === 'cuda-engine';
       laState = s; renderModels_(s);
       if (first) fillSettings(s);
@@ -2186,7 +2209,7 @@ const App = (() => {
     function showLocalPanel() { for (const id of ['#chPicks', '#chOwnPanel', '#chColabPanel']) $(id).classList.add('hidden'); $('#chLocalPanel').classList.remove('hidden'); $('#chooseModal').classList.remove('hidden'); refreshLocal(true); }
     const localDo = (op, body) => localApi(op, body).then(() => refreshLocal()).catch(e => laMsg('✗ ' + e.message, 'bad'));
     $('#chLocal').onclick = showLocalPanel;
-    $('#clBack').onclick = () => { $('#chLocalPanel').classList.add('hidden'); $('#chPicks').classList.remove('hidden'); };
+    $('#clBack').onclick = () => { clearTimeout(localPoll); $('#chLocalPanel').classList.add('hidden'); $('#chPicks').classList.remove('hidden'); };
     $('#laModels').addEventListener('change', e => { if (e.target.name === 'laM') localDo('settings', { active: e.target.value }); });
     $('#laModels').addEventListener('click', e => {
       const b = e.target.closest('[data-la]'); if (!b) return;
@@ -2237,6 +2260,8 @@ const App = (() => {
       else if (b.dataset.repo) hfFiles(b.dataset.repo);
     });
     // only where CircuitPilot's own server runs (not pcbgo.site); start the model by itself when it is the selected AI
+    if (LA_SITE) $('#chLocal').classList.remove('hidden');   // the website: the panel says how to get the engine when it is not running
+    $('#laRetry').onclick = () => refreshLocal(true);
     localApi('status').then(s => {
       $('#chLocal').classList.remove('hidden');
       const p = (AI.settings.providers || []).find(p => OLD_LOCAL.test(p.name || '')), m = s.models.find(x => x.id === s.active);

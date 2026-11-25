@@ -29,6 +29,7 @@ STATE = os.path.join(DATA, "localai.json")
 FROZEN = bool(getattr(sys, "frozen", False))
 APP_DIR = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(os.path.abspath(__file__))
 NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+SUSPEND = 0x4 if os.name == "nt" else 0   # CREATE_SUSPENDED: resumed once it is in the job (_in_job)
 # NVIDIA CUDA build of the same llama.cpp (CUDA 12.4: still runs Volta / V100, and sees compute-only TCC cards that Vulkan
 # cannot), downloaded on demand from the llama.cpp release and checked against its published SHA-256
 CUDA_DIR = os.path.join(DATA, "llama-cuda", LLAMA_BUILD)
@@ -76,6 +77,47 @@ _lock = threading.Lock()
 _dl = {"active": False, "id": None, "bytes": 0, "total": 0, "phase": "", "error": None, "cancel": False, "speed": 0}
 _srv = {"proc": None, "port": None, "error": None, "log": None, "id": None, "alias": None, "engine": None, "started": 0}
 _dev_cache = {"t": 0, "list": None}
+_job = {"h": None}
+
+
+def _in_job(p):
+    """put the model server in a Windows job that is killed when CircuitPilot ends (closed, crashed or killed), so no
+    llama-server / external engine stays behind holding the GPU. The process starts suspended, so its own children
+    (cmd → an external engine's server) are in the job too."""
+    if os.name != "nt":
+        return p
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        if not _job["h"]:
+            k32.CreateJobObjectW.restype = wintypes.HANDLE
+            h = k32.CreateJobObjectW(None, None)
+
+            class BASIC(ctypes.Structure):
+                _fields_ = [("a", ctypes.c_int64), ("b", ctypes.c_int64), ("LimitFlags", wintypes.DWORD), ("c", ctypes.c_size_t),
+                            ("d", ctypes.c_size_t), ("e", wintypes.DWORD), ("f", ctypes.c_size_t), ("g", wintypes.DWORD), ("h", wintypes.DWORD)]
+
+            class IO(ctypes.Structure):
+                _fields_ = [(n, ctypes.c_uint64) for n in ("r", "w", "o", "rb", "wb", "ob")]
+
+            class EXT(ctypes.Structure):
+                _fields_ = [("Basic", BASIC), ("Io", IO), ("a", ctypes.c_size_t), ("b", ctypes.c_size_t), ("c", ctypes.c_size_t), ("d", ctypes.c_size_t)]
+            info = EXT()
+            info.Basic.LimitFlags = 0x2000   # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if not k32.SetInformationJobObject(h, 9, ctypes.byref(info), ctypes.sizeof(info)):   # JobObjectExtendedLimitInformation
+                raise OSError(ctypes.get_last_error())
+            _job["h"] = h
+        k32.AssignProcessToJobObject(wintypes.HANDLE(_job["h"]), wintypes.HANDLE(int(p._handle)))
+    except Exception:
+        pass
+    finally:
+        try:
+            import ctypes
+            ctypes.WinDLL("ntdll").NtResumeProcess(ctypes.c_void_p(int(p._handle)))
+        except Exception:
+            pass
+    return p
 
 
 # ---------- state ----------
@@ -549,9 +591,9 @@ def _free_port(start=8091):
 
 
 def _llama_args(exe, m, s, port):
-    origins = ",".join(f"http://{h}:{os.environ.get('CP_PORT', '5173')}" for h in ("localhost", "127.0.0.1"))
+    origins = ",".join([f"http://{h}:{os.environ.get('CP_PORT', '5173')}" for h in ("localhost", "127.0.0.1")] + ["https://pcbgo.site", "https://www.pcbgo.site"])
     a = [exe, "-m", m["files"][0], "--alias", m["alias"], "--host", "127.0.0.1", "--port", str(port), "-c", str(s["ctx"]), "-np", "1",
-         "--jinja", "--no-webui", "--cors-origins", origins]   # only CircuitPilot's own pages may call it
+         "--jinja", "--no-webui", "--cors-origins", origins]   # only CircuitPilot's own pages (and its website) may call it
     if s["device"] == "cpu":
         a += ["--device", "none", "-ngl", "0"]
     else:
@@ -602,14 +644,14 @@ def start(mid=None):
                 raise RuntimeError(f"{m['name']} runs on its own engine: set its start command under Engine → External command (with {{port}})")
             cmd = cmd.replace("{port}", str(port)).replace("{model}", m["files"][0]).replace("{ctx}", str(s["ctx"]))
             logf.write("> " + cmd + "\n"); logf.flush()
-            _srv["proc"] = subprocess.Popen(["cmd", "/c", cmd], stdout=logf, stderr=subprocess.STDOUT, cwd=s["external_cwd"] or None, creationflags=NOWIN)
+            _srv["proc"] = _in_job(subprocess.Popen(["cmd", "/c", cmd], stdout=logf, stderr=subprocess.STDOUT, cwd=s["external_cwd"] or None, creationflags=NOWIN | SUSPEND))
         else:
             exe = runtime(st)
             if not exe:
                 raise RuntimeError("no llama-server: use the Windows app from pcbgo.site, or choose a llama-server.exe under Engine")
             args = _llama_args(exe, m, s, port)
             logf.write("> " + subprocess.list2cmdline(args) + "\n"); logf.flush()
-            _srv["proc"] = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, cwd=os.path.dirname(exe), creationflags=NOWIN)
+            _srv["proc"] = _in_job(subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, cwd=os.path.dirname(exe), creationflags=NOWIN | SUSPEND))
         st["active"] = mid
         _save(st)
     return status()

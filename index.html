@@ -177,6 +177,7 @@
         <button data-mode="agent">Agent</button><button data-mode="ask">Ask</button><button data-mode="plan">Plan</button>
       </div>
       <select id="modelSel" title="Model"></select>
+      <select id="thinkSel" class="hidden" title="Reasoning effort of the local model: how long it thinks before answering"><option value="auto">💭 Auto</option><option value="off">💭 Off</option><option value="low">💭 Low</option><option value="medium">💭 Medium</option><option value="high">💭 High</option></select>
       <button id="btnConnect" class="primary hidden" title="Connect an AI model with your own API key">🔑 Connect AI</button>
     </div>
     <div id="chat"></div>
@@ -610,7 +611,7 @@
 <script src="js/model.js?v=202611241700"></script>
 <script src="js/schematic.js?v=202611170600"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611251800"></script>
+<script src="js/pcb.js?v=202611251930"></script>
 <script src="js/cnc.js?v=202611071200"></script>
 <script src="js/pcbview.js?v=202611232300"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
@@ -627,7 +628,7 @@
 <script src="js/pcb3d.js?v=202611240100"></script>
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
-<script src="js/engine.js?v=202611251800"></script>
+<script src="js/engine.js?v=202611251930"></script>
 <script src="js/ai.js?v=202611251500"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
@@ -637,9 +638,9 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611251800"></script>
-<script src="js/app.js?v=202611251800"></script>
-<script src="js/update.js?v=202611251800"></script>
+<script src="js/welcome.js?v=202611251930"></script>
+<script src="js/app.js?v=202611251930"></script>
+<script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>
   if (/^(www\.)?pcbgo\.site$/.test(location.hostname)) {

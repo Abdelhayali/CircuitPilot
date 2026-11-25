@@ -320,6 +320,21 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
       body: JSON.stringify(Object.assign({ model: model.model || model.id, messages: toOpenAI(hist, system, vision, model.base) }, extra.body || {}, tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })) } : {}, st ? { stream: true, stream_options: { include_usage: true } } : {}))
     });
     let res = await send(stream);
+    // a chat template that refuses this reasoning effort ("Supported types are xhigh, medium, and low"): use the closest
+    // level it lists (high → xhigh), else only thinking on, without a level
+    const kw = extra.body && extra.body.chat_template_kwargs;
+    if (!res.ok && kw && kw.reasoning_effort) {
+      const err = await res.clone().text().catch(() => '');
+      if (/reasoning.?effort/i.test(err)) {
+        const want = kw.reasoning_effort, ok = (/supported[^.]*?are ([^.]+)/i.exec(err) || [, ''])[1].toLowerCase().match(/[a-z]+/g) || [];
+        const pick = ok.includes(want) ? null : ok.find(x => x === 'x' + want) || ok.find(x => x.endsWith(want)) || null;
+        const b = Object.assign({}, extra.body, { chat_template_kwargs: Object.assign({}, kw) });
+        if (pick) { b.chat_template_kwargs.reasoning_effort = pick; b.reasoning_effort = pick; } else { delete b.chat_template_kwargs.reasoning_effort; delete b.reasoning_effort; }
+        extra = Object.assign({}, extra, { body: b });
+        res = await send(stream);
+        if (!res.ok && pick) { delete b.chat_template_kwargs.reasoning_effort; delete b.reasoning_effort; res = await send(stream); }
+      }
+    }
     if (stream && !res.ok && res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429) res = await send(false);
     if (res.ok && /text\/event-stream/i.test(res.headers.get('content-type') || '')) return readStream(res, extra.onDelta);
     const j = await res.json().catch(() => ({}));
@@ -400,6 +415,15 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     try { localStorage.setItem('cp.chat', JSON.stringify(strip(0).map(m => m.checkpoint ? Object.assign({}, m, { checkpoint: undefined }) : m))); } catch (e) { }
   };
   const NO_MODEL = { id: '', label: 'No model', provider: 'none' };
+  // a model on this PC, the local network or the user's own tunnel (Colab): the 💭 Reasoning menu applies to it
+  const isLocal = m => !!m && m.provider === 'openai' && m.pid !== 'shared' && (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(String(m.base || '')) || /trycloudflare\.com/.test(String(m.base || '')));
+  // request fields for a reasoning effort: OpenAI style (llama.cpp, Ollama, LM Studio, vLLM) plus the chat-template
+  // switches llama.cpp passes to the model (Qwen3 / DeepSeek: enable_thinking; gpt-oss: reasoning_effort low/medium/high)
+  function reasoningBody(eff) {
+    if (eff === 'off') return { reasoning_effort: 'none', chat_template_kwargs: { enable_thinking: false } };
+    const cap = +settings.maxTokens || 8192;   // thinking needs room for the answer after it
+    return { reasoning_effort: eff, chat_template_kwargs: { enable_thinking: true, reasoning_effort: eff }, max_tokens: Math.max(cap, { low: 8192, medium: 16384, high: 32768 }[eff] || cap) };
+  }
   const currentModel = () => { const ms = allModels(); return ms.find(m => m.id === settings.model) || ms.find(m => m.model === settings.model) || NO_MODEL; };
 
   // ---------- context window, usage estimate, compression ----------
@@ -579,7 +603,10 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         systemChars = system.length;
         const sentLen = history.length;
         // compact mode on a self-hosted server (Ollama / llama.cpp / LM Studio): thinking off, as pcbgo models are trained
-        const ex = lite && model.provider === 'openai' && !/api\.openai\.com|googleapis|openrouter/.test(model.base || '') ? { body: { reasoning_effort: 'none' } } : {};
+        // the chat's 💭 Reasoning menu (models on this PC / network) overrides that: off, low, medium or high
+        const eff = isLocal(model) ? settings.reasoning || 'auto' : 'auto';
+        const ex = eff !== 'auto' ? { body: reasoningBody(eff) }
+          : lite && model.provider === 'openai' && !/api\.openai\.com|googleapis|openrouter/.test(model.base || '') ? { body: { reasoning_effort: 'none' } } : {};
         // live view: what the model is doing now (reading the conversation, thinking, writing, calling a tool)
         live = { phase: 'model', since: Date.now(), model: model.label, tokens: contextInfo().used };
         hooks.onLive && hooks.onLive();
@@ -654,5 +681,5 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   const modelReady = () => { const m = currentModel(); if (m.provider === 'none') return false; return m.provider === 'anthropic' ? !!settings.anthropicKey : !!m.base; };
 
   const partsApi = Engine.partsApi, loadPart = Engine.loadPart;
-  return { routeOf, onWeb, MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, stop, busy, reset, get history() { return history; }, get live() { return live; }, get queued() { return queue.slice(); }, queueMessage: t => { if (String(t || "").trim()) queue.push(String(t).trim()); }, takeQueue: () => { const q = queue; queue = []; return q; }, execTool, TOOLS, contextInfo, probeContext, compress };
+  return { routeOf, onWeb, MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, isLocal, stop, busy, reset, get history() { return history; }, get live() { return live; }, get queued() { return queue.slice(); }, queueMessage: t => { if (String(t || "").trim()) queue.push(String(t).trim()); }, takeQueue: () => { const q = queue; queue = []; return q; }, execTool, TOOLS, contextInfo, probeContext, compress };
 })();

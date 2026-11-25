@@ -449,7 +449,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611251800');
+      worker = new Worker('js/route-worker.js?v=202611251930');
       $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
       worker.onmessage = e => {
         const m = e.data;
@@ -993,6 +993,13 @@ const App = (() => {
     $('#btnConnect').classList.remove('hidden');
     $('#btnConnect').textContent = ready ? '🔑 AI keys' : '🔑 Connect AI';
     $('#modelSel').classList.remove('hidden');
+    showThink();
+  }
+  // 💭 reasoning effort: only for models on this PC / network (llama.cpp, Ollama, LM Studio, Colab tunnel)
+  function showThink() {
+    const t = $('#thinkSel'); if (!t) return;
+    t.classList.toggle('hidden', !AI.isLocal(AI.currentModel()));
+    t.value = AI.settings.reasoning || 'auto';
   }
 
   // default model per provider (used when connecting and whenever the model list is refreshed)
@@ -1995,6 +2002,11 @@ const App = (() => {
       if (v === '__shared') { window.CPChoose(); renderModels(); return; }
       if (v === '__setup') { openSetup('gemini'); renderModels(); return; }   // not a model: open the setup dialog
       AI.saveSettings({ model: v });
+    };
+    $('#modelSel').addEventListener('change', showThink);
+    $('#thinkSel').onchange = e => {
+      AI.saveSettings({ reasoning: e.target.value });
+      toast({ auto: 'Reasoning: automatic (off for compact pcbgo models, the model’s own default otherwise)', off: 'Reasoning off: answers right away', low: 'Reasoning: low', medium: 'Reasoning: medium', high: 'Reasoning: high (slower, more careful)' }[e.target.value]);
     };
     $('#btnSend').onclick = () => running && !$('#prompt').value.trim() ? AI.stop() : send();
     $('#prompt').addEventListener('input', () => { if (running) setRunning(true); });

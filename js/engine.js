@@ -866,6 +866,7 @@ const Engine = (() => {
         if (input.route === true && placement.fits !== false) {
           const result = await exec('route_pcb', {}, mode, true);
           const { drc, ...routingResult } = result;
+          delete routingResult.placement;
           return { placement, drc, ...routingResult };
         }
         return { ...placement, note: placement.fits === false ? placement.hint : 'Inspect the placement if needed, then call route_pcb.' };

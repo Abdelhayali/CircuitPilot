@@ -9,6 +9,7 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.25', date: '2026-11-25', items: [
+      'Component adding repairs stray package labels when the exact library part is known and fixes one-pin generic battery headers',
       'Part lookup and component errors give the AI ready-to-copy JSON for adding parts',
       'Local AI reuses exact parts it already looked up, reports all component errors together, and skips identical failed retries',
       'Chat shows the model’s generation speed in tokens per second as it responds',

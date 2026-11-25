@@ -423,16 +423,28 @@ const Engine = (() => {
             if (id) {
               spec.part = id[1] || id[2];
             } else {
-              const matches = knownPartFor(spec, knownParts);
+              let matches = knownPartFor(spec, knownParts);
+              const footprint = String(spec.footprint || '').trim();
+              // A stray package label is common in model calls. Prefer a unique known part name
+              // only when the supplied label cannot be placed and doesn't assert a pad count.
+              const unknownLabel = footprint && !/\(\d+ pads?\)$/i.test(footprint) && !Lib.footprint(footprint);
+              if (!matches.length && unknownLabel) matches = knownPartFor({ value: spec.value }, knownParts);
               if (matches.length === 1) {
                 spec.part = keyOf(matches[0]);
-                notes.push(`${spec.ref || spec.value}: used the previously loaded part ${spec.part}`);
+                notes.push(`${spec.ref || spec.value}: used the library part ${spec.part} and its stored footprint`);
               } else if (matches.length > 1) {
                 problems.set(i, `choose one exact "lcsc" key: ${matches.map(keyOf).slice(0, 5).join(', ')}`);
               } else if (/^TP\d+$/i.test(spec.ref || '') && /^PinHeader_1x1$/i.test(spec.footprint || '') && spec.pins == null) {
                 Object.assign(spec, { type: 'connector', footprint: 'PinHeader_1x1', pins: ['1'] });
               }
             }
+          }
+          const onePinHeader = /^PinHeader_1x1$/i.test(spec.footprint || '');
+          const battery = spec.type === 'battery' || (!spec.type && /^B(?:T)?\d+$/i.test(spec.ref || '')
+            && /\b(?:battery|rechargeable|coin[ -]?cell|(?:LI[RF]|CR|BR|ML|VL)\d{3,4})\b/i.test(spec.value || ''));
+          if (onePinHeader && battery && !spec.part && !spec.lcsc && !problems.has(i)) {
+            Object.assign(spec, { type: 'battery', footprint: 'PinHeader_1x2' });
+            notes.push(`${spec.ref || 'Battery'}: corrected the generic header to two pins (positive and negative)`);
           }
           return spec;
         });

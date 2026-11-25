@@ -1087,6 +1087,21 @@ const Pcb = (() => {
     const R = rules(), W = S.board.w, H = S.board.h, poly = boardPoly();
     const noStack = !!opt.no_stack, rectangular = isRectBoard();
     const margin = Math.max(R.edgeClearance + 0.4, 0.8), cx0 = W / 2, cy0 = H / 2;
+    const boardArea = Math.abs(poly.reduce((sum, p, i) => {
+      const q = poly[(i + 1) % poly.length];
+      return sum + p[0] * q[1] - q[0] * p[1];
+    }, 0)) / 2;
+    const footprints = cs.map(c => Lib.footprint(c.footprint).box);
+    const partArea = gap => footprints.reduce((sum, b) => sum + (b[2] - b[0] + gap) * (b[3] - b[1] + gap), 0);
+    const defaultGaps = [1.0, 0.6, 0.3, 0.15];
+    const minGap = +R.partGap || 0;
+    const sparePerPart = (Math.sqrt(boardArea) - Math.sqrt(partArea(0))) / Math.sqrt(cs.length);
+    const channelLimit = Math.min(2.5, Math.max(1.5, 6 * (R.traceWidth + R.clearance)));
+    const channels = Math.min(channelLimit, sparePerPart * 0.45);
+    // Leave room for several tracks between footprints on spacious boards. Tight boards and
+    // explicit compaction keep their previous packing options, including both sides.
+    const roomyGaps = opt.quick && !opt.tight_pack && !opt.compact
+      ? [channels, channels * 0.75].filter(gap => gap > Math.max(minGap, defaultGaps[0]) && partArea(gap) <= boardArea * 0.6) : [];
     // locked parts stay exactly where they are; everything else is arranged around them
     const lockedSet = new Set(cs.filter(c => c.pcb && c.pcb.locked));
     // a part quick place itself moved to the bottom (autoSide) starts on top again; one the user put there stays
@@ -1119,7 +1134,7 @@ const Pcb = (() => {
       let bestS = null, bestC = Infinity;
       for (let k = 0; k < tries; k++) {
         cs.forEach((c, i) => { c.pcb = JSON.parse(JSON.stringify(base[i])); });
-        const r = anneal({ time_s: opt.anneal_s ?? 2, seed: (opt.seed ?? 7) + k * 7919, fixed: fx, compact: opt.compact || 0 });
+        const r = anneal({ time_s: opt.anneal_s ?? 2, seed: (opt.seed ?? 7) + k * 7919, fixed: fx, compact: opt.compact || 0, routingGap: roomyGaps[0] });
         const cst = r.cost_after ?? r.cost ?? 0;
         if (cst < bestC) { bestC = cst; bestS = cs.map(c => JSON.parse(JSON.stringify(c.pcb))); }
       }
@@ -1281,8 +1296,12 @@ const Pcb = (() => {
       return failed;
     }
     let failed = [];
-    // top side only at every gap first (one-sided assembly is cheaper); then top and bottom
-    const passes = []; for (const flip of twoSided ? (opt.tight_pack ? [true] : [false, true]) : [false]) for (const gap of [...new Set([1.0, 0.6, 0.3, 0.15].map(gap => Math.max(+R.partGap || 0, gap)))]) passes.push([gap, flip]);
+    // Try the extra routing room before falling back to close packing. At each spacing,
+    // one-sided assembly remains the first choice when it can fit.
+    const gaps = [...new Set(defaultGaps.map(gap => Math.max(minGap, gap)))];
+    const sides = twoSided ? (opt.tight_pack ? [true] : [false, true]) : [false];
+    const passes = [...roomyGaps.flatMap(gap => sides.map(flip => [gap, flip])),
+      ...sides.flatMap(flip => gaps.map(gap => [gap, flip]))];
     for (let i = 0; i < passes.length; i++) { failed = legalise(passes[i][0], passes[i][1], i === passes.length - 1); if (!failed.length) break; }
     if (opt.tight_pack && failed.length) {
       // A centred part can leave two unusably narrow strips. Try packing from a corner before resizing.
@@ -1296,15 +1315,13 @@ const Pcb = (() => {
     }
     for (const c of cs) if (failed.includes(c.ref)) delete c.pcb;
     const packed = cs.filter(c => c.pcb);
-    const area = cs.reduce((a, c) => { const b = Lib.footprint(c.footprint).box; return a + (b[2] - b[0]) * (b[3] - b[1]); }, 0);
-    let boardArea = 0; for (let i = 0; i < poly.length; i++) { const p = poly[i], q = poly[(i + 1) % poly.length]; boardArea += p[0] * q[1] - q[0] * p[1]; } boardArea = Math.abs(boardArea / 2);
     const hadHoles = (S.pcb.holes || []).filter(h => h.auto), holeD = hadHoles.length ? hadHoles[0].d : 0;
     S.pcb = Object.assign({}, S.pcb, { traces: [], vias: [], routed: {}, pours: (S.pcb.pours || []).filter(pr => pr.whole), holes: [] });
     if (holeD) addMountingHoles({ diameter: holeD });
     const still = overlaps(packed, 0, noStack).map(([a, b]) => `${a.ref}/${b.ref}`);
     const outside = packed.filter(c => !boxInside(c, poly, 0)).map(c => c.ref);
     const res = { board: boardBrief(), kept_board: true, placed: packed.length, fits: !failed.length && !still.length && !outside.length,
-      parts_area_pct: Math.round(area / boardArea * 100),
+      parts_area_pct: Math.round(partArea(0) / boardArea * 100),
       on_edge: edgeParts.filter(e => e.c.pcb).map(e => `${e.c.ref}:${e.placedSide}${e.plug ? ' (opening outward)' : ''}`) };
     if (!res.fits) {
       res.unplaced = failed;
@@ -3711,7 +3728,7 @@ const Pcb = (() => {
       const pins = padsOf(c, idx).length;
       let o = orients.findIndex(q => q.rot === (c.pcb.rot || 0) && q.side === (c.pcb.side === 'B' ? 'B' : 'F')); if (o < 0) o = 0;
       const nb = new Set(orients[0].pads.map(q => q[0]));
-      const margin = Math.max(+R.partGap || 0, Math.min(3, 0.4 + pitch * Math.sqrt(pins) * 0.6 + (boost[c.ref] || 0)));   // never below the rule partGap
+      const margin = Math.max(+R.partGap || 0, opt.routingGap || 0, Math.min(3, 0.4 + pitch * Math.sqrt(pins) * 0.6 + (boost[c.ref] || 0)));
       return { c, x: c.pcb.x, y: c.pcb.y, o, orients, fixed: fixed(c), nets: [...nb], margin, pins };
     });
     // net → [(part index, pad index list)] ; power nets weigh less (wide / poured), large nets get the usual HPWL correction

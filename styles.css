@@ -729,3 +729,4 @@ details.think { margin: 2px 0 6px; font-size: 12px; }
 details.think summary { cursor: pointer; color: var(--muted, #777); }
 .think-body { white-space: pre-wrap; max-height: 220px; overflow: auto; color: var(--muted, #666); border-left: 2px solid var(--border, #ddd); padding: 4px 8px; margin-top: 4px; font-size: 12px; }
 .live-tool { font-size: 12px; padding: 2px 0; word-break: break-all; }
+.msg.user.queued .bub { opacity: .65; border-style: dashed; }

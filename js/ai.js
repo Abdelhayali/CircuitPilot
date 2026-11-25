@@ -388,7 +388,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   }
 
   // ---------- agent loop ----------
-  let history = [], controller = null, live = null;
+  let history = [], controller = null, live = null, queue = [];
   try { history = JSON.parse(localStorage.getItem('cp.chat') || '[]'); } catch (e) { }
   // Attachment bytes are big: browser storage keeps them for the latest messages only (the text is always kept).
   const persist = () => {
@@ -522,9 +522,10 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     const model = currentModel(), lite = isLite(model);
     const tools = (lite ? Engine.LITE.tools() : TOOLS).filter(t => (mode === 'agent' || t.ro) && (settings.webAccess || !t.web));
     history.push(Object.assign({ role: 'user', text, mode, checkpoint: hooks.checkpoint }, hooks.files && hooks.files.length ? { files: hooks.files } : {}));
+    if (settings.includeContext) history[history.length - 1].ctx = designContext();   // the design as it is now, kept with this message (prompt cache, below)
     persist();
     controller = new AbortController();
-    const repeats = new Map(); let stuck = null, ctxSnap = null;
+    const repeats = new Map(); let stuck = null;
     await probeContext(model);
     // compact mode (small models): a part number in the request that is not in the design yet is looked up first, as a
     // normal search_parts call — the model then answers from the database instead of from memory
@@ -545,12 +546,18 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     }
     try {
       for (let step = 0; step < 40; step++) {
+        // messages the user sent while the AI was working: into the conversation before its next step
+        if (step > 0 && queue.length) {
+          const um = { role: 'user', text: queue.join('\n\n'), mode, during: true };
+          queue = [];
+          history.push(um); persist(); hooks.onAssistant(um, null);
+        }
         // auto-compress when the context is 80% full: summarise everything before this turn, then trim this turn's tool output
         if (settings.autoCompress !== false && contextInfo().pct >= 80) {
           const turn = history.map(m => m.role === 'user').lastIndexOf(true);
           hooks.onInfo && hooks.onInfo('Context 80% full — compressing the conversation…');
           let did = false;
-          try { did = turn > 0 && await compress({ keepFrom: turn }); if (did) ctxSnap = null; } catch (e) { if (e.name === 'AbortError') throw e; hooks.onInfo && hooks.onInfo('Auto-compress failed: ' + e.message); }
+          try { did = turn > 0 && await compress({ keepFrom: turn }); } catch (e) { if (e.name === 'AbortError') throw e; hooks.onInfo && hooks.onInfo('Auto-compress failed: ' + e.message); }
           if (contextInfo().pct >= 80) trimToolResults(did ? 2 : turn);
           hooks.onInfo && hooks.onInfo(null);
         }
@@ -559,12 +566,16 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
           const k = await Engine.knowledgeDigest();
           if (k) know = `\n\nPROJECT KNOWLEDGE FOLDER: ${k.folder} (${k.files} files)\nFiles:\n${k.index}\n` + (k.included ? `\nIncluded documents:\n${k.included}` : '') + '\n(Use knowledge_search / knowledge_read for anything not included.)';
         } catch (e) { know = '\n\nPROJECT KNOWLEDGE FOLDER: unavailable (' + e.message + ')'; }
-        // the design summary is taken once per request and kept: a system prompt that changes after every tool call
-        // makes llama.cpp / Ollama / cloud prompt caches useless (the model would re-read the tools and the whole
-        // conversation each step); the model sees later changes in the tool results
-        if (ctxSnap == null) ctxSnap = settings.includeContext ? '\n\n' + designContext() : '';
-        const system = lite ? Engine.LITE.system + '\n\n' + Engine.LITE.mode[mode] + ctxSnap
-          : BASE + '\n\n' + MODE[mode] + know + ctxSnap;
+        // prompt cache: the start of the prompt must stay the same for the whole chat, so llama.cpp / Ollama / cloud
+        // providers re-read only what is new (not the tools and the whole conversation at every step / question).
+        // The system prompt carries the design as it was at the chat's first message; every later question carries the
+        // design as it was then (stored with that message, so it stays the same in later requests); the model sees
+        // changes during a request in the tool results.
+        const firstU = history.find(m => m.role === 'user');
+        if (settings.includeContext && firstU && firstU.ctx == null) { firstU.ctx = designContext(); persist(); }
+        const sysCtx = settings.includeContext && firstU && firstU.ctx ? '\n\n' + firstU.ctx : '';
+        const system = lite ? Engine.LITE.system + '\n\n' + Engine.LITE.mode[mode] + sysCtx
+          : BASE + '\n\n' + MODE[mode] + know + sysCtx;
         systemChars = system.length;
         const sentLen = history.length;
         // compact mode on a self-hosted server (Ollama / llama.cpp / LM Studio): thinking off, as pcbgo models are trained
@@ -573,7 +584,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
         live = { phase: 'model', since: Date.now(), model: model.label, tokens: contextInfo().used };
         hooks.onLive && hooks.onLive();
         ex.onDelta = d => { if (live && live.phase === 'model') Object.assign(live, d); hooks.onLive && hooks.onLive(); };
-        const r = await callModel(model, system, history.map(({ role, text, toolCalls, results, files }) => ({ role, text, toolCalls, results, files })), tools, controller.signal, ex);
+        const r = await callModel(model, system, history.map(m => ({ role: m.role, text: m.role === 'user' && m.ctx && m !== firstU ? (m.text || '') + '\n\n[The design now]\n' + m.ctx : m.text, toolCalls: m.toolCalls, results: m.results, files: m.files })), tools, controller.signal, ex);
         if (r.usage && r.usage.in > 0) lastIn = { tokens: r.usage.in, len: sentLen };
         const msg = Object.assign({ role: 'assistant', text: r.text, toolCalls: r.toolCalls, model: model.label, mode }, r.reasoning ? { reasoning: r.reasoning } : {});
         history.push(msg); persist(); hooks.onAssistant(msg, r.usage);
@@ -639,5 +650,5 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   const modelReady = () => { const m = currentModel(); if (m.provider === 'none') return false; return m.provider === 'anthropic' ? !!settings.anthropicKey : !!m.base; };
 
   const partsApi = Engine.partsApi, loadPart = Engine.loadPart;
-  return { routeOf, onWeb, MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, stop, busy, reset, get history() { return history; }, get live() { return live; }, execTool, TOOLS, contextInfo, probeContext, compress };
+  return { routeOf, onWeb, MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, stop, busy, reset, get history() { return history; }, get live() { return live; }, get queued() { return queue.slice(); }, queueMessage: t => { if (String(t || "").trim()) queue.push(String(t).trim()); }, takeQueue: () => { const q = queue; queue = []; return q; }, execTool, TOOLS, contextInfo, probeContext, compress };
 })();

@@ -814,7 +814,7 @@ const App = (() => {
       if (m.summary) { out.push(`<div class="msg summary"><details><summary>🗜 Earlier conversation compressed${m.compressed ? ` (${m.compressed} message${m.compressed > 1 ? 's' : ''})` : ''}${m.saved ? ` — about ${fmtTok(m.saved)} tokens freed` : ''}. Show summary</summary><div class="md">${md(m.text)}</div></details></div>`); return; }
       if (m.summaryAck) return;
       const atts = (m.files || []).map(f => f.kind === 'image' && f.data ? `<img src="data:${f.mime};base64,${f.data}" alt="${esc(f.name)}" title="${esc(f.name)} (click to enlarge)" class="thumb">` : `<span class="att">${fileIcon(f)} <span class="an">${esc(f.name)}</span></span>`).join('');
-      if (m.role === 'user') out.push(`<div class="msg user">${m.text ? `<div class="bub">${esc(m.text).replace(/\n/g, '<br>')}</div>` : ''}${atts ? `<div class="atts">${atts}</div>` : ''}<div class="meta">${m.mode ? `<span class="mtag ${m.mode}">${m.mode}</span>` : ''}${m.checkpoint ? `<button class="restore" data-i="${i}" title="Restore the design to how it was before this message">↺ restore checkpoint</button>` : ''}</div></div>`);
+      if (m.role === 'user') out.push(`<div class="msg user">${m.text ? `<div class="bub">${esc(m.text).replace(/\n/g, '<br>')}</div>` : ''}${atts ? `<div class="atts">${atts}</div>` : ''}<div class="meta">${m.during ? '<span class="muted small">sent while it was working · </span>' : ''}${m.mode ? `<span class="mtag ${m.mode}">${m.mode}</span>` : ''}${m.checkpoint ? `<button class="restore" data-i="${i}" title="Restore the design to how it was before this message">↺ restore checkpoint</button>` : ''}</div></div>`);
       else if (m.role === 'assistant') {
         let h = '';
         if (m.reasoning) h += `<details class="think"><summary>💭 Thinking <span class="muted">(${m.reasoning.split(/\s+/).length} words)</span></summary><div class="think-body">${esc(m.reasoning)}</div></details>`;
@@ -830,6 +830,7 @@ const App = (() => {
     });
     if (infoMsg) out.push(`<div class="msg info"><span class="spin"></span> ${esc(infoMsg)}</div>`);
     else if (running) out.push(`<div class="msg ai live" id="liveMsg">${liveHtml()}</div>`);
+    for (const q of (running && AI.queued) || []) out.push(`<div class="msg user queued"><div class="bub">${esc(q).replace(/\n/g, '<br>')}</div><div class="meta"><span class="muted small">⏳ waiting — the AI reads this before its next step</span></div></div>`);
     if (lastError) out.push(`<div class="msg err">${esc(lastError)}</div>`);
     const chat = $('#chat'); chat.innerHTML = out.join(''); chat.scrollTop = chat.scrollHeight;
     updateCtx();
@@ -928,7 +929,10 @@ const App = (() => {
   async function send(text) {
     const typed = text === undefined;
     text = (text ?? $('#prompt').value).trim();
-    if (running) return;
+    if (running) {   // the AI is working: the message waits and goes in before its next step
+      if (typed && text) { AI.queueMessage(text); $('#prompt').value = ''; setRunning(true); renderChat(); }
+      return;
+    }
     if (typed && pendingFiles.some(f => f.busy)) { toast('Still reading the attached files…'); return; }
     const files = typed ? pendingFiles.filter(f => !f.error).map(({ busy, size, warn, error, ...f }) => f) : [];
     if (!text && !files.length) return;
@@ -948,8 +952,12 @@ const App = (() => {
     });
     infoMsg = null;
     running = false; setRunning(false); renderChat();
+    // messages sent while it was writing its last answer: the next question
+    const left = AI.takeQueue();
+    if (left.length && !lastError) send(left.join('\n\n'));
   }
-  function setRunning(on) { $('#btnSend').textContent = on ? '■ Stop' : 'Send'; $('#btnSend').classList.toggle('stop', on); }
+  // while the AI works: Send with text in the box sends it to the running task, Stop with an empty box
+  function setRunning(on) { const t = on && $('#prompt').value.trim(); $('#btnSend').textContent = !on ? 'Send' : t ? 'Send ➜' : '■ Stop'; $('#btnSend').classList.toggle('stop', !!on && !t); $('#btnSend').title = on ? (t ? 'Send this to the running task: the AI reads it before its next step' : 'Stop the AI') : ''; }
   function setMode(m) {
     mode = m; $$('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
     $('#modeHint').textContent = { agent: 'Agent: edits your design (checkpointed)', ask: 'Ask: read-only questions & review', plan: 'Plan: proposes a plan before building' }[m];
@@ -1957,7 +1965,8 @@ const App = (() => {
       if (v === '__setup') { openSetup('gemini'); renderModels(); return; }   // not a model: open the setup dialog
       AI.saveSettings({ model: v });
     };
-    $('#btnSend').onclick = () => running ? AI.stop() : send();
+    $('#btnSend').onclick = () => running && !$('#prompt').value.trim() ? AI.stop() : send();
+    $('#prompt').addEventListener('input', () => { if (running) setRunning(true); });
     $('#prompt').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
     $('#btnNewChat').onclick = () => { if (running) return; AI.reset(); lastError = null; renderChat(); };
     // attachments: 📎 button, paste, drag & drop

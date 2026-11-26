@@ -82,6 +82,9 @@ const AI = (() => {
   // browser requests (no CORS — Ollama Cloud, NVIDIA …) simply does not work there. With server.py (desktop app /
   // start.bat) such providers go through the user's own PC.
   let webMode = null;
+  const websiteLocalOrigin = /(^|\.)pcbgo\.site$/i.test(location.hostname) ? 'http://127.0.0.1:5173' : '';
+  const websiteLocalBase = websiteLocalOrigin && websiteLocalOrigin + '/api/localai/inference/v1';
+  const managedLocal = name => /^(Local AI \(this PC\)|pcbgo-v1 on this PC)$/.test(name || '');
   async function onWeb() { if (webMode === null) { try { webMode = !!(window.CPStatic && await CPStatic.detect() === 'static'); } catch (e) { webMode = false; } } return webMode; }
   const desktopOnly = host => new Error(`${host} does not accept requests from web pages. On the web, CircuitPilot sends your key only straight to the provider — never through a server — so use ${host} in the desktop version.`);
   // how a provider is reached: 'direct' (browser → provider), 'desktop' (web version: not possible, desktop only),
@@ -109,6 +112,20 @@ const AI = (() => {
   async function llmFetch(base, path, opts = {}) {
     if (/\/pool\/v1$/.test(String(base || '').trim().replace(/\/+$/, ''))) return poolFetch(String(base).trim().replace(/\/+$/, ''), path, opts);
     base = String(base || '').trim().replace(/\/+$/, '');
+    if (base && base === websiteLocalBase) {
+      const headers = new Headers(opts.headers);
+      headers.delete('Authorization');
+      headers.set('X-CircuitPilot-App', '1');
+      let r;
+      try { r = await fetch(base + path, { ...opts, headers, credentials: 'omit' }); }
+      catch (e) {
+        if (opts.signal?.aborted) throw e;
+        throw new Error('Could not reach the Windows app from pcbgo.site. Keep CircuitPilot running and allow local network access if your browser asks. You can also open the chat directly in the Windows app.');
+      }
+      if (r.status === 404) throw new Error('Update the CircuitPilot Windows app to connect this website to Local AI.');
+      if (r.status === 503) throw new Error('Local AI is stopped or still loading. Open Local AI and wait for the model to be ready.');
+      return r;
+    }
     const web = await onWeb();
     let host = ''; try { host = new URL(base).host; } catch (e) { }
     if (web && /(^|\.)ollama\.com$/.test(host.replace(/:\d+$/, ''))) throw desktopOnly(host);
@@ -167,7 +184,9 @@ const AI = (() => {
   const sharedToken = () => { try { return (typeof GitHub !== 'undefined' && GitHub.getIdToken()) || ''; } catch (e) { return ''; } };
   const sharedModels = () => { const t = sharedToken(); return t ? [{ id: 'shared::circuitpilot', model: 'circuitpilot', label: 'CircuitPilot shared AI (daily limit)', provider: 'openai', pid: 'shared', pname: 'CircuitPilot shared', base: ((window.CP_CONFIG && CP_CONFIG.relay) || '').replace(/\/+$/, '') + '/pool/v1', key: t }] : []; };
   const allModels = () => [...(settings.anthropicKey ? MODELS : []), ...sharedModels(), ...settings.providers.flatMap(p => String(p.models || '').split(',').map(s => s.trim()).filter(Boolean)
-    .map(id => ({ id: p.id + '::' + id, model: id, label: id, provider: 'openai', pid: p.id, pname: p.name, base: p.base, key: p.key })))];
+    .map(id => ({ id: p.id + '::' + id, model: id, label: id, provider: 'openai', pid: p.id, pname: p.name,
+      base: websiteLocalBase && managedLocal(p.name) ? websiteLocalBase : p.base,
+      key: websiteLocalBase && managedLocal(p.name) ? '' : p.key })))];
 
   // Tools live in engine.js (shared with the MCP server / REST API).
   const TOOLS = Engine.TOOLS, execTool = Engine.exec;
@@ -460,7 +479,11 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   // ---------- context window, usage estimate, compression ----------
   // detected context sizes, remembered in this browser so each model is probed once
   const ctxCache = (() => { try { return JSON.parse(localStorage.getItem('cp.ctx') || '{}'); } catch (e) { return {}; } })();
+  let localContext;
+  function setLocalContext(alias, tokens) { localContext = +tokens > 0 ? { alias, tokens: +tokens } : null; }
+  const actualLocalContext = model => managedLocal(model.pname) && localContext?.alias === model.model ? localContext.tokens : 0;
   function contextWindow(model = currentModel()) {
+    if (actualLocalContext(model)) return actualLocalContext(model);
     if (+settings.contextWindow > 0) return +settings.contextWindow;
     if (ctxCache[model.id]) return ctxCache[model.id];
     const id = String(model.model || model.id).toLowerCase();
@@ -474,7 +497,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   }
   // Ask the server for its real context size (llama.cpp /props, LM Studio, OpenRouter-style model lists).
   async function probeContext(model = currentModel()) {
-    if (model.provider === 'anthropic' || model.provider === 'none' || ctxCache[model.id]) return contextWindow(model);
+    if (model.provider === 'anthropic' || model.provider === 'none' || actualLocalContext(model) || ctxCache[model.id]) return contextWindow(model);
     const n = await probeContextRaw(model);
     if (ctxCache[model.id]) { try { localStorage.setItem('cp.ctx', JSON.stringify(ctxCache)); } catch (e) { } }
     return n;
@@ -482,7 +505,7 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   async function probeContextRaw(model) {
     try {
       const base = await resolveBase(model.base), root = base.replace(/\/v1$/, '');
-      const headers = Object.assign(model.key ? { authorization: 'Bearer ' + model.key } : {}, base.includes('/llm-proxy/') ? { 'X-CircuitPilot-App': '1' } : {});
+      const headers = Object.assign(model.key ? { authorization: 'Bearer ' + model.key } : {}, base.includes('/llm-proxy/') || base === websiteLocalBase ? { 'X-CircuitPilot-App': '1' } : {});
       const get = async u => { const r = await fetch(u, { headers, signal: AbortSignal.timeout(4000) }); return r.ok ? r.json() : null; };
       const props = await get(root + '/props').catch(() => null);
       const n = props && (props.default_generation_settings?.n_ctx || props.n_ctx);
@@ -735,5 +758,5 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   const modelReady = () => { const m = currentModel(); if (m.provider === 'none') return false; return m.provider === 'anthropic' ? !!settings.anthropicKey : !!m.base; };
 
   const partsApi = Engine.partsApi, loadPart = Engine.loadPart;
-  return { routeOf, onWeb, MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, isLocal, stop, busy, reset, get history() { return history; }, get live() { return live; }, get queued() { return queue.slice(); }, queueMessage: t => { if (String(t || "").trim()) queue.push(String(t).trim()); }, takeQueue: () => { const q = queue; queue = []; return q; }, execTool, TOOLS, contextInfo, probeContext, compress };
+  return { routeOf, onWeb, MODELS, PRESETS, friendlyError, saveProvider, removeProvider, hostName, allModels, fetchModels, partsApi, loadPart, get settings() { return settings; }, saveSettings, run, complete, note, modelReady, currentModel, isLocal, stop, busy, reset, get history() { return history; }, get live() { return live; }, get queued() { return queue.slice(); }, queueMessage: t => { if (String(t || "").trim()) queue.push(String(t).trim()); }, takeQueue: () => { const q = queue; queue = []; return q; }, execTool, TOOLS, contextInfo, probeContext, compress, websiteLocalOrigin, websiteLocalBase, setLocalContext };
 })();

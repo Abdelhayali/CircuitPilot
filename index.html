@@ -221,7 +221,7 @@
     </fieldset>
     <fieldset><legend>Behaviour</legend>
       <label>Max output tokens (Claude)<input id="sMax" type="number" min="1024" step="1024"></label>
-      <label>Context window (tokens, empty = auto-detect)<input id="sCtxWin" type="number" min="0" step="1024" placeholder="auto"></label>
+      <label>Chat context estimate (managed Local AI uses its running context)<input id="sCtxWin" type="number" min="0" step="1024" placeholder="auto"></label>
       <label class="chk"><input id="sCtx" type="checkbox"> Send current design to the model with every request</label>
       <label title="Small local models (2–8B, e.g. CircuitPilot-4B on Ollama or Colab) work far better with 30 core tools and a short prompt (~6k instead of ~23k tokens)">Compact tools for small models <select id="sCompact"><option value="auto">Auto (models named pcbgo… / circuitpilot-…)</option><option value="on">Always</option><option value="off">Never</option></select></label>
       <label class="chk"><input id="sWeb" type="checkbox"> Let the AI search the internet and read web pages / PDF datasheets</label>
@@ -316,7 +316,7 @@
           <div class="la-wide"><span>Graphics cards</span> <span id="laGpus" class="small muted">—</span> <button id="laDetect" class="small">Detect</button></div>
           <label>GPU split <input id="laSplit" placeholder="e.g. 60,40" title="Share of the model per selected GPU (tensor split), in the order above"></label>
           <label>Split mode <select id="laSplitMode"><option value="layer">layer (default)</option><option value="row">row</option><option value="none">none (one GPU)</option></select></label>
-          <label>Context <select id="laCtx"><option value="4096">4k tokens</option><option value="8192">8k tokens</option><option value="16384">16k tokens</option><option value="32768">32k tokens</option><option value="65536">64k tokens</option><option value="131072">128k tokens</option><option value="262144">256k tokens</option></select></label>
+          <label>Context <select id="laCtx"><option value="4096">4k tokens</option><option value="8192">8k tokens</option><option value="16384">16k tokens</option><option value="32768">32k tokens</option><option value="65536">65,536 tokens (64k)</option><option value="131072">128k tokens</option><option value="262144">256k tokens</option></select></label>
           <label>KV cache type <select id="laKv"><option>f16</option><option>bf16</option><option>q8_0</option><option>q5_1</option><option>q5_0</option><option>q4_1</option><option>q4_0</option><option>iq4_nl</option><option>f32</option></select></label>
           <label>Flash attention <select id="laFlash"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label>
           <label>Threads <input id="laThreads" type="number" min="0" placeholder="0 = auto"></label>
@@ -626,7 +626,7 @@
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
 <script src="js/engine.js?v=202611252353"></script>
-<script src="js/ai.js?v=202611252351"></script>
+<script src="js/ai.js?v=202611260005"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202611231900"></script>
@@ -635,8 +635,8 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611260004"></script>
-<script src="js/app.js?v=202611260004"></script>
+<script src="js/welcome.js?v=202611260005"></script>
+<script src="js/app.js?v=202611260005"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

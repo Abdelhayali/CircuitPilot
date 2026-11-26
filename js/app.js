@@ -2167,23 +2167,23 @@ const App = (() => {
     // ---- local AI (Windows app / server.py): a GGUF model run by llama.cpp (or an external engine) on 127.0.0.1 — offline
     const LOCAL_NAME = 'Local AI (this PC)', OLD_LOCAL = /^(pcbgo-v1 on this PC|Local AI \(this PC\))$/, GB = b => (b / 1e9).toFixed(b >= 1e10 ? 1 : 2) + ' GB';
     const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    let localPoll = null, laState = null;
+    let localPoll = null, laState = null, restartRequested = false;
     // on the website (pcbgo.site) the panel drives the CircuitPilot engine on this PC (CircuitPilot.exe, port 5173)
-    const LA_SITE = /(^|\.)pcbgo\.site$/i.test(location.hostname), LA_BASE = LA_SITE ? 'http://127.0.0.1:5173' : '';
+    const LA_BASE = AI.websiteLocalOrigin, LA_SITE = !!LA_BASE;
     const LA_GET = 'https://github.com/Abdelhayali/CircuitPilot/releases/latest';
     async function localApi(op, body) {
       let r;
       try { r = await fetch(LA_BASE + '/api/localai/' + op, op === 'status' ? { cache: 'no-store' } : { method: 'POST', headers: { 'content-type': 'application/json', 'X-CircuitPilot-App': '1' }, body: JSON.stringify(body || {}) }); }
-      catch (e) { throw Object.assign(new Error(LA_SITE ? 'CircuitPilot is not running on this PC' : e.message), { noEngine: LA_SITE }); }
+      catch (e) { throw Object.assign(new Error(LA_SITE ? 'Keep CircuitPilot open and allow this site to access the local network if prompted.' : e.message), { noEngine: LA_SITE }); }
       const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j;
     }
     const laMsg = (t, cls) => { const st = $('#laStatus'); st.className = (cls || '') + ' small'; st.textContent = t; };
-    function connectLocal(sv) {
-      const url = sv.url, model = sv.alias;
-      const cur = (AI.settings.providers || []).find(p => p.name === LOCAL_NAME);
+    function connectLocal(sv, url, model = sv.alias) {
+      AI.setLocalContext(model, sv.context_size);
+      updateCtx();
+      const cur = (AI.settings.providers || []).find(p => OLD_LOCAL.test(p.name || ''));
       if (cur && cur.base === url && AI.settings.model === cur.id + '::' + model) return;
-      for (const p of (AI.settings.providers || []).filter(p => OLD_LOCAL.test(p.name || ''))) AI.removeProvider(p.id);
-      const pid = AI.saveProvider({ name: LOCAL_NAME, base: url, key: 'local', models: [model] });
+      const pid = AI.saveProvider({ id: cur?.id, name: LOCAL_NAME, base: url, key: LA_SITE ? '' : 'local', models: [model] });
       AI.saveSettings({ model: pid + '::' + model });
       renderModels(); renderChat(); AI.probeContext().then(updateCtx);
       toast('🖥 AI: ' + model + ' on this PC (offline)', 6000);
@@ -2233,13 +2233,29 @@ const App = (() => {
         if (s.cuda) toast('✓ NVIDIA CUDA engine installed — every NVIDIA card is usable. Start the model again to use it.', 8000);
       }
       const d = s.download, sv = s.server, m = s.models.find(x => x.id === s.active) || {};
-      $('#laStart').classList.toggle('hidden', !m.present || (sv.running && sv.id === s.active));
+      const contextPending = sv.running && sv.launch_context > 0 && sv.launch_context !== s.settings.ctx;
+      const restart = sv.running && sv.id === s.active && (contextPending || restartRequested);
+      $('#laStart').classList.toggle('hidden', !m.present || (sv.running && sv.id === s.active && !restart));
       $('#laStop').classList.toggle('hidden', !sv.running);
-      $('#laStart').textContent = sv.running ? 'Switch to this model' : 'Start and connect';
+      $('#laStart').textContent = restart ? 'Restart model to apply settings' : sv.running ? 'Switch to this model' : 'Start and connect';
+      if (contextPending) $('#laSaved').textContent = `Saved ${s.settings.ctx.toLocaleString()} tokens. Restart the model to apply.`;
       $('#laBar').classList.toggle('hidden', !d.active); if (d.active) $('#laBar').value = d.total ? d.bytes / d.total : 0;
       if (d.active) laMsg(d.phase === 'checking' ? 'Checking the downloaded file (SHA-256)…' : d.phase === 'unpacking' ? 'Unpacking the NVIDIA CUDA engine…' : `Downloading ${d.id === 'cuda-engine' ? 'the NVIDIA CUDA engine' : (s.models.find(x => x.id === d.id) || {}).name || ''}… ${GB(d.bytes)} of ${d.total ? GB(d.total) : '?'}${d.speed ? ' · ' + (d.speed / 1e6).toFixed(1) + ' MB/s' : ''}`);
       else if (d.error) laMsg('✗ ' + d.error, 'bad');
-      else if (sv.ready) { laMsg(`✓ ${sv.alias} is running on this PC — the copilot uses it, no internet needed.`, 'good'); connectLocal(sv); }
+      else if (sv.ready) {
+        let url = sv.url, model = sv.alias;
+        if (LA_SITE) {
+          if (LA_BASE + sv.inference_path !== AI.websiteLocalBase) { laMsg('Update the CircuitPilot Windows app to use Local AI on pcbgo.site.', 'bad'); return; }
+          url = AI.websiteLocalBase;
+          try {
+            const models = await AI.fetchModels(url);
+            if (!models.includes(model)) model = models[0];
+          } catch (e) { laMsg(e.message, 'bad'); return; }
+        }
+        const tokens = sv.context_size ? ` · ${sv.context_size.toLocaleString()} context tokens` : '';
+        laMsg(`✓ ${model} is ready on this PC${tokens}`, 'good');
+        connectLocal(sv, url, model);
+      }
       else if (sv.running) laMsg(`Starting ${sv.alias} (loading it into the graphics card or memory: up to a few minutes for big models) … ${sv.seconds} s`);
       else if (sv.error) laMsg('✗ ' + sv.error, 'bad');
       else if (m.engine === 'external' && !s.settings.external_cmd) laMsg('This model runs on its own engine: set its start command under Hardware and llama.cpp settings → External engine command.');
@@ -2260,7 +2276,17 @@ const App = (() => {
       if (op === 'delete' && !confirm('Delete the downloaded model file from this PC? You can download it again later.')) return;
       localDo(op, { id });
     });
-    $('#laStart').onclick = () => localDo('start', {});
+    $('#laStart').onclick = async () => {
+      if (AI.busy()) { laMsg('Wait for the current response to finish or stop it before restarting.', 'bad'); return; }
+      const button = $('#laStart'); button.disabled = true;
+      try {
+        await localApi('start', {});
+        restartRequested = false;
+        $('#laSaved').textContent = '';
+        await refreshLocal();
+      } catch (e) { laMsg(e.message, 'bad'); }
+      finally { button.disabled = false; }
+    };
     $('#laStop').onclick = () => localDo('stop');
     $('#laLogBtn').onclick = async () => { const box = $('#laLog'); if (!box.classList.toggle('hidden')) box.textContent = (await localApi('log').catch(e => ({ log: e.message }))).log || '(empty)'; };
     $('#laBrowse').onclick = async () => { try { const r = await localApi('browse', { kind: 'gguf' }); if (r.path) await localDo('add_local', { path: r.path }); } catch (e) { laMsg('✗ ' + e.message, 'bad'); } };
@@ -2274,7 +2300,7 @@ const App = (() => {
         threads: num('#laThreads'), batch: num('#laBatch'), ubatch: num('#laUbatch'), thinking: $('#laThinking').checked, mlock: $('#laMlock').checked, no_mmap: $('#laNoMmap').checked,
         extra: $('#laExtra').value, models_dir: $('#laDir').value.trim(), engine: $('#laEngine').value, server_exe: $('#laExe').value.trim(), external_cmd: $('#laExtCmd').value.trim(), external_cwd: $('#laExtCwd').value.trim(),
         gpus: gpus.length && sel.length < gpus.length ? sel : [] };
-      try { const s = await localApi('settings', body); $('#laSaved').textContent = s.server.running ? 'Saved — click Start to restart the model with them.' : 'Saved.'; if (s.server.running) $('#laStart').classList.remove('hidden'); refreshLocal(); }
+      try { const s = await localApi('settings', body); restartRequested = s.server.running; $('#laSaved').textContent = restartRequested ? 'Saved. Restart the model to apply.' : 'Saved.'; await refreshLocal(); }
       catch (e) { $('#laSaved').textContent = '✗ ' + e.message; }
     };
     // Hugging Face: search GGUF repos, list a repo's files, add + download one

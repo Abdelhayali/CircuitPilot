@@ -326,6 +326,21 @@ def _healthy(port):
     return False
 
 
+def active_port():
+    srv = _srv.copy()
+    return srv["port"] if srv["proc"] and srv["proc"].poll() is None else None
+
+
+def _effective_context(port):
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/props", timeout=1) as r:
+            props = json.load(r)
+        n = int(props.get("default_generation_settings", {}).get("n_ctx") or props.get("n_ctx") or 0)
+        return n if n > 0 else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
 def _log_tail(n=400):
     try:
         with open(_srv["log"], encoding="utf-8", errors="replace") as f:
@@ -338,8 +353,15 @@ def _log_tail(n=400):
 
 def status():
     st = _load()
-    p = _srv["proc"]
+    srv = _srv.copy()
+    p = srv["proc"]
     running = bool(p and p.poll() is None)
+    ready = running and _healthy(srv["port"])
+    effective = srv.get("effective_ctx") if ready else None
+    if ready and not effective:
+        effective = _effective_context(srv["port"])
+        if effective and _srv["proc"] is p:
+            _srv["effective_ctx"] = effective
     if p and not running and not _srv["error"]:
         _srv["error"] = "the model server stopped: " + _log_tail()
     models = []
@@ -351,8 +373,9 @@ def status():
         "models": models, "active": st["active"], "settings": st["settings"], "models_dir": models_dir(st),
         "runtime": bool(runtime(st)), "runtime_path": runtime(st), "llama_build": LLAMA_BUILD, "devices": _dev_cache["list"], "cuda": cuda_present(),
         "download": {k: _dl[k] for k in ("active", "id", "bytes", "total", "phase", "error", "speed")},
-        "server": {"running": running, "ready": running and _healthy(_srv["port"]), "port": _srv["port"], "id": _srv["id"], "alias": _srv["alias"],
-                   "engine": _srv["engine"], "url": f"http://127.0.0.1:{_srv['port']}/v1" if running else None,
+        "server": {"running": running, "ready": ready, "port": srv["port"], "id": srv["id"], "alias": srv["alias"],
+                   "engine": srv["engine"], "url": f"http://127.0.0.1:{srv['port']}/v1" if running else None,
+                   "launch_context": srv.get("ctx") if running else None, "context_size": effective,
                    "error": None if running else _srv["error"], "seconds": int(time.time() - _srv["started"]) if running else 0},
     }
 
@@ -636,7 +659,7 @@ def start(mid=None):
             raise RuntimeError(f"download {m['name']} first")
         port = _free_port()
         os.makedirs(DATA, exist_ok=True)
-        _srv.update(port=port, error=None, log=os.path.join(DATA, "local-model-server.log"), id=mid, alias=m["alias"], engine=m["engine"], started=time.time())
+        _srv.update(port=port, error=None, log=os.path.join(DATA, "local-model-server.log"), id=mid, alias=m["alias"], engine=m["engine"], started=time.time(), ctx=s["ctx"], effective_ctx=None)
         logf = open(_srv["log"], "w", encoding="utf-8")
         if m["engine"] == "external":
             cmd = s["external_cmd"].strip()

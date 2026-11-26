@@ -44,8 +44,18 @@ def _job_lock(pid):
         return None
     return lk
 
-# the website may drive this PC's local AI engine (CORS, /api/localai/* only)
+# The website may drive this PC's local AI engine through the scoped local-AI API.
 SITE_ORIGINS = {"https://pcbgo.site", "https://www.pcbgo.site"}
+LOCAL_INFERENCE = "/api/localai/inference"
+INFERENCE_ENDPOINTS = {"/v1/models": "GET", "/props": "GET", "/v1/model": "GET", "/api/show": "POST", "/v1/chat/completions": "POST"}
+
+
+class _NoModelRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoModelRedirect())
 PROXY_RE = re.compile(r"^/llm-proxy/(\d{1,5})(/.*)?$")
 STATIC_RE = re.compile(r"^/(|index\.html|styles\.css|favicon\.ico|js/[\w.-]+\.js|js/vendor/(?:manifold\.(?:js|wasm)|TransformControls\.js)|data/kicad-footprints\.txt|data/open-parts\.txt|data/demo-ecg\.json)$")
 HOP_HEADERS = {"host", "origin", "referer", "connection", "content-length", "accept-encoding",
@@ -284,6 +294,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._jlc(path)
         if path == "/llm-proxy/_ping":
             return self._send(200, b'{"ok":true}', "application/json")
+        if path.startswith(LOCAL_INFERENCE + "/"):
+            return self._local_inference(path)
         if PROXY_RE.match(path):
             return self._proxy()
         if CLOUD_RE.match(path):
@@ -296,7 +308,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._send(200, json.dumps({"version": str(int(v)), "data_dir": os.path.dirname(store.DB_PATH)}).encode(), "application/json")
         if path == "/api/localai/status":   # pcbgo-v1 on this PC (Windows app): model file, download, server
             import localai
-            return self._send(200, json.dumps(localai.status()).encode(), "application/json")
+            state = localai.status()
+            state["server"]["inference_path"] = LOCAL_INFERENCE + "/v1"
+            return self._send(200, json.dumps(state).encode(), "application/json")
         if path.startswith("/api/parts/"):
             return self._parts(path)
         if path.startswith(("/api/projects", "/api/library")):
@@ -347,6 +361,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        if path.startswith(LOCAL_INFERENCE + "/"):
+            return self._local_inference(path)
         if path.startswith("/api/jlc/"):
             return self._jlc(path)
         if path == "/api/parts/codex/connect" and self.command == "POST":
@@ -536,10 +552,34 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def _site(self):
         """the CircuitPilot website (pcbgo.site) may use the local AI engine of this PC: models, downloads, settings, start"""
         p = self.path.split("?")[0]
-        return (self.headers.get("Origin") or "") in SITE_ORIGINS and (p.startswith("/api/localai/") or p == "/api/version")
+        if (self.headers.get("Origin") or "") not in SITE_ORIGINS:
+            return False
+        if p.startswith(LOCAL_INFERENCE + "/"):
+            return self._inference_loopback() and p[len(LOCAL_INFERENCE):] in INFERENCE_ENDPOINTS
+        return p.startswith("/api/localai/") or p == "/api/version"
+
+    def _inference_loopback(self):
+        return (self.client_address[0] in {"127.0.0.1", "::1"} and
+                self.headers.get("Host") in {f"{name}:{self.server.server_port}" for name in ("127.0.0.1", "localhost", "[::1]")})
+
+    def _local_inference(self, path):
+        import localai
+        endpoint = path[len(LOCAL_INFERENCE):]
+        if (self.headers.get("Origin") not in SITE_ORIGINS or self.headers.get("X-CircuitPilot-App") != "1"
+                or not self._inference_loopback() or not self._authed()):
+            return self._send(403, b'{"error":{"message":"Open pcbgo.site on the PC running CircuitPilot."}}', "application/json")
+        if self.path != path or INFERENCE_ENDPOINTS.get(endpoint) != self.command:
+            return self._send(404, b'{"error":{"message":"Unknown local AI endpoint."}}', "application/json")
+        port = localai.active_port()
+        if not port:
+            return self._send(503, b'{"error":{"message":"Start a model in the CircuitPilot Windows app or the Local AI panel."}}', "application/json")
+        return self._forward_local(port, endpoint, website=True)
 
     def do_OPTIONS(self):   # CORS preflight: only the website, only the local-AI routes
         if not self._site():
+            self.send_response(403); self.send_header("Content-Length", "0"); self.end_headers(); return
+        endpoint = self.path[len(LOCAL_INFERENCE):] if self.path.startswith(LOCAL_INFERENCE + "/") else None
+        if endpoint and INFERENCE_ENDPOINTS.get(endpoint) != self.headers.get("Access-Control-Request-Method"):
             self.send_response(403); self.send_header("Content-Length", "0"); self.end_headers(); return
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin"))
@@ -553,14 +593,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def _send(self, code, body, ctype):
         self.send_response(code)
-        if self._site():
-            self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin"))
-            self.send_header("Access-Control-Allow-Private-Network", "true")
-            self.send_header("Vary", "Origin")
+        self._site_headers()
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _site_headers(self):
+        if self._site():
+            self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin"))
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.send_header("Vary", "Origin")
 
     def _cloud(self):
         path, _, query = self.path.partition("?")
@@ -621,18 +664,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             msg = (f'{{"error":{{"message":"Port {port} is not allowed by the proxy. '
                    f'Restart server.py with --allow-ports {port}"}}}}').encode()
             return self._send(403, msg, "application/json")
-        url = f"http://127.0.0.1:{port}{rest or '/'}" + (f"?{query}" if query else "")
+        return self._forward_local(port, (rest or "/") + (f"?{query}" if query else ""))
+
+    def _forward_local(self, port, endpoint, website=False):
+        url = f"http://127.0.0.1:{port}{endpoint}"
         length = int(self.headers.get("Content-Length") or 0)
+        if website and not 0 <= length <= 30_000_000:
+            return self._send(413, b'{"error":{"message":"Local AI request is too large."}}', "application/json")
         body = self.rfile.read(length) if length else None
-        headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_HEADERS and k.lower() != "x-circuitpilot-app"}
+        headers = {k: v for k, v in self.headers.items() if (k.lower() in {"content-type", "accept"} if website
+                   else k.lower() not in HOP_HEADERS and k.lower() != "x-circuitpilot-app")}
         req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
         try:
-            with urllib.request.urlopen(req, timeout=900) as r:
+            # The website forwards only to the running loopback model. The desktop's general proxy retains its existing behaviour.
+            opener = LOCAL_OPENER.open if website else urllib.request.urlopen
+            with opener(req, timeout=900) as r:
                 ctype = r.headers.get("Content-Type", "application/json")
                 if "text/event-stream" not in ctype:
                     return self._send(r.status, r.read(), ctype)
                 # a streamed answer (SSE): pass each piece on as it arrives, so the chat shows the model writing
                 self.send_response(r.status)
+                self._site_headers()
                 self.send_header("Content-Type", ctype)
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("Transfer-Encoding", "chunked")
@@ -652,7 +704,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             self._send(e.code, e.read(), e.headers.get("Content-Type", "application/json"))
         except Exception as e:  # connection refused, timeout, ...
-            msg = f'{{"error":{{"message":"Proxy could not reach {url}: {e}"}}}}'.encode()
+            msg = json.dumps({"error": {"message": f"Proxy could not reach {url}: {e}"}}).encode()
             self._send(502, msg, "application/json")
 
     def log_message(self, fmt, *args):

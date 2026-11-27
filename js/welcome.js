@@ -8,6 +8,9 @@ const Welcome = (() => {
 
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
+    { v: '2026.11.27', date: '2026-11-27', items: [
+      'Bench tools adds a phone assembly guide with a camera overlay, PCB photo import with connection review, and spoken answers from the open project',
+    ] },
     { v: '2026.11.26', date: '2026-11-26', items: [
       'pcbgo.site connects to the running local model through the Windows app',
       'Local AI shows the running context size and offers a restart after context changes',

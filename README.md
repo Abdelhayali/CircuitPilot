@@ -16,6 +16,7 @@ CircuitPilot is an AI-assisted schematic and PCB editor. Describe a circuit in p
 | PCB layout | Use two-sided Quick place, rule-driven autorouting, manual tracks and vias, copper pours, and design rule checks (DRC). Choose a 1-, 2-, or 4-layer rule profile. |
 | 3D and manufacturing | Preview the board, design and check enclosures, and export Gerber/drill files, BOM and pick-and-place data, CNC toolpaths, and product documentation. |
 | Projects and interchange | Save portable project files, import EasyEDA or KiCad projects, and export schematic and PCB files for EasyEDA. |
+| Bench tools | Follow a phone assembly guide, review a schematic draft from PCB photos, or ask the open project about pins, voltages, and bring-up steps. |
 
 ## Get started
 

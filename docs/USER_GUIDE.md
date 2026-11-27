@@ -5,6 +5,7 @@
 - [Connect AI](#connect-ai)
 - [Schematic and component library](#schematic-and-component-library)
 - [PCB placement, routing, and checks](#pcb-placement-routing-and-checks)
+- [Bench tools](#bench-tools)
 - [3D, fabrication, and documentation](#3d-fabrication-and-documentation)
 - [Projects, backups, and file formats](#projects-backups-and-file-formats)
 - [Local setup and automation](#local-setup-and-automation)
@@ -43,6 +44,14 @@ In a local server session, **Knowledge** lets you attach a folder of requirement
 The PCB editor also supports copper pours and stitching vias, keep-outs, mounting holes, rotating silkscreen text, net highlighting, panel outlines with break-off tabs, and separate PCB layouts and rules within one project.
 
 Use the **Track** tool for interactive routing. Start from a pad, use right-click or **V** to change layers with a via, and use **Space** to change the routing angle. In Select mode, **R** rotates the selected footprint or silkscreen label. The selected side and the available actions appear in the PCB tool panel.
+
+## Bench tools
+
+Open **Bench tools** beside the editor tabs.
+
+- **Assembly guide.** Use the current PCB, then export an assembly file to open on your phone at pcbgo.site. Use the 2D map or print the selected side’s alignment sheet in colour at 100%. Check the 10 mm scale line and secure the board inside the printed outline. Start the rear camera and keep all four marks in view. The highlight shows the next footprint and orientation pads. Use **Placed**, **Skip**, and **Back** to navigate. Choose the other side and its printed sheet when flipping the board. Camera frames are processed on the phone.
+- **Photo → schematic.** Add clear top and bottom photographs with the same board edge at the top. If needed, align each photo by tapping its four corners. **Analyze with vision** sends the photos to the selected vision model. Review or edit the proposed parts and nets, display suggested copper paths, and mark traces yourself where useful. Confirm connections individually before creating the new project. Unconfirmed nets are kept as review notes. Check component identities, pin assignments, and hidden connections before relying on the schematic.
+- **Bench voice.** Start listening on a supported browser, or type a question such as “What’s on pin 3 of U5?” **Bench notes** stores expected voltages and bring-up steps in the project. Say “next step” to advance the checklist. Answers are read aloud where speech synthesis is available. The browser may use a remote speech recognition service for microphone audio.
 
 ## 3D, fabrication, and documentation
 

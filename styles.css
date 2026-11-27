@@ -734,3 +734,34 @@ details.think summary { cursor: pointer; color: var(--muted, #777); }
 .think-body { white-space: pre-wrap; max-height: 220px; overflow: auto; color: var(--muted, #666); border-left: 2px solid var(--border, #ddd); padding: 4px 8px; margin-top: 4px; font-size: 12px; }
 .live-tool { font-size: 12px; padding: 2px 0; word-break: break-all; }
 .msg.user.queued .bub { opacity: .65; border-style: dashed; }
+
+/* Mobile bench workspaces */
+.bench-dialog { width: min(920px, 96vw); max-height: 94dvh; padding: 18px; overflow: auto; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+.bench-dialog::backdrop { background: #070c15b5; }
+.bench-dialog h2 { margin: 0; font-size: 20px; }
+.bench-head, .bench-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.bench-head { justify-content: space-between; margin-bottom: 12px; }
+.bench-dialog nav { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.bench-dialog nav [aria-pressed=true] { background: var(--panel2); border-color: var(--accent, #5b8cff); }
+.bench-dialog button { min-height: 36px; }
+.bench-section { padding-top: 14px; }
+.bench-section[hidden], .bench-camera[hidden], .bench-map[hidden] { display: none; }
+.bench-note { max-width: 72ch; color: var(--muted); font-size: .9em; }
+.bench-answer { font-weight: 650; min-height: 1.3em; margin: 8px 0 12px; }
+.bench-camera, .bench-map, .bench-photo-grid canvas { border-radius: 9px; background: #121a28; }
+.bench-camera { position: relative; width: min(100%, 720px); overflow: hidden; }
+.bench-camera video { display: block; width: 100%; height: auto; }
+.bench-camera canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.bench-map { display: block; width: min(100%, 660px); height: auto; }
+.bench-photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+.bench-photo-grid canvas { width: 100%; height: auto; }
+.bench-field { display: grid; gap: 4px; margin: 10px 0; }
+.bench-field textarea { width: 100%; resize: vertical; padding: 6px; font: inherit; }
+.bench-review > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px; border-bottom: 1px solid var(--line); }
+#benchQuestion { flex: 1 1 220px; min-width: 0; }
+#benchDialog [role=status] { min-height: 1.2em; color: var(--muted); }
+@media (max-width: 560px) {
+  .bench-dialog { width: 98vw; padding: 10px; }
+  .bench-dialog button { min-height: 42px; }
+  .bench-photo-grid { grid-template-columns: 1fr; }
+}

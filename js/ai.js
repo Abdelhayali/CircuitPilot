@@ -745,8 +745,8 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
     // JSON mode + a generous output limit (some servers stop at a small default); retried without JSON mode if refused
     const json = opts.json && currentModel().provider !== 'anthropic';
     try {
-      try { const r = await callModel(currentModel(), system, [{ role: 'user', text }], [], own.signal, { maxTokens: opts.maxTokens, body: Object.assign({ max_tokens: opts.maxTokens || 8192 }, json ? { response_format: { type: 'json_object' } } : {}) }); return r.text || ''; }
-      catch (e) { if (!json || own.signal.aborted) throw e; const r = await callModel(currentModel(), system, [{ role: 'user', text }], [], own.signal, { body: { max_tokens: opts.maxTokens || 8192 } }); return r.text || ''; }
+      try { const r = await callModel(currentModel(), system, [{ role: 'user', text, files: opts.files }], [], own.signal, { maxTokens: opts.maxTokens, body: Object.assign({ max_tokens: opts.maxTokens || 8192 }, json ? { response_format: { type: 'json_object' } } : {}) }); return r.text || ''; }
+      catch (e) { if (!json || own.signal.aborted) throw e; const r = await callModel(currentModel(), system, [{ role: 'user', text, files: opts.files }], [], own.signal, { body: { max_tokens: opts.maxTokens || 8192 } }); return r.text || ''; }
     }
     finally { clearTimeout(t); }
   }

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611251500">
+<link rel="stylesheet" href="styles.css?v=202611270001">
 </head>
 <body>
 <header id="top">
@@ -77,6 +77,7 @@
         <button class="tab" data-view="pcb">PCB</button>
         <button class="tab" data-view="enc">Enclosure</button>
         <button class="tab" data-view="doc">Documentation</button>
+        <button id="btnBench">Bench tools</button>
       </div>
       <div id="schTools" class="tools">
         <button id="btnFirmware" title="The code of the MCU: design_pins.h (every connected pin as a PIN_ name, made from the schematic) and the code files saved with the design. An AI can write the code">{ } Firmware</button>
@@ -605,6 +606,75 @@
 <script src="js/static-backend.js?v=202611232300"></script>
 <script src="js/lib.js?v=202611232100"></script>
 <script src="js/view.js?v=202610301800"></script>
+<dialog id="benchDialog" class="bench-dialog" aria-labelledby="benchTitle">
+  <header class="bench-head"><h2 id="benchTitle">Bench tools</h2><button id="benchClose" aria-label="Close bench tools">✕</button></header>
+  <nav class="bench-row" aria-label="Bench tools">
+    <button data-bench="assembly" aria-pressed="true">Assembly guide</button>
+    <button data-bench="photos" aria-pressed="false">Photo → schematic</button>
+    <button data-bench="voice" aria-pressed="false">Bench voice</button>
+  </nav>
+
+  <section id="bench-assembly" class="bench-section" aria-label="Assembly guide">
+    <div class="bench-row">
+      <button id="benchUseBoard">Use current PCB</button>
+      <button id="benchLoadGuide">Open assembly file</button><input id="benchGuideFile" type="file" accept=".json,application/json" hidden>
+      <button id="benchExportGuide" disabled>Export assembly file</button>
+      <button id="benchMat" disabled>Download alignment sheet</button>
+    </div>
+    <p class="bench-note">Open the assembly file on your phone at pcbgo.site. Print the alignment sheet at 100% scale and secure the PCB within its outline. Keep the four markers visible.</p>
+    <div class="bench-row">
+      <label>Side <select id="benchSide"><option value="F">Top</option><option value="B">Bottom</option></select></label>
+      <button id="benchCamera" disabled>Start camera</button>
+    </div>
+    <div id="benchCameraView" class="bench-camera" hidden>
+      <video id="benchVideo" playsinline muted></video><canvas id="benchOverlay" aria-label="Live footprint overlay"></canvas>
+    </div>
+    <canvas id="benchMap" class="bench-map" aria-label="PCB assembly map" width="660" height="320"></canvas>
+    <p id="benchAssemblyStatus" role="status"></p>
+    <p id="benchPart" class="bench-answer" aria-live="polite"></p>
+    <div class="bench-row">
+      <button id="benchBack" disabled>Back</button><button id="benchPlaced" class="primary" disabled>Placed</button><button id="benchSkip" disabled>Skip</button>
+    </div>
+  </section>
+
+  <section id="bench-photos" class="bench-section" aria-label="Photo to schematic" hidden>
+    <div class="bench-row">
+      <label>Top photo <input id="benchPhotoTop" type="file" accept="image/*" capture="environment"></label>
+      <label>Bottom photo <input id="benchPhotoBottom" type="file" accept="image/*" capture="environment"></label>
+    </div>
+    <div class="bench-photo-grid">
+      <div><button id="benchAlignTop" disabled>Align top photo</button><canvas id="benchTopPreview" aria-label="Top PCB photo and trace evidence" height="150"></canvas></div>
+      <div><button id="benchAlignBottom" disabled>Align bottom photo</button><canvas id="benchBottomPreview" aria-label="Bottom PCB photo and trace evidence" height="150"></canvas></div>
+    </div>
+    <p class="bench-note">Use sharp, straight-on photos with the same board edge at the top. Analyze sends the photos to your selected vision model. Review all proposed parts and confirm each connection before import.</p>
+    <div class="bench-row">
+      <button id="benchAnalyze" class="primary">Analyze with vision</button>
+      <button id="benchReview">Review draft</button>
+      <button id="benchImportPhoto" disabled>Create schematic project</button>
+    </div>
+    <p id="benchPhotoStatus" role="status">Hidden copper and uncertain pin assignments may need a continuity check.</p>
+    <label class="bench-field">Editable draft JSON <textarea id="benchPhotoDraft" rows="6" spellcheck="false" placeholder='{"name":"Photo draft","parts":[{"ref":"R1","pins":[{"num":"1"},{"num":"2"}]}],"nets":[]}'></textarea></label>
+    <div id="benchPhotoReview" class="bench-review" aria-label="Proposed connections"></div>
+  </section>
+
+  <section id="bench-voice" class="bench-section" aria-label="Bench voice assistant" hidden>
+    <div class="bench-row"><button id="benchListen" class="primary">Start listening</button><button id="benchSpeak">Read answer aloud</button></div>
+    <p class="bench-note">Speech recognition availability varies by browser. Your browser may send microphone audio to its speech service. Typed questions work without the microphone.</p>
+    <form id="benchQuestionForm" class="bench-row">
+      <label for="benchQuestion">Ask the open project</label>
+      <input id="benchQuestion" placeholder="What’s on pin 3 of U5?" required maxlength="250">
+      <button type="submit">Ask</button>
+    </form>
+    <p id="benchVoiceStatus" role="status"></p>
+    <p id="benchVoiceAnswer" class="bench-answer" aria-live="polite"></p>
+    <details><summary>Bench notes and bring-up</summary>
+      <label class="bench-field">Bring-up steps, one per line <textarea id="benchSteps" rows="4"></textarea></label>
+      <label class="bench-field">Expected voltages, one per line <textarea id="benchVoltages" rows="3" placeholder="TP4 = 1.8 V"></textarea></label>
+      <div class="bench-row"><button id="benchSaveNotes">Save to project</button><button id="benchResetSteps">Restart checklist</button></div>
+    </details>
+  </section>
+</dialog>
+
 <script src="js/model.js?v=202611252350"></script>
 <script src="js/schematic.js?v=202611170600"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
@@ -626,7 +696,7 @@
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
 <script src="js/engine.js?v=202611252353"></script>
-<script src="js/ai.js?v=202611260005"></script>
+<script src="js/ai.js?v=202611270001"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202611231900"></script>
@@ -635,8 +705,11 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611260005"></script>
+<script src="js/welcome.js?v=202611270001"></script>
 <script src="js/app.js?v=202611260005"></script>
+<script src="js/bench-tools.js?v=202611270001"></script>
+<script src="js/bench-reverse.js?v=202611270001"></script>
+<script src="js/bench-voice.js?v=202611270001"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

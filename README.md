@@ -1,640 +1,85 @@
 # CircuitPilot
 
-An AI copilot for electronics design: describe a circuit in plain language and it picks **real parts from the JLCPCB/LCSC database**, draws the schematic, runs ERC, then places and autoroutes a 2-layer PCB you can export as Gerbers. Use Claude, any OpenAI-compatible model or a **local model**, from the browser, your phone, or **Claude Code via MCP**.
+CircuitPilot is an AI-assisted schematic and PCB editor. Describe a circuit in plain language or design it by hand, choose real components, check the schematic, lay out and route the board, and export files for fabrication. The same project can include a fitted 3D-printable enclosure and a product datasheet.
 
-![CircuitPilot — ESP32-C3 board schematic](docs/media/schematic.png)
+## Quick features
 
-**📖 [Tutorial and user guide (PDF)](https://pcbgo.site/docs/CircuitPilot-Tutorial.pdf)**: getting started, every tool with screenshots, the Windows app, Claude Desktop and Claude Code, CNC milling, troubleshooting.
+| Tool | What you can do |
+| --- | --- |
+| AI Copilot | Use **Agent** to edit, **Ask** to review, or **Plan** to draft a design before applying it. Connect a cloud provider, a local model, or an external AI client through MCP. |
+| Schematic editor | Organize multi-sheet schematics, wire named nets, run electrical rule checks (ERC), and cross-probe parts and nets on the PCB. |
+| Parts and footprints | Search JLCPCB/LCSC, EasyEDA, KiCad-format libraries, and My Library. Preview symbols and footprints or create your own. |
+| PCB layout | Use two-sided Quick place, rule-driven autorouting, manual tracks and vias, copper pours, and design rule checks (DRC). Choose a 1-, 2-, or 4-layer rule profile. |
+| 3D and manufacturing | Preview the board, design and check enclosures, and export Gerber/drill files, BOM and pick-and-place data, CNC toolpaths, and product documentation. |
+| Projects and interchange | Save portable project files, import EasyEDA or KiCad projects, and export schematic and PCB files for EasyEDA. |
 
-**▶ Try it online: [pcbgo.site](https://pcbgo.site)**: nothing to install. The **🔑 Connect AI** window walks you through getting a free Google Gemini or Ollama Cloud key in about a minute (Claude, OpenAI, OpenRouter and others work too). Your key stays in your browser. Then describe your circuit. Projects are saved in your browser. For local models, knowledge folders and Claude Code control, run the desktop version (below).
+## Get started
 
-## How to install and run
+### Online
 
-Pick one of the three options. You need an AI key for the copilot. A free Google Gemini key takes about a minute at [aistudio.google.com/apikey](https://aistudio.google.com/apikey); the **🔑 Connect AI** window in the app walks you through it.
+Open **[pcbgo.site](https://pcbgo.site)**, then choose **Connect AI** to use a supported provider or the shared AI where available. You can also use the editors manually. The website stores projects and My Library in the current browser by default. Use **Export → CircuitPilot project file** to save a portable copy.
 
-### 1. Easiest: Windows app (nothing else to install)
+To use a managed local model from the website, open the current CircuitPilot Windows app on the **same PC**, keep it running, and open **Connect AI → Local AI** on pcbgo.site. Allow local network access if your browser asks.
 
-1. Download **[CircuitPilot-Windows.zip](https://github.com/Abdelhayali/CircuitPilot/releases/latest/download/CircuitPilot-Windows.zip)** from the [latest release](https://github.com/Abdelhayali/CircuitPilot/releases/latest).
-2. Unzip it anywhere, for example on your Desktop.
-3. Double-click **CircuitPilot.exe**. Windows may warn that the app is not code-signed: click **More info → Run anyway**.
-4. Choose how you want to design:
-   - **With Claude Desktop (recommended, no AI key needed):** install [Claude Desktop](https://claude.com/download) and sign in. Then in CircuitPilot press **⚙ Settings → Claude Desktop → Connect** (or run `CircuitPilot.exe --connect-claude`). Quit Claude Desktop completely (also from the system tray) and open it again. Claude Desktop now controls CircuitPilot's design tools: start a chat, pick **Design a board with CircuitPilot** from the **+** menu or just describe the board, and the CircuitPilot window follows along. CircuitPilot starts by itself when Claude needs it.
-   - **With the built-in copilot:** press **🔑 Connect AI** and paste a free Google Gemini key, then type what you want to build in the AI Copilot box and press **Send**.
+### Windows app
 
-Windows 10 or 11, 64-bit. Your projects are saved in `%LOCALAPPDATA%\CircuitPilot`.
+1. Download **[CircuitPilot-Windows.zip](https://github.com/Abdelhayali/CircuitPilot/releases/latest/download/CircuitPilot-Windows.zip)** and extract the whole archive.
+2. Run **CircuitPilot.exe** on 64-bit Windows 10 or 11. The package includes the app, Node.js for MCP, and a llama.cpp runtime.
+3. Choose **Connect AI** for a cloud provider or **Local AI** for a GGUF model. To work from another AI app, use **Settings → Codex → Connect to Codex** or **Settings → Claude Desktop → Connect**, then restart that client.
 
-### 2. Run from the source code
+Projects and model downloads are stored under `%LOCALAPPDATA%\CircuitPilot`. See the [latest Windows release notes](https://github.com/Abdelhayali/CircuitPilot/releases/latest) for updates.
 
-You need **Python 3** (no extra packages to install). Git is optional.
+### Run from source
 
-1. Get the code: `git clone https://github.com/Abdelhayali/CircuitPilot.git`, or on the GitHub page click **Code → Download ZIP** and unzip it.
-2. Open a terminal in the `CircuitPilot` folder.
-3. Start the server:
+Install Python 3. Clone the repository, or use **Code → Download ZIP** on GitHub and extract it. The core editor runs without a build step or package installation.
 
-   ```bash
-   python server.py 5173
-   ```
-
-   On macOS or Linux, use `python3`. On Windows you can double-click **`start.bat`** instead.
-4. Open **http://localhost:5173** in your browser.
-5. Choose how you want to design:
-   - **With Claude Desktop (recommended, no AI key needed):** install [Claude Desktop](https://claude.com/download) and sign in, then press **⚙ Settings → Claude Desktop → Connect** (or, in the folder, run `node mcp/install-claude-desktop.mjs`; this needs [Node.js](https://nodejs.org) installed). Quit Claude Desktop completely and open it again. Claude now controls CircuitPilot's design tools: pick **Design a board with CircuitPilot** from the **+** menu or just describe the board.
-   - **With the built-in copilot:** press **🔑 Connect AI** and paste your key (or add it under **⚙ Settings**).
-
-Stop the server with **Ctrl+C**. To protect it with a password, add `--password YOUR_PASSWORD` to the command in step 3.
-
-### 3. Use the online version (no install)
-
-Open **[pcbgo.site](https://pcbgo.site)**, press **🔑 Connect AI**, paste your key and start designing. It also works on a phone or tablet. Your projects are kept in this browser, so export the `.json` file from the Export menu to back them up.
-
-## See it in action
-
-**From one prompt to a routed board and a 3D-printed case** — the copilot (Gemini Flash Lite) designs an ESP32 board from *"create PCB for ESP"*: real JLCPCB parts, schematic, placement, rip-up autorouting (21/21 nets, DRC 0 errors), GND pours, then a fitted enclosure and a Whoop-style wristband pod (sped up 5×).
-
-[![Prompt to PCB to enclosure](docs/media/demo-esp32-board.gif)](docs/media/demo-esp32-board.mp4)
-
-▶ [Watch the full-speed video (MP4)](docs/media/demo-esp32-board.mp4)
-
-**A wearable sensor board, end to end** — with a local model (gpt-oss:120b) from *"Create ESP32-C3 with IMU BMI160 and ECG BMD101 in 4 cm × 4 cm"*: the copilot searches the JLCPCB catalogue and datasheets, wires the schematic (I²C IMU, UART ECG front-end, 3.3 V LDO, USB-C), places and routes the 40 × 40 mm board (all nets routed), shows it in 3D, builds an enclosure and an ECG electrode patch from the wearable templates, and generates the product datasheet PDF (sped up 5×).
-
-[![ESP32-C3 + BMI160 + BMD101 wearable: prompt to datasheet](docs/media/demo-esp32-imu-ecg.gif)](docs/media/demo-esp32-imu-ecg.mp4)
-
-▶ [Watch the video (MP4)](docs/media/demo-esp32-imu-ecg.mp4)
-
-**AI copilot designing a circuit** (local Qwen 27B model, real tool calls, sped up)
-
-![AI copilot building a circuit](docs/media/ai-copilot.gif)
-
-The result, a fully routed board with a BOM and the design calculations, from a one-sentence prompt:
-
-![AI copilot result](docs/media/ai-copilot.png)
-
-| Generate & route the PCB | Search 600k+ real parts |
-|---|---|
-| ![PCB generation](docs/media/pcb.gif) | ![Parts database](docs/media/parts-database.gif) |
-
-| Create symbols & footprints | Real footprints from the database |
-|---|---|
-| ![Part editor](docs/media/part-editor.gif) | ![Edit a database part](docs/media/part-editor.png) |
-
-**PCB editor** — layers panel, PCB tools, hand routing with T/B layer switching (vias are added automatically)
-
-![Hand routing with layer switching](docs/media/pcb-routing.gif)
-
-| Layers panel (show / hide / colour / active layer) | Hand-routed tracks + vias |
-|---|---|
-| ![Layers](docs/media/pcb-layers.png) | ![PCB editor](docs/media/pcb-editor.png) |
-
-**3D board view** — PCB toolbar **◈ 3D / ▦ 2D**: solder mask, copper, ENIG/HASL pads, silkscreen on both sides and 3D part models (Top / Bottom / Iso, mask colour, pad finish)
-
-![3D PCB view](docs/media/pcb-3d.png)
-
-**3D-printable enclosure fitted to the board** — STL + parametric OpenSCAD, editable by hand or by the AI
-
-| Inside (X-ray, lid lifted) | Closed |
-|---|---|
-| ![Enclosure X-ray](docs/media/enclosure.png) | ![Enclosure](docs/media/enclosure-closed.png) |
-
-| Design rules (JLCPCB defaults) | Autorouted 2-layer PCB |
-|---|---|
-| ![Design rules](docs/media/design-rules.png) | ![PCB](docs/media/pcb.png) |
-
-| Projects | Project knowledge |
-|---|---|
-| ![Projects](docs/media/projects.png) | ![Knowledge](docs/media/knowledge.png) |
-
-
-## Features
-
-- **Model picker** — Claude (Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 4.5) or any OpenAI-compatible endpoint (OpenAI, Gemini, Grok, OpenRouter, Ollama, **Ollama Cloud** (via the server proxy), LM Studio, llama.cpp, vLLM / ExLlama / TabbyAPI, local servers); the context window is detected from the server.
-- **Three copilot modes** — **Agent** edits the design with tools, **Ask** is read-only review and Q&A, **Plan** writes a BOM + netlist plan you approve with **Execute plan**.
-- **Every palette part is a real JLCPCB part** — the schematic keeps clean symbols while the footprint and pinout come from a specific LCSC part (Basic parts where possible, LEDs by colour); **⇄ JLCPCB parts** converts older designs and **Export → BOM for JLCPCB assembly** matches part numbers for every value.
-- **Parts archives (keep working without JLCPCB)** — ⚙ Settings → *Parts archives* keeps your own copy of the JLCPCB parts catalogue: the **Basic Parts Archive** (Basic + Preferred parts, ~1.3 MB — fetched by itself the first time the live search fails) and the full **Parts Archive** (every JLCPCB part in stock, ~450 000 parts: on the web a compact ~19 MB copy that CircuitPilot rebuilds and publishes every day, on the desktop the ~360 MB database, indexed locally for millisecond search). Search uses them next to the live JLCPCB search and on their own when it is unavailable or you are offline; results are marked *Archive*. Daily snapshots by [CDFER/jlcpcb-parts-database](https://github.com/CDFER/jlcpcb-parts-database), built from [yaqwsx/jlcparts](https://github.com/yaqwsx/jlcparts); press *Update* for a newer one.
-- **Backup for the EasyEDA library** — if a part's symbol and footprint cannot be loaded from EasyEDA, CircuitPilot builds the part from the open libraries instead: the same part number in the KiCad / SparkFun / Digi-Key libraries (real pin names), otherwise the standard KiCad footprint for its package (0603, SOT-23, SOIC-8, QFN-32 5×5…, numbered pins). The LCSC number is kept for ordering and the part says where its footprint came from, so you can check it.
-- **Open part libraries (KiCad format)** — search also finds about 20 000 ready parts (symbol + footprint) from the **KiCad official library** (18 000), **SparkFun** (700) and **Digi-Key** (1 000): they appear under *Open libraries* in the parts list and in the Library panel's *KiCad / open libs* tab, and the copilot gets them from `search_parts` (keys `OL:…`). The symbol and footprint are downloaded from the library's own repository when the part is placed; they are custom parts (no LCSC number — pick an LCSC part for JLCPCB assembly). The part list is `data/open-parts.txt`, rebuilt with `tools/open_library_index.py`.
-- **Real component databases** — one search asks the **JLCPCB catalogue** (stock, price, Basic/Extended), the **EasyEDA official library** (about 1.6 million LCSC parts, including modules JLCPCB does not stock) and the **EasyEDA community library** (parts drawn by EasyEDA users — breakout boards, modules, rare chips; marked *community*, placed as custom parts, so check their footprint) at once, plus My Library. A database that is slow to answer is skipped after a few seconds and repeated searches come from memory. **Only parts that have a footprint are shown**: every result is checked against the EasyEDA library in one batch request (remembered locally), so whatever you pick can go straight onto the PCB. Exact pinouts and real footprints, cached locally; parts found only in the EasyEDA library are marked *EasyEDA lib*.
-- **Library panel, like EasyEDA's** — **📚 Library** (or **Shift+F**) opens a floating window that searches every source at once (JLCPCB, EasyEDA library, community, My Library, built-in symbols; filter with the source tabs) and shows the **symbol and footprint** of the selected part beside the results, with pins, pads, package and datasheet. Place with **Place**, a double-click or Enter, or **drag a row onto the schematic**; it lands where you drop it. Parts in the left palette and its search results can be dragged onto the schematic too.
-- **Part editor** — create or modify symbols and footprints (generators for SOIC/TSSOP/QFN/DIP/SOT…, draggable pads); saved to *My Library*. **KiCad library…** searches the official KiCad footprint library (15 000+ footprints, downloaded from gitlab.com/kicad on demand) and puts the chosen footprint on your part; *Pins from pads* then creates the missing pins.
-- **Projects** — saved on the server with autosave; same projects on PC and phone.
-- **Save in a folder on your PC** — **📁 Folder ▾ → Save to folder…** writes the project as `<name>.circuit.json` into a folder you choose, and from then on every save (and autosave, undo, redo) updates that file — easy to back up, put in Git or Dropbox, or move to another PC. **Open from folder…** opens a project file from a folder and keeps saving back to it; **Stop saving to folder** unlinks it (the file stays). The 📁 next to the save status shows where it goes; after a browser restart one click lets it continue. Needs Chrome or Edge (other browsers download the file instead).
-- **Chat attachments** — 📎 attach photos, PDFs (datasheets), Word or any text file; paste or drag & drop too. Claude reads PDFs natively, other models get the extracted text; images go to vision models.
-- **Chat controls** — 🌐 Web search toggle (on by default), 📁 folder for project docs, a context meter (used / window, % left), 🗜 Compress to summarise the chat, and automatic compression at 80% full.
-- **Project knowledge** — point a project at a folder of docs, guides and datasheets (md/txt/pdf/docx) the AI follows.
-- **Checkpoints** — every Agent message snapshots the design; restore with one click. Full undo/redo.
-- **Schematic editor** — built-in parts plus database/custom parts, power symbols, click pin-to-pin wiring, drag, rotate (R), auto-layout, and **✨ Organize** (`organize_schematic`): ICs in a row, every small part next to the pin it is wired to, GND parts vertical with GND down, supply parts vertical with 3V3 / VDD up, wires routed around the symbols without running over each other.
-- **Any AI provider, several at once** — save as many OpenAI-compatible providers as you like (Google Gemini, Ollama Cloud, NVIDIA, OpenAI, OpenRouter, Groq, your own vLLM / LM Studio / llama.cpp server…), each with its own URL and key, and pick any of their models from the menu above the chat. **🔑 Connect AI → Custom URL** adds one in a few seconds. Providers that refuse requests from web pages (e.g. NVIDIA) are reached automatically through `server.py` or, on pcbgo.site, the CircuitPilot relay (which stores nothing).
-- **The AI can see its work** — `view_design` gives the copilot (and Claude Code) a screenshot of the schematic, the 2D PCB, the 3D board or the enclosure, so it can spot crowded symbols, odd placement or a part sticking out of the case and fix it. Screenshots appear in the chat; only the latest two are sent with each request, and text-only models are handled automatically. With Claude Code, the screenshots are drawn by the CircuitPilot tab open in your browser.
-- **Move between EasyEDA and CircuitPilot** — **Projects → Import** opens an EasyEDA Pro project file (`.epro` / `.epro2`) with its schematic sheets *and* PCB (placement, tracks, vias, pours, outline, LCSC numbers), or an EasyEDA Standard PCB. **Export → EasyEDA project: schematic + PCB (.zip)** goes the other way: open it in EasyEDA Pro with *File → Import → EasyEDA (Standard)*.
-- **Net highlight on the PCB** — click a track, via or pad: the whole route of that net glows (both layers), its pads and vias get rings, every part on the net is outlined, and a tag shows the net name, pads, parts and routed length; Properties lists the connected parts (click one to jump to it).
-- **Cross-probing** — select a part or a net in the schematic and it is selected on the PCB, and the other way round (clicking a track highlights its whole net in the schematic). Switching tabs scrolls to the selection and opens the right schematic sheet.
-- **Select, move, copy, paste** — in the schematic and on the PCB: drag a box on empty space to select several parts (Shift+click adds or removes), drag any of them to move the group, **Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D / Ctrl+A**, **R** rotates and **Del** deletes the selection. Right-click a part (or the selection) for a menu: Cut, Copy, Paste, Duplicate, Rotate, Delete, Properties, Edit symbol & footprint — plus Flip side and Lock position on the PCB. Pasted groups keep their power nets (GND, +3V3…) and their own wiring on new nets. Right- or middle-drag pans.
-- **Professional schematic sheets** — an A-series drawing frame with zone markers and a title block (title, company/author, document, sheet *n of m*, date, revision, size) filled from the Documentation fields; toggle it with the *frame* checkbox. **Multi-page schematics**: add sheets with ＋ in the sheet bar (double-click a tab to rename it), move parts between sheets from Properties, and nets that continue on another sheet are drawn as net labels and connected by name. The copilot can use sheets too (`add_sheet`, `move_to_sheet`, `sheet` in `add_components`).
-- **Readable spacing enforced** — after every copilot edit the layout is spaced out so that parts *and their net labels* never overlap, no matter where the model put them.
-- **PCB** — rule-driven 2-layer autorouter (Web Worker) with vias and neck-down, ratsnest, draggable footprints; routed tracks are straightened into clean 0°/45°/90° runs with a clearance safety margin, so they pass DRC.
-- **Routing that keeps trying** — negotiated rip-up and reroute: when a net is stuck, the router finds the nets in its way, rips them up, routes the stuck net and re-routes the others, learning which corridors are contested (history cost), with restarts — for up to the *Autorouter effort* time (Rules, default 90 s), stopping as soon as everything is routed. Progress shows the nets still unrouted; **Stop** keeps the best result so far. No vias on SMD pins (via-in-pad only as a flagged last resort).
-- **Placement** — **Auto-place ▾ → Quick place**: annealing that pulls connected parts together (2-pin links like decoupling caps hardest), keeps connectors (USB, headers, jacks) on the board edges and the biggest IC in the centre, runs several tries and keeps the best; with Board size empty it finds the **minimum-area board** (tries three board shapes, shrinks width and height while the placement stays legal) — e.g. 555 example 1124 → ~340 mm². **✦ AI place** asks the model once for a floor plan (JSON mode, compact parts + nets list), then legalises, polishes and routes it — works with local models too.
-- **✨ Optimize ▾** — moves parts (local re-arrangement around stuck nets and fresh global arrangements) and re-routes until every net is connected; **…and make the board as small as possible** then shrinks the outline step by step while everything still routes (e.g. 45×26 → 20.5×11.8 mm on the 555 example).
-- **Silkscreen text** — every part's label (its reference) is placed automatically next to the part where it covers **no pad**, no other part and no other label (mirrored on the bottom side), and the board name goes in a free corner; the Gerber silkscreen, the 2D view and the 3D view show exactly the same text. **Drag a label** to move it (it then moves with its part), drag its corner square to resize it, **R** rotates it and **+ / −** change its size, or set text, size, rotation and visibility in Properties; **T (Text tool)** adds your own text on the top or bottom silkscreen (version, author, pin names, polarity marks). DRC warns when text covers pads. The copilot can do the same with `set_silk_label`, `add_pcb_text`, `update_pcb_text` and `remove_pcb_text`; `get_pcb_layout` lists every label with `covers_pads`.
-- **Copper pours, arcs, bottom-side parts, curved boards** — GND (or any net) pours with clearance cut-outs; arc tracks; footprints on the bottom side (mirrored, bottom copper/silk/paste); rounded, round/elliptical or custom board outlines.
-- **PCB drawing (PDF)** — **Export → PCB drawing (.pdf)**: vector pages for the top layer, the bottom layer, both layers (red top / blue bottom tracks, to check the routing), assembly drawings with every part's reference and value, a page at **actual size (1:1)** to lay real parts on the footprints, and the parts list (reference, value, footprint, LCSC, side, position, rotation). Each page has a title block and a 10 mm scale bar.
-- **3D board view with real parts** — switch the PCB editor between 2D and a 3D render of the manufactured board (both sides, mask colour, pad finish). Parts are shown with their **real 3D models** from the JLCEDA/EasyEDA Official Library (chips, connectors, headers, passives — on the right pads, in their rotation, flipped on the bottom side); parts without a model get a simple shape. **Real models** toggles them; models are downloaded once and cached.
-- **Enclosure** — a third tab builds a 3D-printable case around the PCB (follows the board outline, height from the tallest part, screw standoffs on PCB mounting holes, automatic openings for USB/jacks and holes above LEDs/buttons, snap-fit lid with vents); exports STL (base + lid) and parametric OpenSCAD.
-- **Placement optimizer** — moves / rotates / swaps parts and re-routes until every net is connected (also available to the AI).
-- **Gerber export with DRC check** — problems pop up with *Fix on board / Re-route / Optimize / Download anyway*.
-- **PCB editor** — Layers panel (show/hide, colour, active layer, dim inactive), PCB Tools (Select, Track `W`, Via `V`, Measure `M`), interactive 45°/90°/any-angle routing with T/B layer switching and automatic vias, live clearance check, track/via properties, segment delete; the autorouter keeps hand-routed tracks.
-- **Design rules & DRC** — JLCPCB 2-layer defaults, editable per project (trace/power widths, per-net widths, clearance, vias, edge clearance, layers); exact-geometry DRC with markers on the board.
-- **Exports** — Gerber + Excellon drill (.zip), BOM (.csv), netlist (.net), schematic and PCB SVG, project JSON.
-- **One-click ordering** — **Order at JLCPCB ↗** (PCB toolbar) runs DRC, matches LCSC parts, saves the Gerber zip plus the assembly BOM and pick-and-place (CPL) files, and opens the JLCPCB quote page: drop the zip on *Add gerber file*, and for assembly upload the two .csv files. **Order 3D print ↗** (Enclosure toolbar) builds high-resolution STLs and opens the JLC3DP quote page. (JLCPCB has no public upload link, so you drag the downloaded files in yourself.)
-- **Internet access for the AI** — `web_search` and `web_fetch` let any model (Claude, Gemini, local Qwen …) look up datasheets, application notes, prices and anything else, reading web pages and PDF datasheets; private / local addresses are blocked. Toggle in ⚙ Settings (DuckDuckGo by default, optional Brave Search key).
-- **Light / dark theme** — header button cycles 🖥 System → ☀ Light → 🌙 Dark (remembered per browser; the PCB canvas stays black for layer contrast).
-- **Automation** — MCP server for Claude Code / Claude Desktop / Cursor, plus a REST + OpenAPI interface.
-
-## Web version and desktop version
-
-| | Web version (GitHub Pages) | Desktop version (`server.py`) |
-|---|---|---|
-| Install | none, open the link | Python 3, `python server.py 5173` |
-| Projects and My Library | saved in your browser (export `.json` to back up) | `projects.db` on your PC, shared by all your devices |
-| Part search, web search, Ollama Cloud | through the [CircuitPilot relay](relay/README.md) | direct from your PC |
-| Cloud AI (Claude, OpenAI, Gemini, OpenRouter…) | yes | yes |
-| Local models (llama.cpp, LM Studio, Ollama) | yes, with CORS enabled in the model server | yes, no setup |
-| Chat attachments | PDF, images, text | PDF, Word, images, text |
-| Knowledge folders, Claude Code (MCP) | no | yes |
-
-The web version is the same app: when it is not served by `server.py`, `js/static-backend.js` answers the app's requests in the browser.
-
-**Privacy:** API keys and designs stay in your browser. The public website (pcbgo.site) counts anonymous visits with [Cloudflare Web Analytics](https://www.cloudflare.com/web-analytics/): no cookies, no personal data, only page views, country and referrer. Copies you run yourself (desktop version, forks) send nothing.
-
-**Local models in the web version** need the model server to accept requests from the web page (CORS): Ollama with `OLLAMA_ORIGINS=https://pcbgo.site`, LM Studio with *Enable CORS* in the server settings, llama.cpp's `llama-server` allows it by default. Your browser may ask for permission to reach devices on your local network.
-
-## Run
-
-No build step and no dependencies. Start the bundled server (static files + a proxy for local model servers):
-
-```bash
+```sh
+git clone https://github.com/Abdelhayali/CircuitPilot.git
+cd CircuitPilot
 python server.py 5173
 ```
 
-On Windows you can simply double-click **`start.bat`** (starts the server, shows the LAN address, optionally opens a public Cloudflare link). Open http://localhost:5173 (or `http://<your-PC-IP>:5173` from another device on your LAN), then open **⚙ Settings** and add an API key.
+Use `python3` if that is your system’s Python command. Open [localhost:5173](http://localhost:5173) and stop the server with **Ctrl+C**. Node.js is needed for MCP when running from source. See the [local setup and automation guide](docs/USER_GUIDE.md#local-setup-and-automation) for configuration and REST examples.
 
-API keys are stored in your browser's localStorage and sent directly from the page to the provider you choose — fine for personal/local use, but don't host it publicly with keys baked in.
+## Your first board
 
-## Project layout
+1. Create a project and open **Schematic**. Place parts yourself or ask **Agent** to create a circuit with your supply voltage, connectors, and board dimensions.
+2. Review component values, pinouts, and connections. Run **ERC**.
+3. Open **PCB**, set the outline, then use **Auto-place → Quick place** and **Route**. Use **Update from schematic** when adding or removing parts from a board you’ve already routed.
+4. Inspect unrouted nets, connector access, and both layers. Run **DRC** against your fabrication rules before exporting Gerbers and drill files.
 
-| File | Purpose |
-|---|---|
-| `index.html`, `styles.css` | UI layout and theme |
-| `js/lib.js` | Symbol and footprint library |
-| `js/model.js` | Design state, nets, undo, ERC, schematic auto-layout |
-| `js/schematic.js` | Schematic rendering and editing |
-| `js/pcb.js` | Placement, autorouter, PCB view, Gerber/drill/zip export |
-| `js/easyeda.js` | EasyEDA interchange: schematic export, PCB import |
-| `js/easyedapro.js` | EasyEDA Pro project import (.epro / .epro2): schematic sheets + PCB |
-| `js/kicad.js` | KiCad official footprint library for the part editor (index in `data/kicad-footprints.txt`, rebuilt with `tools/kicad_footprint_index.py`) |
-| `js/enclosure.js`, `js/shape3d.js`, `js/shape-worker.js` | Parametric box enclosure, battery catalogue, CSG kernel, custom 3D script modeller (+ sandboxed worker) |
-| `js/vendor/manifold.js`, `.wasm` | Manifold 3D kernel (Apache-2.0), fast booleans for the enclosure |
-| `js/strokefont.js` | Stroke font for silkscreen text and engraved enclosure labels |
-| `js/cloud.js` | Google sign-in and project / My Library sync with the user's Google Drive (app-data folder) |
-| `js/ai.js` | Providers, tool definitions, agent loop |
-| `js/app.js` | Panels, chat, settings, exports |
-| `js/engine.js` | Design tools shared by the copilot, MCP server and REST API |
-| `js/projects.js`, `js/editor.js` | Project manager / autosave, part editor |
-| `server.py`, `store.py`, `partsdb.py`, `knowledge.py` | Server, project + library storage, parts database, knowledge folders |
-| `mcp/circuitpilot-mcp.mjs` | MCP server (Claude Code) and REST API |
-| `docs/capture.mjs` | Regenerates the README screenshots and GIFs (headless Chrome + ffmpeg) |
+New PCBs use the **EasyEDA Pro** preset with **0.1524 mm** copper clearance and **0.254 mm** routing width. Each PCB has its own rules, so choose a suitable preset or edit its limits in **Rules**.
 
-## Limitations
+## See it in action
 
-- Palette parts (resistor, capacitor, LED, diodes, transistors, MOSFETs, regulator, op-amp, crystal, fuse, inductor, potentiometer, buzzer) are backed by real JLCPCB parts — their footprints and pinouts come from the part library and pins are matched by name, so e.g. the AMS1117's IN/OUT/tab and each LED's cathode land on the right pads. Pin headers / generic connectors and the push button keep standard generated footprints (a 4-pin tact switch's internal pairs are not documented in the library); if you pick a generated footprint from the Footprint menu, verify its pin order against your part's datasheet.
-- The router works on a grid; very dense boards can still leave a net unrouted within the time budget — run **✨ Optimize**, add a GND pour, or give it a bigger board.
-- Touch editing (drag/pinch) on phones is not implemented yet.
+[![CircuitPilot schematic editor showing an ESP32-C3 design](docs/media/schematic.png)](docs/media/schematic.png)
 
-## Local models (llama.cpp, TabbyAPI, LM Studio, Ollama…)
+- [Prompt to routed PCB and enclosure](docs/media/demo-esp32-board.mp4)
+- [Wearable sensor board, enclosure, and product datasheet](docs/media/demo-esp32-imu-ecg.mp4)
+- [PCB editor and 3D board preview](docs/media/pcb-3d.png)
 
-In **⚙ Settings → OpenAI-compatible**, enter the server URL (e.g. `http://localhost:8080/v1` or click the **Local :8080** preset). The model list is fetched automatically from `/v1/models` and appears in the model picker. The model must support OpenAI-style tool calling for Agent mode.
+## Documentation and support
 
-Requests to `localhost` servers are routed through `server.py` (`/llm-proxy/<port>/...`), so local models work even when they only listen on 127.0.0.1 or don't send CORS headers — including from a phone on your LAN.
-
-### Small local models: compact mode
-
-Small models (2–8B) get **compact mode**: the 30 core design tools with short descriptions and a short system prompt
-(~6k tokens instead of ~23k for the full tool list), and tool results cut to 3000 characters. It switches on by itself
-for models named `circuitpilot-…`, or always / never with **⚙ Settings → Compact tools for small models**.
-
-## AI model benchmark — CircuitPilot PCB Bench
-
-How well does an AI model design boards **with CircuitPilot's tools**? [`bench/pcb_bench.mjs`](bench/README.md) gives a
-model 14 tasks in the same agent loop as the AI Copilot — CircuitPilot's real engine runs its tool calls — and scores the
-**design it leaves behind**, 0–100 per task:
-
-| Part | Points | Checked |
-|---|---|---|
-| Schematic | 35 | required parts · required connections (e.g. LED in series with a resistor between a supply and GND, regulator in / out each with a capacitor to GND) · values (LED current, divider ratio, 555 frequency, op-amp gain) · ERC |
-| Placement | 15 | every part placed · no overlaps, parts off the board or on holes · requested board size, edge connector, GND pour, mounting holes |
-| Routing | 25 | routed nets / all nets — unrouted nets are listed as missing connections |
-| DRC | 15 | DRC errors |
-| Behaviour | 10 | finishes with an answer within the step limit; failed or malformed tool calls |
-
-**8 design tasks** start from an empty project (LED indicator, 3.3 V supply with a GND pour, 555 blinker with mounting
-holes, I2C sensor board with the header on the edge, relay driver, op-amp stage, a full sensor node, a schematic-only
-filter). **6 repair tasks** start from a broken board (missing connection, unrouted nets, overlapping parts, DRC short,
-wrong resistor value, part outside the outline). Any model can be tested: Ollama / llama.cpp / LM Studio, any
-OpenAI-compatible API (OpenAI, Gemini, OpenRouter …) or Claude, with the compact or the full tool set.
-
-![PCB Bench: pcbgo v1 against Qwen3.8-27B, Qwen3.6-27B and its base, per measure](docs/media/pcb-bench-chart.png)
-
-<!-- BENCH:START -->
-| Model | Tools | Runs | Score | Design | Repair | Schematic % | Placement % | Routing % | DRC clean | Fully routed | Tool errors | Tokens / task (in · out) | Date |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| CircuitPilot-4B v2 (llama.cpp) | compact, no thinking | 3 × 14 | **80.4** | 72.2 | 91.4 | 78 | 82 | 82 | 25/33 | 32/33 | 76/326 | 96.7k · 991 | 2026-11-24 |
-| Qwen3.8-27B (llama.cpp) | compact, no thinking | 1 × 14 | **78.6** | 62.5 | 100 | 83.4 | 78.7 | 72.8 | 8/11 | 9/11 | 0/180 | 143k · 864 | 2026-11-24 |
-| Qwen3.6-27B (llama.cpp) | compact, no thinking | 1 × 14 | **77.7** | 61 | 100 | 77.7 | 76 | 72.8 | 8/11 | 11/11 | 46/204 | 181k · 2.4k | 2026-11-24 |
-| Qwen3.5-4B (base, llama.cpp) | compact, no thinking | 3 × 14 | **65.1** | 38.9 | 100 | 75.4 | 57.3 | 51.6 | 17/33 | 21/33 | 96/599 | 185k · 1.8k | 2026-11-24 |
-| Qwen3.5-4B (base) | compact | 3 × 14 | **60.3** | 30.4 | 100 | 65.7 | 52.7 | 45.6 | 15/33 | 19/33 | 6/520 | 134k · 2.6k | 2026-11-24 |
-| CircuitPilot-4B (step 25, llama.cpp) | compact, no thinking | 3 × 14 | **57** | 27.3 | 96.5 | 70.9 | 45.3 | 36.4 | 9/33 | 17/33 | 139/391 | 110k · 1.9k | 2026-11-24 |
-| CircuitPilot-4B (step 25) | compact | 3 × 14 | **47.3** | 24.7 | 77.5 | 53.4 | 44 | 21.2 | 3/33 | 27/33 | 18/87 | 26.0k · 1.8k | 2026-11-24 |
-
-<sub>Updated 2026-11-24 · full results: [bench/results/LEADERBOARD.md](bench/results/LEADERBOARD.md)</sub>
-<!-- BENCH:END -->
-
-```bash
-node bench/pcb_bench.mjs --base http://localhost:11434/v1 --model qwen3.5:4b --repeat 3          # Ollama
-node bench/pcb_bench.mjs --base https://openrouter.ai/api/v1 --model <id> --key <key> --repeat 3
-node bench/pcb_bench.mjs --provider anthropic --model claude-sonnet-5-5 --key <key> --tools full
-```
-Results with every tool call, the final design, unrouted nets and DRC errors are in `bench/results/`; the table above
-is rewritten after every run. Send a pull request with your model's results file to add it.
-
-## pcbgo v1 (CircuitPilot-4B) — a small model fine-tuned for CircuitPilot
-
-![pcbgo v1: a small AI that designs circuit boards](docs/media/pcbgo-v1-banner.png)
-
-**The whole flow, free:** pcbgo.site → Connect AI → *Run pcbgo-v1 free on Google Colab* → Run all → paste the address
-→ ask for a board → schematic, routed PCB, DRC and a 3D-printable case:
-
-![pcbgo-v1 on Google Colab with pcbgo.site: from opening the site to a routed PCB in its enclosure](docs/media/pcbgo-v1-colab-demo.gif)
-
-**Download: [huggingface.co/abdelhayali91/pcbgo-v1](https://huggingface.co/abdelhayali91/pcbgo-v1)** (Q4_K_M GGUF, 2.8 GB, Apache-2.0). In pcbgo.site: **🔑 Connect AI → Run pcbgo-v1 free on Google Colab** opens the notebook; press *Run all* and its last cell sends you back to pcbgo.site already connected (the link carries the Colab's Cloudflare address; the site asks before connecting). Or use it with Ollama on your PC (`ollama create pcbgo-v1 -f Modelfile`) and model name `pcbgo-v1` in **🔑 Connect AI → Use your own API**; CircuitPilot switches to compact tools and thinking off for it by itself.
-
-**Offline on your PC (Windows app):** **🔑 Connect AI → Run pcbgo-v1 on this PC → Download** (2.8 GB once, resumable,
-checked with its SHA-256) **→ Start and connect**. The app ships llama.cpp's server (official Vulkan build: NVIDIA, AMD or
-Intel graphics, else the processor) and runs the model on 127.0.0.1 — no internet, no key, designs never leave the PC.
-It starts by itself next time. The model is kept in `%LOCALAPPDATA%\CircuitPilot\models`; `CP_LLAMA_NGL=0` keeps it on
-the processor (small or busy graphics cards).
-
-[Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) fine-tuned with LoRA to design with CircuitPilot's
-tools, small enough for a laptop GPU, Ollama on any PC or a **free Google Colab** GPU. Everything is in
-[`finetune/`](finetune/README.md):
-- **Training data** made by running CircuitPilot's real engine, so every tool result the model learns from is what the
-  app really returns: circuits built from real JLCPCB parts, edits, PCB steps, questions, plans, recovering from a
-  wrong pin name, and requests typed with typos. Only designs that pass ERC / DRC are kept.
-- **Training**: QLoRA (`finetune/train.py`), 4-bit base + LoRA r 32, on one 16–24 GB GPU. v1: 25 steps (400
-  conversations) where the PCB was a follow-up request; **v2** adds requests that ask for the whole job at once
-  (schematic + PCB + size / pour / holes / edge connector) and continues from v1 for 125 steps.
-- **Result on the PCB Bench** (3 × 14 tasks, thinking off, same llama.cpp server): **v2 80.4** vs the untuned
-  Qwen3.5-4B **65.1** — design tasks 72.2 vs 38.9, placement 82 % vs 57 %, routing 82 % vs 52 %, DRC clean 25/33 vs 17/33,
-  fully routed 32/33 vs 21/33. Weak spots left: the 555 blinker and the full sensor node (it loops on a failing call).
-- **Train it yourself on a fresh Windows PC**: [`finetune/train_circuitpilot_4b.bat`](finetune/train_circuitpilot_4b.bat)
-  installs everything, makes the data, trains, exports the GGUF and runs the benchmark.
-- **Free hosting**: [`CircuitPilot_4B_Colab.ipynb`](finetune/CircuitPilot_4B_Colab.ipynb) serves the model on Colab and
-  prints the address to paste into **🔑 Connect AI → Use your own API** (model `circuitpilot-4b`).
-
-## Public URL (Cloudflare tunnel)
-
-```bash
-python server.py 5173 --allow-ports 8080 --password YOUR_PASSWORD
-cloudflared tunnel --url http://localhost:5173
-```
-
-Always set a password when exposing the app: the LLM proxy gives access to your local model. The proxy only forwards to ports listed in `--allow-ports` (default `8080`).
-
-## Component database (JLCPCB / LCSC)
-
-Type a part number in the Parts search box (e.g. `ESP32-C3`, `AMS1117`, `CH340C`, `USB-C`) to search the JLCPCB/LCSC catalogue (stock, price, Basic/Extended). Click a result to place it: the exact pinout and real PCB footprint are loaded from the part library (see *Data sources* below).
-
-The AI copilot has the same database through the `search_parts` and `get_part` tools, so you can ask for e.g. *"ESP32-C3 board with USB-C, AMS1117 regulator and a status LED"* and it will pick real in-stock parts.
-
-Everything fetched is cached in a local SQLite database (`parts.db`), so parts you've used keep working offline. Part definitions are also saved inside each design file.
-
-## Projects
-
-Projects are stored on the server (`projects.db`, SQLite) and saved automatically — the status next to the project name shows **✓ Saved**. Use **▤ Projects** to open, duplicate, rename, delete or import projects, **＋ New** to start one, and **Save as…** (`Ctrl+Shift+S`) to save the current design under a new name and continue in the copy. The same projects appear on every device that opens the app. **Export → Project file (.json)** downloads a portable copy.
-
-**Import a whole folder**: **▤ Projects → Import folder…** (or the folder menu → *Import all projects in a folder…*) searches the folder and all its subfolders for CircuitPilot projects (`.json` / `.circuit.json`) and EasyEDA PCB files, lists what it found (projects already in CircuitPilot start unticked) and adds the ticked ones as new projects; the first one opens. Claude: `import_folder {path, dry_run?}`.
-
-**Earlier versions**: the desktop server keeps earlier states of every project — about every 10 minutes while you edit, whenever many parts disappear in one save, before a restore and when a project is deleted (60 per project). **▤ Projects → ⟲** lists them with **Restore**; **Deleted projects…** brings back a deleted one. Claude: `list_project_versions`, `restore_project_version`, `copy_project`.
-
-### Sign in with Google (projects on every PC)
-
-**☁ Sign in** (top bar) keeps every project and **My Library** in your own **Google Drive**, in the hidden app-data folder: only CircuitPilot can see it, it does not show among your files, and it uses your free Drive space. Sign in on another PC (desktop app or pcbgo.site) and all your designs are there.
-
-- The first sign-in on a PC merges both ways; after that every autosave uploads the project a few seconds later, and other PCs pick up changes when CircuitPilot opens, every 2 minutes, or with **↻ Sync now**.
-- When the same project was changed on two PCs, the newer one wins; the desktop app keeps the other as a project version (⟲), and Drive keeps file revisions. A project deleted on one PC is deleted on the others (unless it was edited there since).
-- No CircuitPilot server: the browser talks to Google directly. CircuitPilot only asks for its own Drive folder (`drive.appdata`) and your name / address — not your other files.
-- Google's sign-in opens in a small window; after a restart the first click on the page reconnects (the window opens and closes by itself).
-
-Setting it up for your own copy: create an OAuth client of type *Web application* in Google Cloud Console (APIs & Services → enable the Google Drive API; OAuth consent screen with the scope `…/auth/drive.appdata`; authorized JavaScript origins = your site and `http://localhost:5173`) and put its client ID in `js/config.js` → `googleClientId` (or ⚙ Settings → Google sign-in client ID). Without a client ID the button is hidden.
-
-## Part editor (custom symbols & footprints)
-
-- **＋ New part** (Parts panel) opens the editor: pins (number, name, side L/R/T/B, bulk edit), live symbol preview, and a footprint editor with generators (0805, SOT-23, SOT-223, SOIC-n, TSSOP-n, QFN-n(-EP), DIP-n, pin headers…), draggable pads (0.05 mm snap) and per-pad size/shape/drill.
-- Select any placed part → **✎ Edit symbol & footprint** to fix a database part, or **✎ Make editable part** to turn a built-in part into a custom one.
-- Saved parts go to **My Library** (shared across projects); every placed instance updates when you edit a part.
-- The AI can do the same with the `create_part` / `update_part` tools.
-
-## Project knowledge folder
-
-Click **📚 Knowledge** in the copilot and enter a folder on the PC running the server. Design notes, requirements, coding/naming rules and datasheets (`.md .txt .pdf .docx .csv .json`, source code…) are given to the AI: small documents go straight into its context, the rest it searches and reads with `knowledge_search` / `knowledge_read`. Try it with [`examples/knowledge`](examples/knowledge).
-
-Only document-type files inside the chosen folder are read (no `..` escapes, hidden folders and `.git`/`node_modules` are skipped). Anyone who can log in to the app can point it at a folder on the server PC, so keep the password private.
-
-## Control from Claude Code (MCP) and other tools
-
-`mcp/circuitpilot-mcp.mjs` exposes all 93 design tools — projects, parts database, schematic editing, ERC, custom parts, knowledge, PCB generation, Gerber export — through the **Model Context Protocol**. It runs the same engine as the browser app and talks to the running `server.py`, so every change shows up live in the browser.
-
-**Claude Desktop (easiest)** — run once:
-
-```bash
-node mcp/install-claude-desktop.mjs
-```
-
-then quit Claude Desktop completely (also from the system tray) and open it again. Now just ask, e.g. *"Design a USB-C powered ESP32-C3 board with a BME280 sensor, 30 × 30 mm"*. Claude calls `start_here`, CircuitPilot starts `server.py` by itself if it isn't running, opens the project in your browser, and the open tab follows whichever project Claude works on. There's also a ready-made **Design a board with CircuitPilot** prompt in Claude Desktop's **+** menu.
-
-**Claude Code** — this repo ships a `.mcp.json`, so just open the folder in Claude Code (with `server.py` running) and approve the `circuitpilot` server. Or add it globally:
-
-```bash
-claude mcp add circuitpilot -e CP_URL=http://localhost:5173 -- node /path/to/CircuitPilot/mcp/circuitpilot-mcp.mjs
-```
-
-Then ask e.g. *"Using circuitpilot, create a project 'ESP32 sensor board' with an ESP32-C3-MINI-1, AMS1117 and USB-C, then generate the PCB and export Gerbers to ./fab"*.
-
-The password is read from `access-password.txt` (or set `CP_PASSWORD`). Other MCP clients (Claude Desktop, Cursor, VS Code…) use the same command.
-
-**REST / OpenAPI** for anything else (scripts, n8n, OpenAI function calling…):
-
-```bash
-node mcp/circuitpilot-mcp.mjs --http 5174
-curl -H "Authorization: Bearer <password>" http://127.0.0.1:5174/tools
-curl -H "Authorization: Bearer <password>" -X POST http://127.0.0.1:5174/tools/search_parts -d '{"query":"CH340C"}'
-```
-
-`GET /openapi.json` returns an OpenAPI 3.1 spec of every tool. Add `"project": "<id or name>"` to any call to switch project. The REST server listens on 127.0.0.1 only (add `--public` to expose it).
-
-**Working safely with several projects**
-- Every tool takes `project` (id or exact name); the call works on that project. The current project is remembered in `%LOCALAPPDATA%\CircuitPilot\mcp-state.json`, so a restart of the MCP server (e.g. after a timeout) continues on the same project. Without a current project the tools ask for one — they never pick "the most recent project".
-- One database: when no app is running, the MCP server starts `server.py` with the Windows app's projects folder (`%LOCALAPPDATA%\CircuitPilot`, or `CP_DATA_DIR`). `start_here` shows which projects folder the running app uses.
-- **Background jobs**: `generate_pcb`, `route_pcb`, `optimize_pcb`, `place_footprints`, `update_pcb_from_schematic`, `auto_layout` and `export_project` run in a worker thread. They answer directly when done within ~40 s, otherwise they return a `job_id`; `job_status {job_id}` waits up to 55 s per call for the result, `cancel_job` stops one. While a job runs, its project is locked against edits (other projects stay usable). This repo's `.claude/settings.json` also sets `MCP_TOOL_TIMEOUT=300000` for Claude Code.
-- Circuit blocks: `copy_block {refs, to_project?, keep_nets?, place: "free"}` copies a group of parts with its layout and inner tracks; `copy_project` copies a whole project.
-- **Two boards, one order**: `merge_pcb {from_project, from_pcb?, side: "right" | "below", gap, tab}` puts another project's PCB next to the open one, joined by a break-off tab (one outline: the union of both boards and the tab). Parts, tracks, vias, pours, holes, keep-outs and texts come along; nets get a suffix so the circuits stay separate.
-- **Design rules per PCB**: each PCB of a project keeps its own rules (a 2-layer electrode PCB next to a 4-layer main PCB); `set_design_rules {all_pcbs: true}` changes every PCB, `list_pcbs` shows each one's layers and preset.
-- **Stable track ids**: `get_tracks` gives every track / via an id (`t12`, `v3`) that never shifts; `remove_tracks {ids}` / `lock_tracks {ids}` use them, `remove_tracks {near: "R12"}` only takes copper of that pad's own net that touches it, `dry_run: true` shows what would go, `dangling: true` removes vias that join nothing. `route_pcb` and `reroute` remove dangling vias afterwards (`keep_dangling_vias` keeps them).
-- **Pour split warning**: `add_track` and `place_in_free_area` return `pour_split` when they cut a copper pour into more pieces (which pads are cut off). `place_in_free_area` keeps clear of tracks and vias of other nets (`avoid_pours: true`: of other nets' pours too).
-- **EasyEDA's numbers**: `run_drc {as: "easyeda"}` (and the DRC panel's "As EasyEDA Pro checks") uses 0.152 mm next to pads / vias and 0.254 mm pour gap, so both tools list the same spots.
-- `compare_firmware_pins {match: "Band_v"}` (or `projects: [...]`): the firmware pin map of several boards side by side — pins that differ or that only some boards have (boards without an MCU are skipped).
-- Inner-layer keep-outs (4 layers): `add_keepout {layer: "inner" | "In1" | "In2" | "all"}` leaves the inner planes without copper there (e.g. under a break-off tab).
-- **Job lock**: while a background job works on a project, the app pauses editing it (the server refuses other saves) and loads the job's result when it is done. The MCP server reloads the app's engine by itself when its `js/` files change (new tools without a restart).
-- **Screenshots, PDFs and export images without a window**: when no CircuitPilot window shows the project, the MCP server opens it in a hidden (headless) Edge / Chrome, draws there and closes it after 10 idle minutes (with an app password it logs in with a one-time link).
-- `batch {calls: [{tool, args}]}` runs many quick edits in one call (e.g. side / rotation of 20 parts); `export_parts` / `import_parts` move My Library parts between databases or PCs.
-- `pcb_status` lists every unrouted net with its pad groups and the router's reason.
-- **Small answers**: results show the board as size + shape (outline points only with `verbose` / `get_pcb_layout {include: ["outline"]}`); `get_pcb_layout` is compact and filters by `refs`, `region`, `fields`, `include`; `run_drc` gives counts and the first 5 violations (`full: true` for all); `get_tracks` filters by `near` (a part or pad), `region`, `layer`, `vias_only`; `view_design {size: "small"}` returns a 640 px JPEG.
-- **One-call macros**: `reroute` (pours off → copper off → GND, +3V3, rest → saved pours back → stitching vias → labels → DRC, one summary line); `batch` may contain routing (then runs as a job); `transform_parts` moves / rotates / scales a group (refs or region) and reports edge margins; `save_pour_template` / `apply_pour_template`, and pours defined as the board clipped to limits (`add_copper_pour {clip: {x_max: 21.3}}` or `rect`) follow outline changes.
-- **Arguments are checked**: an unknown argument is an error listing the allowed ones; common other names are accepted (`rotation` → `rot`, `part` → `ref` …).
-- Placement keeps what you did: `place_footprints` and `optimize_pcb {refs}` move only the listed parts, locked parts never move (also in fresh arrangements), `update_pcb_from_schematic` places new parts and moves an existing part only when its pads clash.
-- `check_placement` gives the overlap in mm and whether pads are clear (courtyard only) or too close; `mark_overlap_ok` accepts known overlaps. `edge_margins` and `set_board_shape` report each part's distance to the edge (`auto_fit` nudges parts inward). The DRC outline check is an error only for copper outside; a body overhang is a warning with the amount.
-- Keep-outs made from a part (`add_keepout {ref, end}`) follow the part. With the strict no-via-in-pad rule, exposed pads get no vias either, and vias keep off plated through-hole pads (also `stitch_pour`).
-- `set_project_notes` keeps notes and named values with the project (shown again by `open_project`, `start_here`, `get_pcb_layout` and to the in-app copilot); `add_to_report` writes a design summary or a finding to a JSON or Markdown report file. Drawing requests are queued, so parallel exports no longer skip PDFs / images.
-
-## Design rules (JLCPCB defaults) and DRC
-
-**PCB → ⚙ Rules** edits the project's design rules. The autorouter follows them and **DRC** checks the finished board against them.
-
-**Fab limits DRC also checks (JLCPCB, 2-layer, 1 oz):** SMD pad to SMD pad of another net ≥ 0.15 mm (solder-bridge risk; the 0.1 mm track rules do not cover it) · **solder mask** — mask web between pads ≥ 0.10 mm (0.13 mm for black / white mask) and mask opening to a track ≥ 0.09 mm, from the rule **Solder-mask opening** (default 0.05 mm per side, also used for the Gerber mask; lower it, e.g. 0.03 mm, for fine pitch) · **2 oz copper** needs 0.16 mm spacing. Track-to-track and pad-to-track at 0.10 mm are fine at JLCPCB even when EasyEDA Pro's default 6 mil (0.152 mm) rule flags them — use DRC **As EasyEDA Pro checks** to see that list.
-
-| Rule | JLCPCB standard preset | JLCPCB minimum |
-|---|---|---|
-| Trace width | 0.25 mm | 0.1 mm |
-| Power / GND trace width (only with *Wider tracks for power / GND nets*) | 0.5 mm | — |
-| Clearance (copper–copper) | 0.2 mm | 0.1 mm |
-| Via diameter / drill | 0.6 / 0.3 mm | 0.25 / 0.15 mm (extra cost; free from 0.4 / 0.3 mm) |
-| Copper to board edge | 0.3 mm | 0.2 mm |
-| Hole to hole | — | 0.5 mm |
-| Plated through-hole pad ring | — | 0.18 mm |
-| Via hole to track / plated hole to track | — | 0.2 mm / 0.28 mm (the router keeps them: a track passes a 0.45 / 0.3 via 0.125 mm from its copper) |
-
-JLCPCB makes tracks / gaps down to 0.1 mm and vias down to 0.15 mm hole / 0.25 mm diameter, but on 1–2 layer boards **vias cost nothing extra only with a hole ≥ 0.3 mm and a diameter ≥ 0.4 mm** (0.2 mm holes are free only on multi-layer boards, at ≥ 0.45 mm diameter); the diameter must be ≥ hole + 0.1 mm (0.15 preferred) — the rules warn about that, DRC lists each extra-cost via size once, and Gerber exports / the datasheet say which via size the board uses.
-
-- Presets: **EasyEDA Pro** (`easyeda_pro`, the default for new PCBs: 6 mil / 0.1524 mm copper spacing, 10 mil / 0.254 mm traces and 0.61 / 0.305 mm vias), **JLCPCB small, no extra cost** (`jlcpcb_free_min`: 0.2 mm tracks, 0.105 / 0.16 mm copper spacing and 0.45 / 0.3 mm vias), **JLCPCB tightest** (`jlcpcb_tight`: 0.1 mm everywhere; EasyEDA Pro then needs its rules lowered), **JLCPCB standard** (`jlcpcb`: 0.25 mm tracks, 0.6 / 0.3 mm vias), **JLCPCB 5/5 mil**, **JLCPCB power/robust**, **Home etching / CNC (1 layer)** — then tweak any value.
-- **Gaps per object kind**: *Clearance track–track*, *Clearance to pads* (track or via to an SMD / through-hole pad), *Clearance to vias* and *Copper pour clearance* — the router, the copper pours, the editor and DRC use each, plus JLCPCB's hole rules (via hole to track 0.2 mm, plated hole to track 0.28 mm).
-- **No via in pad** (default on): vias never go on SMD pads — not even as the router's last resort — and DRC reports one as an error, so the Gerber export refuses it. Only a real exposed pad (a QFN / DFN paddle among at least four pins) may take thermal vias; module edge pads (XIAO castellations), coin-cell contacts and big chip pads never do. `add_via` / `add_track` refuse a via that touches an SMD pad. When a net cannot be routed, `route_pcb` says why (`failed_reason`).
-- **Keep-out areas** (**K** tool, or `add_keepout`): no tracks, vias or copper pour inside — each can be allowed again — and optionally no parts; on top, bottom or both. For the antenna end of a module, under a coin cell, around a crystal. The router and copper pours avoid them; DRC reports what is inside. Click the dashed border to edit or delete one.
-- **Tracks under batteries / metal parts** (Rules checkbox, off by default; `warnUnderMetal`): DRC warns about tracks and vias of other nets on the same side under a coin cell, battery holder, shield can or magnet, where only solder mask insulates them.
-- **Copper pours** drop dead copper: pieces that touch no copper of their net, and pieces smaller than *pourMinArea* (default 0.5 mm²) — in the view, the Gerbers and the connectivity check. `get_pcb_layout` lists the islands per pour.
-- **Board outline**: `set_board_shape` keeps coordinates as they are (parts, tracks and keep-outs stay put; only an outline that reaches below 0 moves everything, by the returned offset), and makes round boards directly: `{shape: "circle", d: 30, flat: {side: "left", at: 3}}`, `rounded_rect`. A round single-pad part (electrode) counts by its circle, not its square box, for "outside the board".
-- **Routing control**: `route_pcb {nets: [...]}` re-routes only those nets; `lock_tracks {net | tracks | all}` keeps good tracks through every re-route and optimisation; `generate_pcb {keep_placement: true}` only routes, without placing the parts again. `stitch_pour {net, max_spacing}` adds stitching vias between a net's top and bottom pours (and one into every piece that has none); `get_pcb_layout {pour_pieces: true}` lists each pour piece with the pads it touches.
-- **Keep-out at a part's end**: `add_keepout {ref: "U1", end: "top", depth: 6, beyond: 5}` — the antenna end of a XIAO / ESP32 module.
-- **Silkscreen**: `arrange_silk_labels {hide?}` puts every reference label back next to its part, off pads, smaller where needed, hidden where there is no room.
-- **Editing**: dragging a via drags the tracks that end on it; parts on a hidden side (copper layer switched off) cannot be selected.
-- **Placement helpers**: `check_placement` (overlaps, outside the outline, in a keep-out, on a mounting hole — in well under a second; SMD parts on opposite sides may overlap), `place_in_free_area` (nearest free board space, as a group or part by part).
-- **One width by default**: every net is routed with the trace width; tick *Wider tracks for power / GND nets* in Rules to give power and ground the power width. **Per-net widths** (e.g. `+5V` 0.8 mm, `MOTOR` 1.2 mm) override both.
-- **Changing widths after routing**: click a track — its whole net lights up (the rest is dimmed), the net name shows on the board, and Properties lists the net's tracks, vias and pins. Set the width for that track, the whole net, or every track (DRC reports at once if something no longer fits); *Reset wide tracks to rule width* brings wider tracks back to the rule.
-- **Neck-down**: when a wide trace can't reach a fine-pitch pad, the router narrows it (power width → trace width → fab minimum) and reports which nets were necked down.
-- Clearance is computed against the real pad shapes, so traces escape fine-pitch QFN/USB-C pads at JLCPCB clearances. Vias are allowed inside a net's own large pads (e.g. module ground pads).
-- **DRC** uses exact geometry: shorts and clearance, trace width, via drill and annular ring, hole-to-hole spacing, copper-to-edge, unrouted nets, and rules set below the fab minimums. Click a violation to zoom to it.
-- The AI and MCP/REST clients get `get_design_rules`, `set_design_rules` and `run_drc`; `generate_pcb` reports the DRC result.
-
-Values follow JLCPCB's published capabilities; check [jlcpcb.com/capabilities](https://jlcpcb.com/capabilities/pcb-capabilities) for the latest before ordering.
-
-## PCB editor
-
-**⟳ Update from schematic** loads schematic edits onto the board without placing or routing anything: new parts are lined up beside the board with their ratsnest for you to drag into place, changed footprints update in place, and tracks of deleted nets are removed. Schematic edits no longer wipe a net's routing — adding a part to GND keeps every GND track, and a footprint change or removed part only drops the tracks on that part's pads. (The copilot's `update_pcb_from_schematic` tool also places the new parts and routes what is missing.)
-
-**Footprints for passives**: resistors, capacitors, inductors and LEDs can be switched between the JLCPCB part's own footprint (shown as e.g. *0603 · JLCPCB C25804*) and standard 0402 / 0603 / 0805 / 1206 / THT footprints in Properties; the assembly BOM then matches an LCSC part in the new package.
-
-| Action | How |
-|---|---|
-| Layers | **Layers** panel: eye = show/hide, swatch = colour, click a copper layer = make it active; **All / None / Top / Bot** quick views; *Dim inactive copper* |
-| Select / move | `S` or `Esc` — click a footprint, track segment or via; drag footprints and vias; double-click a track to select all of it; `R` rotates a footprint |
-| Route a track | `W`, click a pad / via / track to start (net is taken from it), click to add corners, click a pad of the same net to finish |
-| While routing | `T` / `B` / `L` / `V` switch layer (adds a via) · `Space` cycles 45° / 90° / any angle · `/` flips the bend · `+` / `-` width · `Backspace` removes the last corner · `Esc` or right-click finishes |
-| Via | `V`, click to place (takes the net of what is under it) |
-| Measure | `M`, click two points (mm and mil) |
-| Delete | select, then `Del` (a segment splits its track) |
-| Edit | select a track or via → change net, layer, width / diameter, drill, position in **Properties** |
-
-Live feedback: the coordinate bar shows X/Y, layer, width, net, and warns when the track being drawn violates the clearance rule; vias placed while routing are checked too. **Route** (autorouter) keeps every hand-drawn track and re-routes the rest with rip-up; the ratsnest and the “routed” count follow the real copper.
-
-### Connectors on the board edge
-
-**Board size is kept**: once a board exists (or you type a size in Board W×H), Auto-place and Generate PCB fit the parts *inside* the existing outline — rectangle, rounded, round or custom — scaling the schematic arrangement to the board, keeping parts inside the edge clearance, rotating long parts and tightening spacing when crowded. The board is never enlarged on its own: if the parts cannot fit you get a message with how much of the board they need. Clear the Board W×H boxes to size the board to the parts instead. The ✨ Optimizer also keeps the board size.
-
-**Generate PCB** puts connectors on the nearest board edge automatically: USB, DC jacks, RF and card connectors are rotated so the **opening faces outward, flush with the edge** (so a cable can plug in); pin headers and terminals sit just inside the edge. To choose the edge yourself, select the footprint on the PCB and click **⇤ Left / ⤒ Top / ⤓ Bottom / Right ⇥** in Properties — or ask the AI ("put the USB connector on the bottom edge"), which uses the `place_footprint` tool. The choice is remembered for later re-placements; press **Route** afterwards to reconnect.
-
-### More PCB tools
-
-| Feature | How |
-|---|---|
-| Copper pour | **⬛ Pour GND** (whole board, both layers) or the **Copper area** tool `E`: click corners, click the first corner to close; set net / layer / clearance in Properties. Other nets keep the clearance rule, same-net pads/tracks connect, the outline edge clearance is respected. Exported with clearance cut-outs. |
-| Arc track | `A`: click start, click end, click to set the curve. |
-| Drag tracks | Select tool: drag a segment (neighbours stay attached; a new corner is added at pads) or drag a corner. |
-| Tracks drawn by the AI | The copilot / Claude can draw single tracks like you do with the Route tool: `add_track` from a pad through corner points to a pad (`{x, y, via: true}` changes layer, `corner: "45"` adds the knees), `add_via`, `get_tracks`, `remove_tracks` (by index, net, only autorouted or only hand-drawn). Each new track is checked against the design rules right away; **Route** keeps hand-drawn tracks and routes the rest around them. |
-| Bottom side | Select a footprint → **▼ Bottom** in Properties (mirrored, SMD pads on BottomLayer, BottomSilk, bottom paste/mask). The AI: `place_footprint {side: "bottom"}`. |
-| Board outline | **▭ Board**: rectangle, rounded rectangle, circle/ellipse, or **Draw outline** (custom polygon with rounded corners). Router, DRC, pours and the Edge_Cuts Gerber follow it. |
-| Optimize | **✨ Optimize** moves, rotates and swaps parts (and can grow the board) and re-routes until everything connects, keeping the best result. Connectors on edges stay put. The AI: `optimize_pcb`, or `get_pcb_layout` + `place_footprint` + `route_pcb`. |
-| Gerbers | **Gerbers ⤓** runs DRC first. If anything is wrong a window lists it (click to zoom) with **Fix on board · Re-route · Optimize placement · Download anyway**. Export includes copper, mask, paste, silkscreen (top + bottom), outline and drill. Via MCP, `export_gerbers` refuses on DRC errors unless `force: true`. |
-| CNC milling (3018 Pro …) | **CNC ⤓** makes GRBL G-code to mill the board yourself on a desktop CNC: `1_isolation.nc` (V-bit rings around the copper — pours, clearances and keep-outs exactly as in the Gerbers), `2_drill_<size>.nc` (one file per bit), `3_cutout.nc` (holes bigger than the end mill, then the outline in steps with holding tabs), `preview.svg` (toolpaths), `result-2d.svg` / `result-3d.html` (the finished board as milled, flat and in 3D with the parts on their side — **Parts** shows or hides them — also the **Result 2D / Result 3D** tabs of the dialog, to check it before you start) and a README with the bit order and set-up. SMD pads on the GND pour get a milled outline with 4 spokes (rule `smdPadRelief`, on in the CNC and home presets; dialog: *SMD pads on pour*), so each pad is a visible solder spot. Settings: V-bit angle / tip, depth (default 0.2 mm; the groove width follows), passes, the drill bits you have (default 0.8 and 1.0 mm: each hole gets the smallest bit that fits, bigger holes are drilled then widened in a small circle), feeds, end mill, step down, tabs, board thickness, **Parts go on**: bare side (through-hole parts from the side without copper → milled mirrored) or copper side (not mirrored); the AI passes `parts_side` and asks you when it does not know and X0 Y0 (default the PCB's lower-left corner, or the job corner); Z0 = copper surface. No pour and no copper under SMD parts (the copper between the pads of a 1206 and in keep-outs such as the antenna end is milled away). It checks its own toolpaths (no shorts with a narrower groove, no net cut in two with a wider one) and warns about vias (wire links). Design for it with **⚙ Rules → CNC milling — 3018** (`set_design_rules {preset: "cnc3018"}`): 1 layer, 0.9 mm tracks (power 1.0), 0.4 mm gaps, 0.6 mm pour gap, 1.5 mm from the edge, holes ≥ 0.8 mm, rings ≥ 0.35 mm; DRC then refuses vias and tracks on both layers and warns about pin pitch under 1.2 mm and pads smaller than 0805. On one layer, auto-size makes the board 25 % bigger when the first layout does not route. Claude / MCP: `export_cnc_gcode {out_dir}`. See [docs/CNC_MILLING.md](docs/CNC_MILLING.md). |
-| JLCPCB assembly (BOM + CPL) | **Export ▾ → BOM for JLCPCB assembly** and **Export ▾ → Pick-and-place / CPL for JLCPCB**: the two .csv files JLCPCB asks for under *Bill of Materials* (Add BOM File / Add CPL File). CPL = each part's centre (the middle of its pads, Gerber coordinates from the lower-left corner), layer and rotation counted counter-clockwise as JLCPCB / EasyEDA do; check the rotations in JLCPCB's placement preview. Claude / MCP: `export_project {include: ["jlcpcb"]}`. |
-| Pin-1 marks | ICs and every part with 3 or more pads get a 0.5 mm silkscreen dot at pin 1: outside the outline at the pin-1 corner, beside pin 1, or inside the outline when the corner is off the board or on copper (Gerber, 2D, 3D, PDF). |
-| Save to GitHub | **⌥ GitHub** (top bar, next to Google sign-in) or **Export ▾ → Save to GitHub…**: sign in with GitHub (on pcbgo.site) or paste a token, then choose an existing repository or create a private one by name. Every design is saved in its own folder in that repository (project file, Gerbers, BOM + CPL, EasyEDA import zip with the schematic and the PCB, netlist, images, PDFs, README). Only changed files are committed. **Auto-save after changes** sends the design a few seconds after each save. **⇅ Load all designs from GitHub & sync** loads every design folder into this PC (a design changed both here and on GitHub is kept and reported, not overwritten) and then saves the open design. |
-| Export everything | **Export ▾ → Everything (.zip)** puts every file of the project in one zip: project file (.circuit.json), Gerbers + drill (also zipped for the fab), JLCPCB BOM + pick-and-place (CPL), BOM, netlist, schematic / PCB SVG, enclosure STL + OpenSCAD, EasyEDA schematic + PCB, PCB drawing PDF, datasheet PDF and images (schematic sheets, 2D PCB, 3D angled / top / bottom, enclosure). Claude Desktop / Claude Code: `export_project` writes the same files into `Documents/CircuitPilot exports/<project>/` (or `out_dir`), with a README listing them. `include` picks only some, e.g. `["gerbers", "jlcpcb"]`. PDFs and images are drawn by the CircuitPilot window, which is opened on the project if needed. |
-
-## Mill your board on a desktop CNC
-
-Make the board at home on a desktop CNC such as the **CNC 3018 Pro** (GRBL): CircuitPilot writes the G-code itself, with no FlatCAM or Gerber conversion step.
-
-![From a text prompt to CNC G-code](docs/media/text-to-cnc.gif)
-
-![CNC milling dialog](docs/media/cnc-dialog.jpg)
-
-| Toolpaths | Result 2D | Result 3D |
-|---|---|---|
-| ![Toolpaths: isolation (blue), cutout (red), tabs (yellow), X0 Y0 (green)](docs/media/cnc-toolpaths.png) | ![The board as it comes off the machine](docs/media/cnc-result-2d.jpg) | ![The milled board in 3D](docs/media/cnc-result-3d.jpg) |
-| Isolation rings (blue), cutout (red), holding tabs (yellow), X0 Y0 (green) | The copper side as milled, with part names | The same board in 3D, with or without the parts (**Parts** button), to check before you start |
-
-1. **Design for the machine**: ⚙ **Rules → CNC milling — 3018** (1 layer, 0.9 mm tracks, 0.4 mm gaps, holes ≥ 0.8 mm). DRC then refuses vias and warns about pins and pads too small to mill.
-2. **Generate and route** the PCB as usual.
-3. **CNC ⤓** in the PCB tab: set your V-bit (angle, tip, depth), your drill bits, the end mill and where the parts go (*bare side*: through-hole parts from the side without copper, milled mirrored; *copper side*: not mirrored). Check the **Toolpaths / Result 2D / Result 3D** tabs.
-4. **Download G-code ⤓** gives a zip: `1_isolation.nc` (V-bit), `2_drill_<size>.nc` (one file per bit), `3_cutout.nc` (end mill, with tabs) and a README with the bit order.
-5. On the machine: **X0 Y0 = lower-left corner of the PCB**, **Z0 = copper surface**; run the files in order, changing the bit between them.
-
-CircuitPilot checks its own toolpaths before you mill (no short with a narrower groove, no net cut in two with a wider one). From Claude or any MCP client: `export_cnc_gcode {out_dir}`. Every setting is described in [docs/CNC_MILLING.md](docs/CNC_MILLING.md).
-
-## Enclosure (3D print)
-
-The **Enclosure** tab builds a printable case around the current PCB and previews it in 3D (drag to orbit, right-drag to pan, wheel to zoom; *Explode*, *X-ray*, *Lid*, *PCB* and *Section* toggles — Section cuts the model in half, cut walls in red, to check wall thickness, the lid lip and how the board and battery sit).
-
-- **Dimensions** shows the overall length, width and height and the wall, floor and lid thickness (measured on the model itself, straight through the material, so they hold for any shape); **📏 Measure** is a ruler — click two points on the model (corners snap) for the distance and its run along X / Y / Z; Esc clears.
-- **📷 Render**: a picture of the finished design — 4 views in one image (angled, exploded, cut in half, from below) or one large angled / exploded / cut / top / bottom view, with or without dimensions, light or dark background — saved as PNG. The AI gets the same 4-view picture after every enclosure build, so it sees what it made.
-
-- **Fits the board**: the cavity follows the board outline (rectangle, rounded, round or custom) plus a clearance gap; the height comes from the tallest part (estimated per package — override any part height).
-- **Board support**: click **＋ Add M3 mounting holes** (adds non-plated Ø3.2 mm holes to the PCB, kept clear of parts and copper, in the NPTH drill file) to get **screw standoffs**; without holes the board rests on corner supports. Standoffs rise automatically to clear parts on the bottom side.
-- **Openings**: automatic for edge connectors (USB, DC jack…, at the right wall and height) and holes in the lid above LEDs and buttons; add your own rectangle / circle cutouts on any wall, the lid or the floor.
-- **Lid**: snap-fit lip with an adjustable fit tolerance, optional vent slots.
-- **Battery**: pick a loose cell — rechargeable **LIR** coin cells (LIR1220 … LIR2477), primary **CR** coins, **LiPo** pouches (301020 … 103450, with protection board) or cylindrical Li-ion (10440 … 21700) — and where it goes (under the board, beside it, above the parts): the box grows to hold it and the 3D view shows it. The AI chooses one with `list_batteries` (size limits, capacity, runtime from the average current, peak current) and tells you the runtime. Any LiPo size code works (`lipo-302020`), or your own size `{t, w, l, mAh}`; custom scripts also place it on any side, rotated or tilted (a tail pocket that follows the wrist), and `list_batteries {charge_mA}` flags a charge rate above 1 C (LiPo) / 0.5 C (LIR).
-- **Export**: **STL ⤓** (base + lid; the lid is already oriented for printing), **OpenSCAD ⤓** (parametric source of the same design), or **All (.zip)** with print notes.
-- **AI**: "make the walls 3 mm, add a 6×4 mm cable slot on the right and more room above the board" → `set_enclosure`, `add_enclosure_cutout`, `add_mounting_holes`, `get_enclosure`; Claude Code can also `export_enclosure` straight to a folder.
-
-### Custom 3D designs (wearables, patches, organic cases)
-
-Switch the Enclosure tab to **Custom 3D** for anything that is not a box: a Whoop-style **wristband pod** with a curved underside and strap lugs, an **ECG chest patch** with snap-electrode holes, clips, mounts, rounded or organic housings. Just describe it to the AI:
-
-> "Make a wristband pod like Whoop for this board: 22 mm strap, USB-C opening, as thin as possible"
-> "ECG chest node with 3 snap-electrode holes 60 mm apart on the skin side and a window over the LED"
-
-The fastest way is a **template with parameters** — `set_enclosure_script {template: "wrist-whoop", params: {battery: "lipo-402030", strap: 20, label: "NODE-01"}}`: no code to write, built in about a second, and the result comes back with a **picture** (4 views) and a **fit report**. You can do the same without the AI in **Properties → Quick design** (template, shape, battery, engraved text → ▶ Build). For anything the templates cannot do, the AI writes a short **3D script**: rounded boxes, convex hulls, extrude / revolve, union / difference / intersection, transforms — positioned relative to the PCB, whose outline, part boxes, heights and edge connectors it gets as context. Every build returns the fit report (printed parts colliding with the board, components or battery, script errors with line numbers), so the AI iterates until it is clean.
-
-- **Manufacturability check** for the process you print with (**Properties → process**: MJF, SLS, SLA or FDM; `set_enclosure {process}`): every build reports walls thinner than the process minimum (MJF / SLS 1.0 mm, SLA 0.8, FDM 1.2), knife edges (faces meeting below 30°), slits that fuse shut, the lid ↔ base clearance against the process tolerance, openings in the case that no connector or window explains (a wall cut through), sealed hollows that trap powder, and loose pieces with where they are. **Thickness** in the Enclosure toolbar colours the walls (red = below the minimum); `check_enclosure` runs the finer check with a heatmap picture.
-- **Board data that fits** (parts can also carry their own body size and connector positions: `create_part` / `update_part {mech}`, or `set_enclosure {partBodies}`): plug-in modules (Seeed XIAO, Raspberry Pi Pico, Pro Micro, Arduino Nano, ESP32-C3 SuperMini, Waveshare Zero) count with their real body, and their USB port opens through the wall at the right height; part heights come from the package (0402 / 0603 / 0805 by resistor or capacitor, SOT, QFN, MSOP, crystal sizes, EasyEDA `-H` heights); wire pads, test points and electrode pads are flat and never get a hole in the wall.
-- **✎ Design** (Enclosure toolbar) — model by hand, Tinkercad style, on top of any enclosure: add boxes, rounded boxes, cylinders, cones, spheres, torus, tubes, wedges, pyramids, prisms, slots, text, vent slots and honeycomb grilles, or ready parts (USB-C / micro-USB / jack openings, LED and light-pipe holes, button holes, M2 / M3 screw holes and insert bosses, PCB standoffs, ribs, snap hooks, strap slots, magnet pockets, engraved labels). Move / turn / resize them with handles (snap grid, 15° turns) or exact numbers, make any shape a **hole**, choose which part it joins or cuts, **group** shapes to merge them (solids join, holes cut out) and ungroup again, mirror, align, copies in a row or grid, drop onto the model, copy / paste, undo, and keep favourites in **My shapes**. The kernel applies the shapes on the real model, so the STL / STEP files, the checks and the AI see the same thing (`set_enclosure {shapes}`).
-- **Overhangs** view (red: steeper than 45°, needs supports on FDM / SLA) as each part sits on the printer, and the **weight** of every part from its volume and the process.
-- **✓ Check** (Enclosure toolbar) runs the full check and lists every finding — thin spots with the feature they sit under and the setting that clears them ("under engraving ECG: make it 0.4 mm deep"), knife edges, slits, lid fit, unexplained openings, parts below the service's minimum size (MJF 2 × 2 × 10 mm) — click one to fly to it. Size labels come from the measured walls (typical value and the thinnest).
-- **Project manufacturing rules** (`set_enclosure {rules: {minWall, fit, minRidge, minPart}}`): the kit uses them as defaults and the checks enforce them, so each new design follows them without repeating them.
-- **More modelling tools**: 2D booleans (`union2d`, `difference2d`, `intersection2d` with `.offset()`), `text2d` / `engrave` with a minimum ridge (no sub-0.5 mm ridges in sharp corners), `draftWalls` / `softSolid {flare}` (sloped pebble sides), `makeLid` (lip, rabbet, skirt or inset lid on a ledge, with pads that hold the battery), `adhesive` (skin-tape outline with electrode windows → DXF + a 1:1 printable PDF).
-- **Before ordering**: `jlc3dp_quote` / `jlccnc_quote` say what the JLC sites will refuse or flag (size limits, thin walls, manual quotes) and give the order settings; `export_project {dated: true}` writes PCB + enclosure + flat parts + `ORDER-README.md` into one dated folder.
-- **Sheet-metal parts** (skin electrodes, shims): `electrode({…})` makes the recess (following the wrist curve), the wire hole and the flat plate in one call; plates are exported as **DXF** (cut lines only, true arcs and circles) + **STEP** (a proper B-rep: flat and cylindrical faces, small files that JLCCNC quotes automatically) with the same name, plus **all plates as one part** joined by 5 mm bars (what JLCCNC accepts and prices evenly) with a **snip-guide PDF** and an **assembly guide** picture (where the wire joins each plate, what changed since the last order); `face: 'top'` for finger / lid plates; plates on the same face closer than 5 mm are reported (`minGap: 0` turns it off). `jlccnc_quote` checks every material web (≥ 5 mm), slot (≥ the sheet thickness), tiny segment and contour, and says "automatic quote expected" only when all pass.
-- **Gold PCB electrodes** (**Gold PCB ⤓**, `export_electrodes`): the same plates as one 0.6 mm ENIG board — gold over the whole skin side, a solder pad on the back over each wire hole, tented vias, mouse-bite tabs, true-arc outline — Gerbers + drill files + an order README (ENIG 2U", Remove Mark, Single PCB). `export_electrodes {projects: [...]}` merges the plates of several projects (wrist + chest) into one board or sheet part; `jlcpcb_quote {gerber_zip}` prices any Gerber zip.
-- **JLC3DP by material**: `jlc3dp_quote {material: 'resin-9600' | 'ledo-6060' | 'pa12' …}` re-checks with that material's limits and JLC's wording; the check now also reports **edge lips** (thin strips along an open edge, e.g. where a curved underside meets an end cut); the JLC3DP README explains resin vs nylon.
-- **Order packs**: **All (.zip)** holds the printed parts as STL + **STEP** for JLC3DP and the sheet parts for JLCCNC, each with a README of the order settings (material, finish, remarks) and warnings (no powder coat on electrodes, no metallic paint over the antenna, no resin for skin-worn parts); **Sheet metal ⤓** downloads only the JLCCNC files. Claude Code: `export_enclosure {for: jlc3dp | jlccnc}`.
-- **Small edits without resending**: `set_enclosure_script {vars: {t: 2.2}}` or `{patch: [{find, replace}]}`; `get_enclosure {script: false}`; `view_design {section, at, thickness}`.
-- **Fast geometry**: booleans run on **Manifold** (WebAssembly) — exact, always watertight, a template builds in ≈0.5 s instead of 5–17 s (the self-contained BSP kernel is the fallback where WebAssembly is unavailable). High-resolution STLs for printing take under a second.
-- **More modelling tools**: `.bend(R)` wraps a part around the wrist / arm / chest, `.smooth()` rounds every edge into an organic shape, `.warp(fn)` free deformation, `.trim(plane)`, `.array` / `.grid` / `.polar` / `.mirrorCopy` patterns, `text()` engraved or embossed labels, `honeycomb()` grilles, `screwBoss()` (heat-set inserts or self-tapping, M2–M3), `countersink()`, `batteryCradle()`, and measurements while modelling: `gap(a, b)`, `measure(s)`.
-
-- **35 tested templates**, all sized from your board: 10 wrist wearables (Whoop-style pod, round / square / hex / octagon watches with spring-bar lugs, capsules, slim bands, cuffs — concave wrist backs), 10 chest / ECG (3-lead oval, heart-rate strap pod, Holter 5-lead with belt clip, round and hex 3-electrode patches, adhesive patches with flange, lead-wire box, 4-electrode patch), 7 other body-worn (ankle, arm, headband, pendant, key fob, belt clip, badge) and 8 boxes. Every template is checked on real boards: the PCB and every part are inside, nothing collides, every printed part is watertight.
-- **Enclosure kit** for the AI and for your own scripts: `envelope()` (board + every part, plus a battery under / beside / above the board), outlines that contain it (oval, circle, pill, hex, octagon, squircle), soft rounded bodies, wrist curves, strap lugs, snap-electrode holes, belt clips, loops, connector openings, LED / button windows, board posts, and a lid with a press-fit lip.
-- **</> Script** opens the editor (Ctrl+Enter to build, templates: wristband pod, ECG patch, rounded box; **?** shows the API).
-- Builds run in a sandboxed Web Worker (no network access) and produce **watertight meshes**.
-- **Export**: one **STL per part** (lids/covers flipped for printing), equivalent **OpenSCAD** source, and the script itself in the zip.
-
-The geometry runs in the browser and in the MCP server (Manifold is bundled in `js/vendor`, so the desktop app works offline); only the 3D preview loads three.js from cdnjs.
-
-Fit check: a part counts as *not enclosed* only when its centre, or most of a grid of points in its box, can see out of the enclosure; parts whose estimated box only touches a wall are listed under `near_wall` (set their real height with `set_enclosure {partHeights}`). Coin-cell holders are estimated at 4.4 mm with the cell. `envelope({side: 'top' | 'bottom', parts, exclude})` sizes a body from only some parts.
-
-## Documentation (product datasheet PDF)
-
-The **Documentation** tab turns the design into a product datasheet — previewed live, exported with **PDF ⤓**:
-
-- cover with title, tagline, 3D render and key specifications; description, features and applications (**✦ Write with AI** drafts them from the design; edit them in the side panel, or let Claude Code write them with the `get_documentation` / `set_documentation` tools)
-- main components and power rails, full schematic
-- PCB: 3D renders of the top and bottom, copper layout, PCB / fabrication specifications (size, layers, track / space, vias, holes, routing, DRC / ERC)
-- mechanical drawing with board dimensions, mounting holes and edge connectors; connector pinout tables
-- enclosure renders (assembled and exploded) with dimensions; bill of materials with LCSC numbers; revision table
-
-Enclosure **STL ⤓** files are always rebuilt at high resolution (≈0.4 mm curve segments) so they can go straight to a 3D-printing service; the on-screen preview stays fast.
-
-## Windows app (CircuitPilot.exe)
-
-**Download:** [CircuitPilot-Windows.zip](https://github.com/Abdelhayali/CircuitPilot/releases/latest/download/CircuitPilot-Windows.zip) from the [latest release](https://github.com/Abdelhayali/CircuitPilot/releases/latest) — unzip anywhere and double-click `CircuitPilot.exe` (Windows 10 / 11, 64-bit). Windows SmartScreen may warn because the app is not code-signed: **More info → Run anyway**.
-
-`python desktop/build_windows.py` builds `dist/CircuitPilot/CircuitPilot.exe` (and `dist/CircuitPilot-Windows.zip`): the whole desktop version — server, AI, parts databases and archives, open libraries, Gerbers, 3D, enclosure — in one folder that needs no Python or Node.js installed. Double-click **CircuitPilot.exe**: it starts the server and opens the app in its own window (Microsoft Edge app mode). Projects and downloads are kept in `%LOCALAPPDATA%\CircuitPilot`.
-
-**Claude Desktop:** ⚙ Settings → *Claude Desktop* → **Connect** (or `CircuitPilot.exe --connect-claude`), then quit Claude Desktop completely and open it again. The connection uses the Node.js bundled in the folder and starts CircuitPilot.exe by itself when Claude needs it.
-
-Options: `--port 5173`, `--server-only` (no window), `--lan --password SECRET` (also serve phones on your network).
-
-## EasyEDA interchange
-
-- **Export → EasyEDA project: schematic + PCB (.zip)** puts both documents below in one zip, to continue the design in EasyEDA Pro (*File → Import → EasyEDA (Standard)*, choose the zip) or EasyEDA Standard. **Export → PCB for EasyEDA (.json)** writes only the PCB: every footprint with its pads (written in full, so no library lookup is needed), tracks, vias, holes, copper pours and the board outline, with the schematic's net names.
-- **Export → Schematic for EasyEDA (.json)** writes the schematic as an EasyEDA Standard document (symbols, pins, net labels, LCSC part numbers). A design with several sheets becomes a multi-sheet EasyEDA schematic with one page per sheet (same names); net labels connect the pages as they do here. Copper pours go over as EasyEDA copper areas with their net (clipped pours with their real outline); EasyEDA fills them when you rebuild the copper areas (**Shift+B**) after opening the PCB. The PCB carries the design rules it was routed with (EasyEDA Standard uses them); EasyEDA Pro checks with its own rules — import the board’s exported rules under *Design → Design Rule* when it uses a different profile. The EasyEDA Pro preset on new CircuitPilot boards uses 6 mil / 0.1524 mm copper spacing. Open it in EasyEDA Standard with *File → Open → EasyEDA Source*, or in EasyEDA Pro with *File → Import → EasyEDA (Standard)*. Every part with an LCSC number is linked to its EasyEDA library symbol and footprint, so EasyEDA's *Footprints Verification* finds them (parts without an LCSC number get their footprint chosen in EasyEDA).
-- **Projects → Import → EasyEDA Pro project** moves a whole EasyEDA Pro design here: in EasyEDA Pro use *File → Save As (Local)* / *File → Export → Project* to get a `.epro` or `.epro2` file (a `.zip` works too) and import it. You get the schematic (every sheet, parts placed where they were, real pin names, values, LCSC numbers) and the PCB (board outline, part placement on top and bottom, tracks, arcs, vias, copper pours). If the project holds several boards you choose one. Nets come from the PCB's netlist, or from the schematic wires, net labels and power ports when there is no PCB. CircuitPilot boards have 2 copper layers: tracks on inner layers of a 4+ layer board are skipped (the import says how many), so those nets show as unrouted; run the router or re-route them. Parts rotated at odd angles (e.g. 45°) keep their exact pad positions.
-- **Projects → Import → EasyEDA Standard PCB** opens an EasyEDA Standard PCB (*File → Export → EasyEDA Source* in EasyEDA) as a new project: footprints become library parts (LCSC numbers kept), with placement (top/bottom, rotation), nets, tracks, vias, holes, copper areas and the board outline; a schematic is generated from the nets.
-
-## Privacy: GitHub sign-in and the shared AI
-
-- **GitHub sign-in** goes through GitHub's own page; each user signs in with **their own** account. GitHub gives the access token to **the user's browser**, where it stays (local storage). The CircuitPilot relay only exchanges GitHub's one-time sign-in code for the token and returns it — it does not store or log tokens. The owner of the CircuitPilot GitHub app has **no access** to users' repositories or files.
-- **Saving to GitHub** (`repo` permission) sends designs from the user's browser directly to the user's own repository, not through the relay.
-- **The free shared AI** asks only for identity (no permission). The relay reads the GitHub **username** to count daily requests and keeps the username, first / last sign-in and request counts. Chat requests pass through the relay to the AI provider and are not stored.
-- **Feedback** you send (text, an optional e-mail, your username, country, app version) is kept for the developer to read.
-- Revoke CircuitPilot any time: GitHub → Settings → Applications → Authorized OAuth Apps.
+| Resource | What it covers |
+| --- | --- |
+| [User guide](docs/USER_GUIDE.md) | AI setup, parts, editing, manufacturing, file formats, project storage, and automation |
+| [Illustrated tutorial (PDF)](docs/CircuitPilot-Tutorial.pdf) | Screenshot walkthroughs of the editors and common workflows |
+| [CNC milling guide](docs/CNC_MILLING.md) | Single-sided design rules, isolation routing, preview, and G-code |
+| [Local model training notes](finetune/README.md) | CircuitPilot-4B training, evaluation, export, and the Colab notebook |
+| [PCB Bench](bench/README.md) · [Leaderboard](bench/results/LEADERBOARD.md) | Model evaluation on design and repair tasks |
+| [Technical paper](docs/paper/CircuitPilot-Paper-v2.pdf) · [Citation](CITATION.cff) | Architecture, routing, CNC milling, and research citation |
+| [GitHub Issues](https://github.com/Abdelhayali/CircuitPilot/issues) | Bug reports and feature requests |
 
 ## License
 
-CircuitPilot is **source-available** under the [PolyForm Strict License 1.0.0](LICENSE), © 2026 Abdelhay Ali. The code is public so you can see how it works, but the licence allows **use only**.
-
-**Commercial licence**: for use in a company, for products you sell or for any other commercial purpose, write to abdelhay@eng.aun.edu.eg.
-
-If CircuitPilot helps your project, please credit it, for example:
-
-> Designed with [CircuitPilot](https://pcbgo.site) by Abdelhay Ali
-
-## Paper and how to cite
-
-The technical paper describes the architecture, the router, CNC milling, the schematic organizer and a benchmark on 15 real boards:
-**[CircuitPilot: An Agent-Operable Toolchain from Natural Language to Manufacturable PCBs](docs/paper/CircuitPilot-Paper-v2.pdf)**
-
-If you use CircuitPilot or the paper in your work, please cite:
-
-> A. Ali, "CircuitPilot: An agent-operable toolchain from natural language to manufacturable PCBs," Technical report, Oct. 2026. [Online]. Available: https://github.com/Abdelhayali/CircuitPilot
-
-```bibtex
-@techreport{ali2026circuitpilot,
-  author      = {Abdelhay Ali},
-  title       = {{CircuitPilot}: An Agent-Operable Toolchain from Natural Language to Manufacturable {PCBs}},
-  institution = {Independent},
-  year        = {2026},
-  month       = oct,
-  url         = {https://github.com/Abdelhayali/CircuitPilot},
-  note        = {Software: https://pcbgo.site}
-}
-```
-
-GitHub's **Cite this repository** button (right side of the repository page) gives the same entry from [`CITATION.cff`](CITATION.cff).
+CircuitPilot is source-available under the [PolyForm Strict License 1.0.0](LICENSE). See the license for permitted uses and restrictions. For commercial licensing, contact [Abdelhay Ali](mailto:abdelhay@eng.aun.edu.eg). Copyright © 2026 Abdelhay Ali.
 
 ## Data sources & licenses
 
-CircuitPilot's design, code and UI are original work. It uses third-party **data and libraries**, credited here as their terms require:
+Third-party components and data retain their own terms. See [NOTICE](NOTICE), [three.js](js/vendor/three-LICENSE.txt), and [Manifold](js/vendor/manifold-LICENSE.txt).
 
-- **Component catalogue** (search, stock, price, LCSC numbers): JLCPCB / LCSC.
-- **Open libraries**: KiCad symbols and footprints (gitlab.com/kicad/libraries, CC-BY-SA 4.0 with an exception for designs), SparkFun KiCad Libraries (github.com/sparkfun/SparkFun-KiCad-Libraries, CC-BY 4.0), Digi-Key KiCad Library (github.com/Digi-Key/digikey-kicad-library, CC-BY-SA 4.0 with an exception for designs).
-- **Part symbols & footprints** for database parts: the **JLCEDA/EasyEDA official library** — https://easyeda.com · https://lceda.cn. Its terms require this source to be declared; parts are used here only to design boards to be made with these parts.
-- **three.js** (MIT) for the 3D previews; the CSG algorithm in `js/enclosure.js` follows csg.js by Evan Wallace (MIT).
-- **Manifold** (Apache-2.0, github.com/elalish/manifold) — the fast 3D boolean kernel, bundled unchanged in `js/vendor/` (only the module wrapper is adapted to load as a classic script; licence in `js/vendor/manifold-LICENSE.txt`).
-- Web search results come from DuckDuckGo (or Brave Search with your own key).
+- **Component data** comes from JLCPCB/LCSC and the JLCEDA/EasyEDA official library. Community entries are identified in the parts browser. [EasyEDA](https://easyeda.com) · [JLCEDA](https://lceda.cn)
+- **KiCad-format libraries** include KiCad and DigiKey data under CC BY-SA 4.0 with a design exception, and SparkFun data under CC BY 4.0. [KiCad library terms](https://www.kicad.org/libraries/license/) · [DigiKey library terms](https://github.com/Digi-Key/digikey-kicad-library#license) · [SparkFun library terms](https://github.com/sparkfun/SparkFun-KiCad-Libraries#license)
+- **Offline catalogue snapshots** are sourced from CDFER’s JLCPCB parts database and its upstream tools. [CDFER catalogue](https://github.com/CDFER/jlcpcb-parts-database) · [jlcparts](https://github.com/yaqwsx/jlcparts)
+- **Web search** uses DuckDuckGo by default, with an optional Brave Search API key in the local server.
+- **CSG fallback** follows Evan Wallace’s MIT-licensed solid geometry implementation. [csg.js](https://github.com/evanw/csg.js)

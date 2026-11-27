@@ -2,6 +2,10 @@
 
 CircuitPilot is an AI-assisted schematic and PCB editor. Describe a circuit in plain language or design it by hand, choose real components, check the schematic, lay out and route the board, and export files for fabrication. The same project can include a fitted 3D-printable enclosure and a product datasheet.
 
+[![Animated CircuitPilot demo showing an ESP32 design from prompt through schematic, PCB routing, and a 3D enclosure](docs/media/demo-esp32-board.gif)](docs/media/demo-esp32-board.mp4)
+
+*An ESP32 board from a prompt to a routed PCB and fitted enclosure.* [Watch the full video](docs/media/demo-esp32-board.mp4) · [See a wearable sensor board and its datasheet](docs/media/demo-esp32-imu-ecg.mp4)
+
 ## Quick features
 
 | Tool | What you can do |
@@ -50,13 +54,20 @@ Use `python3` if that is your system’s Python command. Open [localhost:5173](h
 
 New PCBs use the **EasyEDA Pro** preset with **0.1524 mm** copper clearance and **0.254 mm** routing width. Each PCB has its own rules, so choose a suitable preset or edit its limits in **Rules**.
 
-## See it in action
+## CircuitPilot-4B local model
 
-[![CircuitPilot schematic editor showing an ESP32-C3 design](docs/media/schematic.png)](docs/media/schematic.png)
+**CircuitPilot-4B**, available as **pcbgo-v1**, is a local model fine-tuned from Qwen3.5-4B to use CircuitPilot’s compact design tools. It can look up parts, edit schematics, place and route PCBs, and work through design repairs. The Windows app offers the 2.8 GB Q4_K_M GGUF under **Connect AI → Local AI**. [Model card and download](https://huggingface.co/abdelhayali91/pcbgo-v1) · [Training notes and Colab notebook](finetune/README.md)
 
-- [Prompt to routed PCB and enclosure](docs/media/demo-esp32-board.mp4)
-- [Wearable sensor board, enclosure, and product datasheet](docs/media/demo-esp32-imu-ecg.mp4)
-- [PCB editor and 3D board preview](docs/media/pcb-3d.png)
+### PCB Bench results
+
+PCB Bench scores the design left by the model on 14 tasks: eight new designs and six repairs. The table compares three runs per model with llama.cpp, compact tools, and thinking disabled on 24 November 2026. Routing and DRC counts cover the 33 runs involving a PCB.
+
+| Model | Mean score / 100 | Fully routed | DRC-clean |
+| --- | ---: | ---: | ---: |
+| **CircuitPilot-4B v2** | **80.4** | **32/33** | **25/33** |
+| Qwen3.5-4B base | 65.1 | 21/33 | 17/33 |
+
+[Benchmark methodology](bench/README.md) · [Full leaderboard](bench/results/LEADERBOARD.md)
 
 ## Documentation and support
 
@@ -65,8 +76,7 @@ New PCBs use the **EasyEDA Pro** preset with **0.1524 mm** copper clearance and 
 | [User guide](docs/USER_GUIDE.md) | AI setup, parts, editing, manufacturing, file formats, project storage, and automation |
 | [Illustrated tutorial (PDF)](docs/CircuitPilot-Tutorial.pdf) | Screenshot walkthroughs of the editors and common workflows |
 | [CNC milling guide](docs/CNC_MILLING.md) | Single-sided design rules, isolation routing, preview, and G-code |
-| [Local model training notes](finetune/README.md) | CircuitPilot-4B training, evaluation, export, and the Colab notebook |
-| [PCB Bench](bench/README.md) · [Leaderboard](bench/results/LEADERBOARD.md) | Model evaluation on design and repair tasks |
+| [PCB editor and 3D board preview](docs/media/pcb-3d.png) | Board inspection and component models |
 | [Technical paper](docs/paper/CircuitPilot-Paper-v2.pdf) · [Citation](CITATION.cff) | Architecture, routing, CNC milling, and research citation |
 | [GitHub Issues](https://github.com/Abdelhayali/CircuitPilot/issues) | Bug reports and feature requests |
 

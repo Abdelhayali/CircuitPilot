@@ -361,6 +361,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        if path in ("/api/advanced-route/status", "/api/advanced-route/run"):
+            host = self.headers.get("Host") or ""
+            origin = self.headers.get("Origin") or ""
+            if (not self._authed() or not self._inference_loopback() or
+                    self.headers.get("X-CircuitPilot-App") != "1" or (origin and origin != "http://" + host)):
+                return self._send(403, b'{"error":"Open CircuitPilot on this PC to use Advanced Route."}', "application/json")
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                if not 0 <= n <= 10_000_000:
+                    raise ValueError("Board is too large to route.")
+                import advanced_route
+                body = json.loads(self.rfile.read(n)) if n else {}
+                out = advanced_route.api(path.rsplit("/", 1)[1], body, os.path.dirname(store.DB_PATH))
+                return self._send(200, json.dumps(out).encode(), "application/json")
+            except (OSError, ValueError, TypeError) as e:
+                return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
         if path.startswith(LOCAL_INFERENCE + "/"):
             return self._local_inference(path)
         if path.startswith("/api/jlc/"):

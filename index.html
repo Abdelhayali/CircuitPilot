@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611271500">
+<link rel="stylesheet" href="styles.css?v=202611271700">
 </head>
 <body>
 <header id="top">
@@ -131,6 +131,7 @@
             <button data-place="quick" title="Leaves room for routing where possible, uses both sides, and grows the board only if needed">Quick place (algorithm)</button>
           </div></div>
         <button id="btnRoute" title="Autoroute with rip-up and reroute (effort: Rules → Autorouter effort)">Route</button>
+        <button id="btnAdvancedRoute" title="Preview routing from KiCadRoutingTools" hidden>Advanced Route</button>
         <button id="btnUnroute">Clear routes</button>
         <button id="btnShape" title="Board outline: rectangle, rounded, circle / ellipse, custom">▭ Board</button>
         <button id="btnPanel" title="Several boards on one PCB, joined by break-off tabs; each schematic sheet can go on its own board">⊞ Panel</button>
@@ -606,6 +607,30 @@
 <script src="js/static-backend.js?v=202611232300"></script>
 <script src="js/lib.js?v=202611232100"></script>
 <script src="js/view.js?v=202610301800"></script>
+<dialog id="advancedRouteDialog" class="bench-dialog advanced-route" aria-labelledby="advancedRouteTitle">
+  <header class="bench-head"><h2 id="advancedRouteTitle">Advanced Route</h2><button id="advancedRouteClose" aria-label="Close Advanced Route">✕</button></header>
+  <p id="advancedRouteSetup" class="bench-note" hidden>Install KiCadRoutingTools in <code id="advancedRouteFolder"></code>, then reopen this panel. <a href="https://github.com/Abdelhayali/CircuitPilot/blob/main/docs/USER_GUIDE.md#advanced-route-on-windows" target="_blank" rel="noopener">Setup instructions</a></p>
+  <form id="advancedRouteForm">
+    <div class="bench-row">
+      <label>Mode <select id="advancedRouteMode"><option value="general">Whole board</option><option value="pair">Differential pair</option></select></label>
+      <button id="advancedRouteRun" class="primary">Preview route</button>
+    </div>
+    <fieldset id="advancedRoutePair" class="bench-row" hidden>
+      <label>Positive net <select id="advancedRoutePositive"></select></label>
+      <label>Negative net <select id="advancedRouteNegative"></select></label>
+      <label>Pair gap (mm) <input id="advancedRouteGap" type="number" min="0" step="any"></label>
+      <label>Max length difference (mm) <input id="advancedRouteSkew" type="number" min="0.001" step="any" value="0.1"></label>
+    </fieldset>
+  </form>
+  <p id="advancedRouteStatus" role="status"></p>
+  <div id="advancedRouteResult" hidden>
+    <div class="bench-row"><button id="advancedRouteBefore" aria-pressed="false">Before</button><button id="advancedRouteAfter" aria-pressed="true">Preview</button><span class="bench-note">Red is top copper. Blue is bottom copper. Gold marks vias.</span></div>
+    <svg id="advancedRouteMap" role="img" aria-label="PCB routing preview"></svg>
+    <table id="advancedRouteScore"></table>
+    <p id="advancedRouteIssues"></p>
+    <button id="advancedRouteApply" class="primary" disabled>Apply route</button>
+  </div>
+</dialog>
 <dialog id="benchDialog" class="bench-dialog" aria-labelledby="benchTitle">
   <header class="bench-head"><h2 id="benchTitle">Bench tools</h2><button id="benchClose" aria-label="Close bench tools">✕</button></header>
   <nav class="bench-row" aria-label="Bench tools">
@@ -749,12 +774,13 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611271500"></script>
+<script src="js/welcome.js?v=202611271700"></script>
 <script src="js/app.js?v=202611260005"></script>
 <script src="js/bench-tools.js?v=202611271500"></script>
 <script src="js/bench-reverse.js?v=202611270001"></script>
 <script src="js/bench-bringup.js?v=202611271500"></script>
 <script src="js/bench-voice.js?v=202611271500"></script>
+<script src="js/advanced-route.js?v=202611271700"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

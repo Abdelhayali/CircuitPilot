@@ -776,6 +776,14 @@ details.think summary { cursor: pointer; color: var(--muted, #777); }
 .bringup-results caption { text-align: left; font-weight: 650; margin-bottom: 6px; }
 .bringup-results td, .bringup-results th { min-width: 100px; padding: 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .bringup-results [data-outcome="Out of range"] { color: var(--red, #d74b50); font-weight: 650; }
+.advanced-route [hidden] { display: none; }
+.advanced-route fieldset { margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.advanced-route fieldset input { width: 6em; }
+#advancedRouteFolder { overflow-wrap: anywhere; }
+#advancedRouteMap { display: block; width: 100%; max-height: 420px; margin: 10px 0; background: #121a28; border-radius: 8px; }
+#advancedRouteScore { width: 100%; border-collapse: collapse; text-align: left; }
+#advancedRouteScore th, #advancedRouteScore td { padding: 6px; border-bottom: 1px solid var(--line); }
+.advanced-route [aria-pressed=true] { border-color: var(--accent); background: var(--panel2); }
 @media (max-width: 560px) {
   .bench-dialog { width: 98vw; padding: 10px; }
   .bench-dialog button { min-height: 42px; }

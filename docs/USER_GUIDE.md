@@ -6,6 +6,7 @@
 - [Schematic and component library](#schematic-and-component-library)
 - [PCB placement, routing, and checks](#pcb-placement-routing-and-checks)
 - [Bench tools](#bench-tools)
+- [Advanced Route on Windows](#advanced-route-on-windows)
 - [3D, fabrication, and documentation](#3d-fabrication-and-documentation)
 - [Projects, backups, and file formats](#projects-backups-and-file-formats)
 - [Local setup and automation](#local-setup-and-automation)
@@ -44,6 +45,25 @@ In a local server session, **Knowledge** lets you attach a folder of requirement
 The PCB editor also supports copper pours and stitching vias, keep-outs, mounting holes, rotating silkscreen text, net highlighting, panel outlines with break-off tabs, and separate PCB layouts and rules within one project.
 
 Use the **Track** tool for interactive routing. Start from a pad, use right-click or **V** to change layers with a via, and use **Space** to change the routing angle. In Select mode, **R** rotates the selected footprint or silkscreen label. The selected side and the available actions appear in the PCB tool panel.
+
+## Advanced Route on Windows
+
+In the Windows app, open **PCB → Advanced Route** after placing the parts on a two-layer board. Choose **Whole board** to try a different route for the placed board, or **Differential pair** to route two explicitly selected nets with two pads each. In pair mode, enter the required spacing and maximum difference in copper trace lengths. The trace length comparison measures planar copper length.
+
+**Preview route** shows the current and proposed copper, unrouted nets, DRC results, via count, and trace length. **Apply route** is available when the proposal preserves existing connections and introduces no new DRC errors. The schematic, footprints, and hand-routed or locked copper are preserved. For **Differential pair**, all other nets retain their current routes.
+
+Set up the local [KiCadRoutingTools release](https://github.com/drandyhaas/KiCadRoutingTools/tree/v0.24.2) once. Use the installation folder displayed in the Advanced Route dialog. For a standard Windows app installation, the following PowerShell commands use that default folder and a dedicated Python environment:
+
+```powershell
+$krtFolder = Join-Path $env:LOCALAPPDATA 'CircuitPilot\KiCadRoutingTools'
+git clone --branch v0.24.2 --depth 1 https://github.com/drandyhaas/KiCadRoutingTools.git $krtFolder
+Set-Location $krtFolder
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install 'numpy>=1.22' 'scipy>=1.7' 'shapely>=2'
+.\.venv\Scripts\python.exe build_router.py --tag v0.24.2
+```
+
+Reopen **Advanced Route** after setup. For an existing installation elsewhere, set `CP_KRT_HOME` to its folder before launching CircuitPilot. If that installation uses another Python environment, set `CP_KRT_PYTHON` to the full path of its Python executable. Routing uses temporary files on the PC.
 
 ## Bench tools
 

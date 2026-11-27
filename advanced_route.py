@@ -55,6 +55,9 @@ def api(action, body, data_dir):
         "--via-size", _number(r.get("via"), "via diameter", .05, 30),
         "--via-drill", _number(r.get("drill"), "via drill", .01, r["via"]),
     ]
+    if r.get("noViaInPad") is True:
+        # KiCadRoutingTools requires a positive edge-to-edge gap to keep vias off their own pads.
+        flags += ["--same-net-pad-clearance", "0.01"]
     if mode == "pair":
         flags += [
             "--nets", "CP_PAIR_P", "CP_PAIR_N",
@@ -62,6 +65,8 @@ def api(action, body, data_dir):
             "--length-match-tolerance", _number(body.get("skew"), "pair length tolerance", .001, 20),
         ]
     else:
+        if r.get("neckDown") is False:
+            flags.append("--no-power-tap-neckdown")
         overrides = body.get("widths") or {}
         if not isinstance(overrides, dict) or len(overrides) > 200 or any(not _NET.fullmatch(k) for k in overrides):
             raise ValueError("Too many individual routing widths.")

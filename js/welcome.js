@@ -9,6 +9,7 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.27', date: '2026-11-27', items: [
+      'Advanced Route passes the no-via-in-pad rule to the router and lets you apply a flagged preview for manual repair',
       'Advanced Route on Windows previews routes from a local KiCadRoutingTools installation, including a differential-pair mode',
       'Bring-up checklists highlight probe locations, log voltages by board revision, and compare results side by side. Bench Voice can read steps and log dictated readings.',
       'Bench tools adds a phone assembly guide with a camera overlay, PCB photo import with connection review, and spoken answers from the open project',

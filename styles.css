@@ -783,6 +783,8 @@ details.think summary { cursor: pointer; color: var(--muted, #777); }
 #advancedRouteMap { display: block; width: 100%; max-height: 420px; margin: 10px 0; background: #121a28; border-radius: 8px; }
 #advancedRouteScore { width: 100%; border-collapse: collapse; text-align: left; }
 #advancedRouteScore th, #advancedRouteScore td { padding: 6px; border-bottom: 1px solid var(--line); }
+#advancedRouteIssueList ul { max-height: 12em; overflow: auto; padding-inline-start: 24px; }
+#advancedRouteRepairLabel { display: block; margin: 12px 0; }
 .advanced-route [aria-pressed=true] { border-color: var(--accent); background: var(--panel2); }
 @media (max-width: 560px) {
   .bench-dialog { width: 98vw; padding: 10px; }

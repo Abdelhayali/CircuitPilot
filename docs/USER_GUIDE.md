@@ -50,7 +50,7 @@ Use the **Track** tool for interactive routing. Start from a pad, use right-clic
 
 In the Windows app, open **PCB → Advanced Route** after placing the parts on a two-layer board. Choose **Whole board** to try a different route for the placed board, or **Differential pair** to route two explicitly selected nets with two pads each. In pair mode, enter the required spacing and maximum difference in copper trace lengths. The trace length comparison measures planar copper length.
 
-**Preview route** shows the current and proposed copper, unrouted nets, DRC results, via count, and trace length. **Apply route** is available when the proposal preserves existing connections and introduces no new DRC errors. The schematic, footprints, and hand-routed or locked copper are preserved. For **Differential pair**, all other nets retain their current routes.
+**Preview route** shows the current and proposed copper, unrouted nets, DRC results, via count, and trace length. Advanced Route passes board dimensions, routing sizes, clearances, and **No via in pad** to the local router. Open **Preview issues** for details. To keep a flagged preview and fix it manually, select the repair checkbox and click **Apply for repair**. CircuitPilot opens DRC after applying the route. The schematic, footprints, and hand-routed or locked copper are preserved. For **Differential pair**, all other nets retain their current routes.
 
 Set up the local [KiCadRoutingTools release](https://github.com/drandyhaas/KiCadRoutingTools/tree/v0.24.2) once. Use the installation folder displayed in the Advanced Route dialog. For a standard Windows app installation, the following PowerShell commands use that default folder and a dedicated Python environment:
 

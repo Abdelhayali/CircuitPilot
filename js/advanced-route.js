@@ -49,7 +49,8 @@
     const rules = {
       width: Math.max(R.traceWidth, +R.minTraceWidth || 0), clearance,
       edge: Math.max(R.edgeClearance, +R.minEdgeClearance || 0), holes: +R.minHoleToHole || 0,
-      via: Math.max(R.viaDiameter, +R.minViaDiameter || 0), drill: Math.max(R.viaDrill, +R.minViaDrill || 0)
+      via: Math.max(R.viaDiameter, +R.minViaDiameter || 0), drill: Math.max(R.viaDrill, +R.minViaDrill || 0),
+      noViaInPad: !!R.noViaInPad, neckDown: !!R.neckDown
     };
     rules.via = Math.max(rules.via, rules.drill + 2 * (+R.minAnnularRing || 0));
     const widthOf = n => Math.max(Pcb.netWidth(n), +R.minTraceWidth || 0);
@@ -160,10 +161,17 @@
     if (ctx.pair.length && [...t,...v].some(q => !ctx.pair.includes(q.net))) {
       throw new Error('The router added copper outside the selected pair.');
     }
+    if (t.some(q => !q.net || q.w <= 0) || v.some(q => !q.net || q.drill <= 0 || q.d < q.drill)) {
+      throw new Error('The router returned invalid copper geometry.');
+    }
     const issues = [];
-    if (t.some(q => !q.net || q.w <= 0 || q.w < ctx.widthOf(q.net) - .001) ||
-        v.some(q => !q.net || q.d < ctx.body.rules.via - .001 || q.drill < ctx.body.rules.drill - .001)) {
-      issues.push('The preview contains copper smaller than the current routing rules permit.');
+    const requested = ctx.body.rules;
+    if (!requested.neckDown) {
+      const nets = [...new Set(t.filter(q => q.w < ctx.widthOf(q.net) - .001).map(q => q.net))];
+      if (nets.length) issues.push('Tracks below the requested width on ' + nets.join(', ') + '.');
+    }
+    if (v.some(q => q.d < requested.via - .001 || q.drill < requested.drill - .001)) {
+      issues.push('The router used vias smaller than the requested ' + requested.via + '/' + requested.drill + ' mm.');
     }
     const pcb = {...original, traces: [...ctx.tracks,...t], vias: [...ctx.vias,...v], routed: {}};
     const before = score(ctx.pair);
@@ -184,7 +192,7 @@
       if (count) known.set(k,count-1);
       return !count;
     });
-    if (newErrors.length) issues.push(...newErrors.slice(0,3).map(q => q.msg));
+    issues.push(...newErrors.map(q => q.msg));
     if (ctx.pair.length) {
       if (ctx.pair.some(n => after.unrouted.includes(n))) issues.push('Both nets in the pair must be fully routed.');
       else if (after.skew > ctx.body.skew + .000001) issues.push('The pair exceeds the requested trace length difference.');
@@ -245,9 +253,21 @@
       for (const value of values) r.insertCell().textContent = value;
     }
     $('advancedRouteResult').hidden = false;
-    $('advancedRouteApply').disabled = issues.length > 0;
-    label('advancedRouteIssues',issues.length ? issues.join(' ') :
-      (after.unrouted.length ? 'Remaining unrouted nets: ' + after.unrouted.join(', ') : 'All PCB nets are connected.'));
+    const list = $('advancedRouteIssueList'), flagged = issues.length > 0;
+    list.hidden = !flagged;
+    list.open = false;
+    const entries = document.createDocumentFragment();
+    for (const issue of issues) {
+      const item = document.createElement('li');
+      item.textContent = issue;
+      entries.append(item);
+    }
+    $('advancedRouteIssueItems').replaceChildren(entries);
+    $('advancedRouteRepairLabel').hidden = !flagged;
+    $('advancedRouteRepair').checked = false;
+    updateApply();
+    const connections = after.unrouted.length ? 'Remaining unrouted nets: ' + after.unrouted.join(', ') + '.' : 'All PCB nets are connected.';
+    label('advancedRouteIssues',flagged ? 'Review the flagged issues before applying this preview for manual repair. ' + connections : connections);
     draw(true);
   }
 
@@ -262,7 +282,14 @@
   function invalidate() {
     preview = undefined;
     $('advancedRouteResult').hidden = true;
-    $('advancedRouteApply').disabled = true;
+    $('advancedRouteRepair').checked = false;
+    updateApply();
+  }
+
+  function updateApply() {
+    const flagged = !!preview?.issues.length, button = $('advancedRouteApply');
+    button.disabled = !preview || (flagged && !$('advancedRouteRepair').checked);
+    button.textContent = flagged ? 'Apply for repair' : 'Apply route';
   }
 
   function options() {
@@ -336,18 +363,21 @@
     };
     $('advancedRouteBefore').onclick = () => { if (preview) draw(false); };
     $('advancedRouteAfter').onclick = () => { if (preview) draw(true); };
+    $('advancedRouteRepair').onchange = updateApply;
     $('advancedRouteApply').onclick = () => {
-      if (!preview || preview.issues.length) return;
+      if (!preview || (preview.issues.length && !$('advancedRouteRepair').checked)) return;
       if (Model.snapshot() !== preview.snapshot) {
         invalidate();
         status('The PCB changed. Run another preview.');
         return;
       }
       try {
+        const flagged = preview.issues.length > 0;
         Model.mutate(() => { Model.S.pcb = preview.pcb; });
         invalidate();
         dialog.close();
-        App.toast('Advanced route applied.');
+        if (flagged) $('btnDrc').click();
+        App.toast(flagged ? 'Route applied for manual repair. Review the DRC list.' : 'Advanced route applied.');
       } catch (error) { status(error.message); }
     };
   }

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611271700">
+<link rel="stylesheet" href="styles.css?v=202611271800">
 </head>
 <body>
 <header id="top">
@@ -628,6 +628,11 @@
     <svg id="advancedRouteMap" role="img" aria-label="PCB routing preview"></svg>
     <table id="advancedRouteScore"></table>
     <p id="advancedRouteIssues"></p>
+    <details id="advancedRouteIssueList" hidden>
+      <summary>Preview issues</summary>
+      <ul id="advancedRouteIssueItems"></ul>
+    </details>
+    <label id="advancedRouteRepairLabel" hidden><input type="checkbox" id="advancedRouteRepair"> Apply this preview so I can fix the issues manually</label>
     <button id="advancedRouteApply" class="primary" disabled>Apply route</button>
   </div>
 </dialog>
@@ -774,13 +779,13 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611271700"></script>
+<script src="js/welcome.js?v=202611271800"></script>
 <script src="js/app.js?v=202611260005"></script>
 <script src="js/bench-tools.js?v=202611271500"></script>
 <script src="js/bench-reverse.js?v=202611270001"></script>
 <script src="js/bench-bringup.js?v=202611271500"></script>
 <script src="js/bench-voice.js?v=202611271500"></script>
-<script src="js/advanced-route.js?v=202611271700"></script>
+<script src="js/advanced-route.js?v=202611271800"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

@@ -445,16 +445,18 @@ const App = (() => {
 
   // ---------- autorouter in a Web Worker ----------
   let worker = null, routeReject = null, routeBest = null, routeResolve = null;
-  function runRouter({ place = null, opt = {} } = {}) {
+  function runRouter({ place = null, opt = {}, state, apply = true, progress } = {}) {
+    if (!apply && worker) return Promise.reject(new Error('Another routing job is running.'));
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
       worker = new Worker('js/route-worker.js?v=202611260004');
-      $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…';
+      if (apply) { $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…'; }
       worker.onmessage = e => {
         const m = e.data;
         if (m.type === 'best') { routeBest = m; return; }
         if (m.type === 'progress') {
+          if (!apply) { progress?.(m); return; }
           const time = m.budget ? ` · ${Math.round(m.elapsed)}/${Math.round(m.budget)} s` : '';
           $('#routeMsg').textContent = m.phase === 'ripup'
             ? `Rip-up & reroute · ${m.unrouted} unrouted · try ${m.iteration}${m.attempt > 1 ? ' · pass ' + m.attempt : ''}${time}`
@@ -463,7 +465,7 @@ const App = (() => {
         }
         worker.terminate(); worker = null; $('#routeBusy').classList.add('hidden');
         if (m.type === 'error') { reject(new Error(m.message)); return; }
-        if (!m.placement?.restored) Model.mutate(() => {
+        if (apply && !m.placement?.restored) Model.mutate(() => {
           const S = Model.S;
           for (const [ref, pcb] of m.positions) {
             const c = Model.comp(ref);
@@ -471,11 +473,11 @@ const App = (() => {
           }
           S.board = m.board; S.pcb = m.pcb;
         });
-        Pcb.ui.drc = null;
-        resolve({ placement: m.placement, routing: m.routing });
+        if (apply) Pcb.ui.drc = null;
+        resolve(apply ? { placement: m.placement, routing: m.routing } : m.pcb);
       };
       worker.onerror = e => { worker.terminate(); worker = null; $('#routeBusy').classList.add('hidden'); reject(new Error(e.message || 'Router crashed')); };
-      worker.postMessage({ state: JSON.parse(Model.snapshot()), place, opt });
+      worker.postMessage({ state: state || JSON.parse(Model.snapshot()), place, opt });
     });
   }
 
@@ -2401,6 +2403,6 @@ const App = (() => {
       e.preventDefault();
     });
   }
-  return { orderWebsite, init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download, openProjectData, exportProject: () => exportAs('json') };
+  return { orderWebsite, init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download, openProjectData, routeCandidate: (state,opt,progress) => runRouter({state,opt,progress,apply:false}), exportProject: () => exportAs('json') };
 })();
 window.addEventListener('DOMContentLoaded', App.init);

@@ -778,6 +778,9 @@ details.think summary { cursor: pointer; color: var(--muted, #777); }
 .bringup-results [data-outcome="Out of range"] { color: var(--red, #d74b50); font-weight: 650; }
 .advanced-route fieldset { margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; }
 .advanced-route fieldset input { width: 6em; }
+#advancedRouteProgress { width: min(470px, 94vw); }
+#advancedRouteIndicator { width: 100%; margin: 0 0 12px; accent-color: var(--accent); }
+#advancedRouteElapsed { font-variant-numeric: tabular-nums; color: var(--muted); }
 @media (max-width: 560px) {
   .bench-dialog { width: 98vw; padding: 10px; }
   .bench-dialog button { min-height: 42px; }

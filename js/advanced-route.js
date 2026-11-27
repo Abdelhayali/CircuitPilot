@@ -12,8 +12,8 @@
   const xy = p => p.map(number).join(' ');
   const coords = (key, p) => '(' + key + ' ' + xy(p) + ')';
   let busy = false;
-  const routingSnapshot = ({board,pcb,nets,lib,rules,components}) =>
-    JSON.stringify([board,pcb,nets,lib,rules,components,Pcb.activePcb()]);
+  const routingSnapshot = ({board,pcb,nets,lib,rules,components,pcbs}) =>
+    JSON.stringify([board,pcb,nets,lib,rules,components,pcbs?.map(p=>p.sheets),Pcb.activePcb()]);
 
   const pinned = v => v.manual || v.locked || v.thermal;
   const point = p => [p.x, p.y];
@@ -180,24 +180,16 @@
     for (const q of v) group(q.net).vias.push({...q,d:rules.via,drill:rules.drill});
 
     const baseline = assess(original);
-    const sig = q => JSON.stringify([q.type,q.msg,q.x,q.y]);
-    const existing = new Map();
-    for (const q of baseline.errors) existing.set(sig(q),(existing.get(sig(q)) || 0) + 1);
     let pcb = original, accepted = 0, failure;
     function attempt(nets) {
       const replace = new Set(nets), keep = q => pinned(q) || !replace.has(q.net);
       const next = {...pcb, traces: [...pcb.traces.filter(keep),...nets.flatMap(n=>groups.get(n).tracks)],
         vias: [...pcb.vias.filter(keep),...nets.flatMap(n=>groups.get(n).vias)], routed: {}};
       const after = assess(next);
-      const known = new Map(existing);
-      const newErrors = after.errors.filter(q => {
-        const k = sig(q), n = known.get(k);
-        if (n) known.set(k,n-1);
-        return !n;
-      });
+      const errors = newErrors(baseline,after);
       const failed = after.unrouted.find(n => replace.has(n) || !baseline.unrouted.includes(n));
-      if (newErrors.length || failed) {
-        failure = newErrors[0]?.msg || 'Could not route ' + failed + ' with the current rules.';
+      if (errors.length || failed) {
+        failure = errors[0]?.msg || 'Could not route ' + failed + ' with the current rules.';
         return false;
       }
       if (ctx.pair.length) {
@@ -223,7 +215,18 @@
     if (ctx.pair.some(n=>!groups.has(n))) throw new Error('The router could not complete both nets of the pair.');
     applyBatches([...groups.keys()]);
     if (!accepted) throw new Error(failure || 'No routes met the selected board rules.');
-    return {pcb, remaining: assess(pcb).unrouted.length, skipped: groups.size - accepted};
+    return {pcb, check: assess(pcb), engine: 'advanced'};
+  }
+
+  function newErrors(before, after) {
+    const signature = q => JSON.stringify([q.type,q.msg,q.x,q.y]);
+    const known = new Map();
+    for (const q of before.errors) known.set(signature(q),(known.get(signature(q)) || 0) + 1);
+    return after.errors.filter(q => {
+      const k = signature(q), n = known.get(k);
+      if (n) known.set(k,n-1);
+      return !n;
+    });
   }
 
   function assess(pcb) {
@@ -232,11 +235,37 @@
       Model.S.pcb = pcb;
       const conn = Pcb.connectivity(), drc = Pcb.drc();
       return {unrouted: Pcb.status(conn).unrouted,
+        links: Object.values(conn).reduce((n,c)=>n + c.groups.length - 1,0),
         errors: drc.violations.filter(q=>q.severity==='error' && q.type!=='unrouted'),
         routed: Object.fromEntries(Object.entries(conn).filter(([,n])=>n.complete).map(([n])=>[n,true]))};
     } finally {
       Model.S.pcb = original;
     }
+  }
+
+  async function builtIn(design, before, progress) {
+    const state = JSON.parse(JSON.stringify(design));
+    const copperKeys = {
+      traces: t => JSON.stringify([t.net,t.layer,t.w,t.pts]),
+      vias: viaKey
+    };
+    const originals = Object.fromEntries(Object.entries(copperKeys).map(([kind,key]) => [
+      kind, new Map(design.pcb[kind].filter(pinned).map(q=>[key(q),q]))
+    ]));
+    // The built-in router preserves hand-routed copper. Give locked and thermal copper the same protection.
+    for (const kind of Object.keys(copperKeys)) {
+      state.pcb[kind].forEach(q=>{ if (pinned(q)) q.manual = true; });
+    }
+    const pcb = await App.routeCandidate(state,{},progress);
+    for (const [kind,key] of Object.entries(copperKeys)) {
+      const fixed = originals[kind], returned = new Set(pcb[kind].map(key));
+      if ([...fixed.keys()].some(k=>!returned.has(k))) throw new Error('The alternative route touched locked copper.');
+      pcb[kind] = pcb[kind].map(q=>fixed.get(key(q)) || q);
+    }
+    const check = assess(pcb), errors = newErrors(before,check);
+    if (errors.length) throw new Error(errors[0].msg);
+    if (check.unrouted.some(n=>!before.unrouted.includes(n))) throw new Error('The alternative route left a previously closed net open.');
+    return {pcb,check,engine:'built-in'};
   }
 
   async function request(action, body) {
@@ -268,41 +297,110 @@
     button.hidden = false;
     pairButton.hidden = false;
     const pairStatus = text => $('advancedRouteStatus').textContent = text;
+    const progress = $('advancedRouteProgress'), indicator = $('advancedRouteIndicator');
+    const stage = $('advancedRouteStage'), summary = $('advancedRouteSummary');
+    const done = $('advancedRouteDone'), drc = $('advancedRouteDrc');
+    let timer;
+    const paint = () => new Promise(resolve=>setTimeout(resolve,25));
+    const quantity = (count, name) => count + ' ' + name + (count === 1 ? '' : 's');
+
+    function startProgress() {
+      const started = performance.now();
+      const elapsed = () => $('advancedRouteElapsed').textContent = Math.floor((performance.now()-started)/1000) + ' s';
+      stage.textContent = 'Reading the PCB and its rules…';
+      indicator.hidden = false;
+      summary.hidden = done.hidden = drc.hidden = true;
+      progress.showModal();
+      elapsed();
+      timer = setInterval(elapsed,1000);
+    }
+
+    function finishProgress(title, detail, hasBoard) {
+      clearInterval(timer);
+      indicator.hidden = true;
+      stage.textContent = title;
+      summary.textContent = detail;
+      summary.hidden = done.hidden = false;
+      drc.hidden = !hasBoard;
+      done.focus();
+    }
+
+    progress.addEventListener('cancel',e=>{ if (busy) e.preventDefault(); });
+    done.onclick = () => progress.close();
+    drc.onclick = () => { progress.close(); $('btnDrc').click(); };
 
     async function route(mode) {
       if (busy) return;
-      const pair = mode === 'pair', rules = Pcb.rules();
-      if (+rules.layers !== 2 || rules.trackStyle === '90') {
-        if (pair) {
-          pairStatus('Differential-pair routing requires a two-layer board with 45° tracks.');
-          return;
-        }
-        $('btnRoute').click();
+      const pair = mode === 'pair', rules = Pcb.rules(), design = Model.S;
+      const nativeOnly = +rules.layers !== 2 || rules.trackStyle === '90';
+      if (pair && nativeOnly) {
+        pairStatus('Differential-pair routing requires a two-layer board with 45° tracks.');
         return;
       }
+      busy = button.disabled = pairButton.disabled = true;
+      fields.forEach(field=>field.disabled = true);
+      startProgress();
       try {
-        const design = Model.S, ctx = prepare(mode), snapshot = routingSnapshot(design);
-        busy = button.disabled = pairButton.disabled = true;
-        button.textContent = 'Routing…';
-        fields.forEach(field=>field.disabled = true);
-        if (pair) pairStatus('Routing pair…');
-        const out = await request('run',ctx.body);
-        if (pair && !dialog.open) return;
-        if (Model.S !== design || routingSnapshot(design) !== snapshot) {
-          throw new Error('The board or its rules changed while routing. Click Advanced Route again.');
+        await paint();
+        if (!design.board.w || !Pcb.placed().length || Pcb.pendingFootprints().length) {
+          throw new Error('Update the PCB from its schematic and place the parts before routing.');
         }
-        const result = candidate(ctx,out.board);
-        Model.mutate(() => { Model.S.pcb = result.pcb; });
+        const before = assess(design.pcb);
+        if (!pair && !before.unrouted.length) {
+          finishProgress('Already routed', before.links ? 'No open nets were found.' :
+            'The board has no unrouted connections. Existing copper was kept.',true);
+          return;
+        }
+        const snapshot = routingSnapshot(design);
+        const stillCurrent = () => Model.S === design && routingSnapshot(design) === snapshot;
+        let best, issue;
+        if (!nativeOnly) {
+          const ctx = prepare(mode);
+          stage.textContent = 'Routing with the Advanced Route engine…';
+          try {
+            const out = await request('run',ctx.body);
+            if (!stillCurrent()) throw new Error('The board or its rules changed while routing.');
+            stage.textContent = 'Checking the returned copper against your PCB rules…';
+            await paint();
+            if (!stillCurrent()) throw new Error('The board or its rules changed while routing.');
+            best = candidate(ctx,out.board);
+          } catch (e) {
+            if (pair || !stillCurrent()) throw e;
+            issue = e.message;
+          }
+        }
+        if (!pair && (!best || best.check.unrouted.length)) {
+          stage.textContent = nativeOnly ? 'Routing with the built-in router for these board rules…' :
+            'Trying the built-in router to close remaining connections…';
+          try {
+            const alternate = await builtIn(design,before,m=>{
+              if (m.net) stage.textContent = 'Built-in router · routing ' + m.net + '…';
+            });
+            if (!best || alternate.check.unrouted.length < best.check.unrouted.length ||
+                (alternate.check.unrouted.length === best.check.unrouted.length && alternate.check.links < best.check.links)) {
+              best = alternate;
+            }
+          } catch (e) { issue = [issue,e.message].filter(Boolean).join(' '); }
+        }
+        if (!stillCurrent()) throw new Error('The board or its rules changed while routing. Run Advanced Route again.');
+        const improved = best && best.check.links < before.links;
+        if (!best || (!pair && !improved)) {
+          finishProgress('No new connections', 'Existing copper was kept. ' + (issue ||
+            quantity(before.unrouted.length,'net') + ' still open under the selected rules.'),true);
+          return;
+        }
+        Model.mutate(() => { Model.S.pcb = best.pcb; });
+        Pcb.ui.drc = null;
         if (pair) dialog.close();
-        $('btnDrc').click();
-        const details = result.skipped ? ' ' + result.skipped + ' net proposal(s) skipped because they could not pass the selected rules.' : '';
-        App.toast('Advanced routing applied. ' + result.remaining + ' unrouted net(s).' + details,8000);
+        const count = before.links - best.check.links;
+        const remaining = best.check.unrouted.length;
+        const detail = (count > 0 ? quantity(count,'connection') + ' added. ' : '') + quantity(remaining,'net') + ' still open.' +
+          (best.engine === 'built-in' ? ' Used the built-in router for the applied result.' : '');
+        finishProgress(remaining ? 'Routing finished with open nets' : 'Routing complete',detail,true);
       } catch (error) {
-        if (pair && dialog.open) pairStatus(error.message);
-        else App.toast(error.message,10000);
+        finishProgress('Routing could not finish',error.message,!!Model.S.board.w);
       } finally {
         busy = button.disabled = pairButton.disabled = false;
-        button.textContent = 'Advanced Route';
         fields.forEach(field=>field.disabled = false);
       }
     }

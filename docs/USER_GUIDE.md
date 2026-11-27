@@ -48,7 +48,7 @@ Use the **Track** tool for interactive routing. Start from a pad, use right-clic
 
 ## Advanced Route on Windows
 
-In the Windows app, click **PCB → Advanced Route** after placing the parts. The Windows download includes the routing engine. CircuitPilot inserts the routes that pass the board's selected rules, then opens DRC. It uses the selected via diameter and drill, track widths, copper and hole clearances, and **No via in pad**. With **Neck down when the full width does not fit** enabled, traces may narrow to the selected minimum. Any connections the router cannot complete under those rules stay listed in DRC. Undo restores the previous routing.
+In the Windows app, click **PCB → Advanced Route** after placing the parts. The progress dialog shows what the router is doing and how many connections it finished. If the bundled engine leaves nets open, CircuitPilot tries its built-in router with the same board rules and keeps the result that closes more connections. Click **Show DRC** in the results dialog to inspect any remaining issues. The router uses your selected via diameter and drill, track widths, copper and hole clearances, and **No via in pad**. With **Neck down when the full width does not fit** enabled, traces may narrow to the selected minimum. Undo restores the previous routing.
 
 The bundled engine handles two-layer boards with 45° tracks. The **Advanced Route** button uses CircuitPilot's built-in router for other layer counts or 90° tracks. To route a coupled differential pair, click **Route pair…**, select two nets with two pads each, and enter the pair spacing and allowed difference in planar trace length. Hand-routed and locked copper is preserved.
 

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611272100">
+<link rel="stylesheet" href="styles.css?v=202611272200">
 </head>
 <body>
 <header id="top">
@@ -621,6 +621,16 @@
   </form>
   <p id="advancedRouteStatus" role="status"></p>
 </dialog>
+<dialog id="advancedRouteProgress" class="bench-dialog advanced-route" aria-labelledby="advancedRouteProgressTitle">
+  <header class="bench-head"><h2 id="advancedRouteProgressTitle">Advanced Route</h2><span id="advancedRouteElapsed"></span></header>
+  <p id="advancedRouteStage" role="status"></p>
+  <progress id="advancedRouteIndicator" aria-label="Routing progress"></progress>
+  <p id="advancedRouteSummary" hidden></p>
+  <div class="bench-row">
+    <button id="advancedRouteDrc" hidden>Show DRC</button>
+    <button id="advancedRouteDone" class="primary" hidden>Done</button>
+  </div>
+</dialog>
 <dialog id="benchDialog" class="bench-dialog" aria-labelledby="benchTitle">
   <header class="bench-head"><h2 id="benchTitle">Bench tools</h2><button id="benchClose" aria-label="Close bench tools">✕</button></header>
   <nav class="bench-row" aria-label="Bench tools">
@@ -764,13 +774,13 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611272100"></script>
-<script src="js/app.js?v=202611260005"></script>
+<script src="js/welcome.js?v=202611272200"></script>
+<script src="js/app.js?v=202611272200"></script>
 <script src="js/bench-tools.js?v=202611271500"></script>
 <script src="js/bench-reverse.js?v=202611270001"></script>
 <script src="js/bench-bringup.js?v=202611271500"></script>
 <script src="js/bench-voice.js?v=202611271500"></script>
-<script src="js/advanced-route.js?v=202611272100"></script>
+<script src="js/advanced-route.js?v=202611272200"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

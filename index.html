@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611270001">
+<link rel="stylesheet" href="styles.css?v=202611271500">
 </head>
 <body>
 <header id="top">
@@ -612,6 +612,7 @@
     <button data-bench="assembly" aria-pressed="true">Assembly guide</button>
     <button data-bench="photos" aria-pressed="false">Photo → schematic</button>
     <button data-bench="voice" aria-pressed="false">Bench voice</button>
+    <button data-bench="bringup" aria-pressed="false">Bring-up</button>
   </nav>
 
   <section id="bench-assembly" class="bench-section" aria-label="Assembly guide">
@@ -660,6 +661,7 @@
   <section id="bench-voice" class="bench-section" aria-label="Bench voice assistant" hidden>
     <div class="bench-row"><button id="benchListen" class="primary">Start listening</button><button id="benchSpeak">Read answer aloud</button></div>
     <p class="bench-note">Speech recognition availability varies by browser. Your browser may send microphone audio to its speech service. Typed questions work without the microphone.</p>
+    <p class="bench-note">During a bring-up run, say “next step”, “log 3.28 volts”, then “confirm reading”. For an instruction step, say “mark step complete”.</p>
     <form id="benchQuestionForm" class="bench-row">
       <label for="benchQuestion">Ask the open project</label>
       <input id="benchQuestion" placeholder="What’s on pin 3 of U5?" required maxlength="250">
@@ -672,6 +674,48 @@
       <label class="bench-field">Expected voltages, one per line <textarea id="benchVoltages" rows="3" placeholder="TP4 = 1.8 V"></textarea></label>
       <div class="bench-row"><button id="benchSaveNotes">Save to project</button><button id="benchResetSteps">Restart checklist</button></div>
     </details>
+  </section>
+  <section id="bench-bringup" class="bench-section" aria-label="Bring-up checklist and measurement log" hidden>
+    <details class="bringup-setup">
+      <summary>Edit checklist for new runs</summary>
+      <form id="bringupSetup">
+        <div id="bringupRows"></div>
+        <datalist id="bringupPins"></datalist><datalist id="bringupReferences"></datalist>
+        <div class="bench-row">
+          <button type="button" id="bringupAdd">Add step</button>
+          <button type="button" id="bringupLegacy" hidden>Copy existing bench notes</button>
+          <button type="submit">Save checklist</button>
+        </div>
+      </form>
+    </details>
+    <form id="bringupNew" class="bench-row bringup-run">
+      <label>Board revision <input id="bringupRevision" placeholder="Rev A" required maxlength="60"></label>
+      <label>Board ID <input id="bringupUnit" placeholder="Prototype 1" required maxlength="60"></label>
+      <button class="primary">Start run</button>
+    </form>
+    <p id="bringupStatus" role="status"></p>
+    <div id="bringupSession" hidden>
+      <div class="bench-row">
+        <label>Run <select id="bringupRuns"></select></label>
+        <label>Compare with <select id="bringupCompare"></select></label>
+      </div>
+      <div class="bench-row bringup-run">
+        <label>Checklist step <select id="bringupSteps"></select></label>
+        <button id="bringupNext">Next outstanding step</button>
+      </div>
+      <p id="bringupPrompt" class="bench-answer"></p>
+      <div id="bringupMapPanel" hidden>
+        <div class="bench-row" aria-label="PCB side"><button id="bringupTop">Top</button><button id="bringupBottom">Bottom</button><span id="bringupMapLabel"></span></div>
+        <canvas id="bringupMap" class="bench-map" aria-label="PCB probe locations" width="660" height="320"></canvas>
+      </div>
+      <form id="bringupReading" class="bench-row bringup-run" hidden>
+        <label>Measured voltage <input id="bringupVolts" inputmode="decimal" placeholder="e.g. 3.28 V" required maxlength="24"></label>
+        <button class="primary">Log reading</button>
+      </form>
+      <button id="bringupDone" hidden>Mark step complete</button>
+      <ol id="bringupAttempts" class="bringup-attempts" aria-label="Readings for selected step"></ol>
+      <div id="bringupResults" class="bringup-results"></div>
+    </div>
   </section>
 </dialog>
 
@@ -705,11 +749,12 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611270001"></script>
+<script src="js/welcome.js?v=202611271500"></script>
 <script src="js/app.js?v=202611260005"></script>
-<script src="js/bench-tools.js?v=202611270001"></script>
+<script src="js/bench-tools.js?v=202611271500"></script>
 <script src="js/bench-reverse.js?v=202611270001"></script>
-<script src="js/bench-voice.js?v=202611270001"></script>
+<script src="js/bench-bringup.js?v=202611271500"></script>
+<script src="js/bench-voice.js?v=202611271500"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

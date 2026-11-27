@@ -226,6 +226,7 @@ const BenchTools = (() => {
         }
       }
       dlg.showModal();
+      dlg.dispatchEvent(new Event('bench-open'));
     };
     $('benchClose').onclick=()=>dlg.close();
     dlg.addEventListener('close',stopCamera);

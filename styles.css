@@ -760,8 +760,26 @@ details.think summary { cursor: pointer; color: var(--muted, #777); }
 .bench-review > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px; border-bottom: 1px solid var(--line); }
 #benchQuestion { flex: 1 1 220px; min-width: 0; }
 #benchDialog [role=status] { min-height: 1.2em; color: var(--muted); }
+.bringup-setup { margin-bottom: 14px; }
+.bringup-setup summary { cursor: pointer; font-weight: 650; }
+.bringup-step { display: grid; grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) repeat(2, minmax(0, .75fr)) auto; align-items: end; gap: 8px; min-width: 0; margin: 8px 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.bringup-step label, .bringup-run label { display: grid; gap: 4px; }
+.bringup-step input, .bringup-run input, #bringupSteps { width: 100%; min-width: 0; }
+.bringup-run { align-items: end; margin-top: 10px; }
+#bringupReading[hidden] { display: none; }
+#bringupSteps, #bringupRuns, #bringupCompare { max-width: min(360px, 75vw); }
+#bringupMap { margin: 8px 0; }
+#bringupMapPanel [aria-pressed=true] { border-color: var(--accent); background: var(--panel2); }
+.bringup-attempts { padding-left: 24px; font-size: .9em; }
+.bringup-results { margin-top: 12px; overflow-x: auto; }
+.bringup-results table { border-collapse: collapse; width: 100%; text-align: left; }
+.bringup-results caption { text-align: left; font-weight: 650; margin-bottom: 6px; }
+.bringup-results td, .bringup-results th { min-width: 100px; padding: 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.bringup-results [data-outcome="Out of range"] { color: var(--red, #d74b50); font-weight: 650; }
 @media (max-width: 560px) {
   .bench-dialog { width: 98vw; padding: 10px; }
   .bench-dialog button { min-height: 42px; }
   .bench-photo-grid { grid-template-columns: 1fr; }
+  .bringup-step { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bringup-step label:first-child { grid-column: 1 / -1; }
 }

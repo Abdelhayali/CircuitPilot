@@ -16,9 +16,13 @@ const BenchVoice = (() => {
   }
 
   function read(question) {
+    const measurement = BenchBringup.answer(question);
+    if (measurement) return measurement;
     const q=normalize(question).trim();
     const next=/\b(?:next(?:\s+(?:bring[- ]?up|checklist))?\s+step|next|step\s+of\s+bring[- ]?up)\b/i.test(q);
     if (next && !/\bpin\b/i.test(q)) {
+      const checklist = BenchBringup.next();
+      if (checklist) return checklist;
       const list=steps();
       if (!list.length) return 'This project has no bring-up checklist. Add its steps in Bench notes.';
       if (step>=list.length) return 'All '+list.length+' bring-up steps have been read.';
@@ -35,6 +39,8 @@ const BenchVoice = (() => {
     const net=pin&&Model.netOf(pin.key);
     if (wanted&&!pin) return ref.ref+' has no pin '+wanted+' in this project.';
     if (/\b(?:voltage|volts?|measure|reading|show)\b/i.test(q)) {
+      const range=BenchBringup.expected(pin?.key);
+      if (range) return range;
       const expected=Object.entries(voltages()).find(([key])=>[pin?.key,ref.ref,net].some(k=>typeof k==='string'&&k.toUpperCase()===key.toUpperCase()));
       if (expected) return 'The project notes specify '+String(expected[1])+' at '+expected[0]+'. That is the expected value.';
       if (!pin) return ref.ref+' has multiple pins. Specify the pin to check its net and expected voltage.';
@@ -67,6 +73,7 @@ const BenchVoice = (() => {
     },300);
   }
   function stop() {
+    BenchBringup.clearPending();
     wantsVoice=false; clearTimeout(restart);
     if (recognizing) recognition.abort();
     if (speaking) speechSynthesis.cancel();
@@ -87,7 +94,8 @@ const BenchVoice = (() => {
 
   function answer(q) {
     syncProject();
-    const result=read(q);
+    let result;
+    try { result=read(q); } catch(e) { result=e.message; }
     $('benchVoiceAnswer').textContent=result;
     speak(result);
   }

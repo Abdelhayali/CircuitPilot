@@ -11,21 +11,21 @@
   };
   const xy = p => p.map(number).join(' ');
   const coords = (key, p) => '(' + key + ' ' + xy(p) + ')';
-  const label = (id, value) => $(id).textContent = value;
-  let preview, busy = false, available = false;
+  let busy = false;
+  const routingSnapshot = ({board,pcb,nets,lib,rules,components}) =>
+    JSON.stringify([board,pcb,nets,lib,rules,components,Pcb.activePcb()]);
 
   const pinned = v => v.manual || v.locked || v.thermal;
   const point = p => [p.x, p.y];
   const segments = traces => traces.flatMap(t => t.pts.slice(1).map((p,i) =>
     ({net: t.net || null, layer: t.layer, w: t.w, pts: [t.pts[i], p]})));
 
-  function prepare() {
+  function prepare(mode) {
     const S = Model.S, R = Pcb.rules(), parts = Pcb.placed();
     if (+R.layers !== 2) throw new Error('Advanced Route currently supports two-layer boards.');
     if (!S.board.w || !parts.length || Pcb.pendingFootprints().length) {
       throw new Error('Update from schematic and place the parts before routing.');
     }
-    const mode = $('advancedRouteMode').value;
     const pair = mode === 'pair' ? [$('advancedRoutePositive').value, $('advancedRouteNegative').value] : [];
     const idx = Model.pinIndex(), padGroups = parts.map(c => ({c, pads: Pcb.padsOf(c,idx)}));
     const pads = padGroups.flatMap(p => p.pads);
@@ -50,7 +50,10 @@
       width: Math.max(R.traceWidth, +R.minTraceWidth || 0), clearance,
       edge: Math.max(R.edgeClearance, +R.minEdgeClearance || 0), holes: +R.minHoleToHole || 0,
       via: Math.max(R.viaDiameter, +R.minViaDiameter || 0), drill: Math.max(R.viaDrill, +R.minViaDrill || 0),
-      noViaInPad: !!R.noViaInPad, neckDown: !!R.neckDown
+      noViaInPad: !!R.noViaInPad, neckDown: !!R.neckDown,
+      minWidth: +R.minTraceWidth || R.traceWidth, annular: +R.minAnnularRing || 0,
+      holeClearance: Math.max(+R.minHoleToTrack || 0, +R.minPthToTrack || 0),
+      seconds: +R.routeTime || 90
     };
     rules.via = Math.max(rules.via, rules.drill + 2 * (+R.minAnnularRing || 0));
     const widthOf = n => Math.max(Pcb.netWidth(n), +R.minTraceWidth || 0);
@@ -113,7 +116,7 @@
         ')) (min_thickness 0.1) (fill yes (thermal_gap 0.3) (thermal_bridge_width 0.3)) ' + polygon(pts) + ')');
     }
     rows.push(')');
-    return {body: {mode, board: rows.join('\n'), rules, widths, gap, skew}, pair, nets, outline, pads, tracks, vias, widthOf};
+    return {body: {mode, board: rows.join('\n'), rules, widths, gap, skew}, pair, nets, tracks, vias, widthOf};
   }
 
   const trackKey = t => JSON.stringify([t.net,t.layer,number(t.w),...t.pts.map(xy).sort()]);
@@ -164,111 +167,76 @@
     if (t.some(q => !q.net || q.w <= 0) || v.some(q => !q.net || q.drill <= 0 || q.d < q.drill)) {
       throw new Error('The router returned invalid copper geometry.');
     }
-    const issues = [];
-    const requested = ctx.body.rules;
-    if (!requested.neckDown) {
-      const nets = [...new Set(t.filter(q => q.w < ctx.widthOf(q.net) - .001).map(q => q.net))];
-      if (nets.length) issues.push('Tracks below the requested width on ' + nets.join(', ') + '.');
+    const groups = new Map();
+    const group = n => {
+      if (!groups.has(n)) groups.set(n,{tracks:[],vias:[]});
+      return groups.get(n);
+    };
+    const rules = ctx.body.rules;
+    for (const q of t) {
+      const width = ctx.pair.length ? rules.width : ctx.widthOf(q.net);
+      group(q.net).tracks.push({...q, w: rules.neckDown ? Math.max(rules.minWidth,Math.min(q.w,width)) : width});
     }
-    if (v.some(q => q.d < requested.via - .001 || q.drill < requested.drill - .001)) {
-      issues.push('The router used vias smaller than the requested ' + requested.via + '/' + requested.drill + ' mm.');
+    for (const q of v) group(q.net).vias.push({...q,d:rules.via,drill:rules.drill});
+
+    const baseline = assess(original);
+    const sig = q => JSON.stringify([q.type,q.msg,q.x,q.y]);
+    const existing = new Map();
+    for (const q of baseline.errors) existing.set(sig(q),(existing.get(sig(q)) || 0) + 1);
+    let pcb = original, accepted = 0, failure;
+    function attempt(nets) {
+      const replace = new Set(nets), keep = q => pinned(q) || !replace.has(q.net);
+      const next = {...pcb, traces: [...pcb.traces.filter(keep),...nets.flatMap(n=>groups.get(n).tracks)],
+        vias: [...pcb.vias.filter(keep),...nets.flatMap(n=>groups.get(n).vias)], routed: {}};
+      const after = assess(next);
+      const known = new Map(existing);
+      const newErrors = after.errors.filter(q => {
+        const k = sig(q), n = known.get(k);
+        if (n) known.set(k,n-1);
+        return !n;
+      });
+      const failed = after.unrouted.find(n => replace.has(n) || !baseline.unrouted.includes(n));
+      if (newErrors.length || failed) {
+        failure = newErrors[0]?.msg || 'Could not route ' + failed + ' with the current rules.';
+        return false;
+      }
+      if (ctx.pair.length) {
+        const lengths = ctx.pair.map(net=>next.traces.filter(q=>q.net===net).reduce((sum,q)=>
+          sum+q.pts.slice(1).reduce((n,p,i)=>n+Math.hypot(p[0]-q.pts[i][0],p[1]-q.pts[i][1]),0),0));
+        if (Math.abs(lengths[0]-lengths[1]) > ctx.body.skew + .000001) {
+          failure = 'The pair exceeds the selected length difference.';
+          return false;
+        }
+      }
+      next.routed = after.routed;
+      pcb = next;
+      accepted += nets.length;
+      return true;
     }
-    const pcb = {...original, traces: [...ctx.tracks,...t], vias: [...ctx.vias,...v], routed: {}};
-    const before = score(ctx.pair);
-    let after;
+    // Try the complete route first. If some nets violate the selected rules, keep compliant batches.
+    function applyBatches(nets) {
+      if (attempt(nets) || nets.length < 2 || ctx.pair.length) return;
+      const mid = Math.floor(nets.length/2);
+      applyBatches(nets.slice(0,mid));
+      applyBatches(nets.slice(mid));
+    }
+    if (ctx.pair.some(n=>!groups.has(n))) throw new Error('The router could not complete both nets of the pair.');
+    applyBatches([...groups.keys()]);
+    if (!accepted) throw new Error(failure || 'No routes met the selected board rules.');
+    return {pcb, remaining: assess(pcb).unrouted.length, skipped: groups.size - accepted};
+  }
+
+  function assess(pcb) {
+    const original = Model.S.pcb;
     try {
       Model.S.pcb = pcb;
-      after = score(ctx.pair);
-      pcb.routed = Object.fromEntries(Object.entries(Pcb.connectivity()).filter(([,n]) => n.complete).map(([n]) => [n,true]));
+      const conn = Pcb.connectivity(), drc = Pcb.drc();
+      return {unrouted: Pcb.status(conn).unrouted,
+        errors: drc.violations.filter(q=>q.severity==='error' && q.type!=='unrouted'),
+        routed: Object.fromEntries(Object.entries(conn).filter(([,n])=>n.complete).map(([n])=>[n,true]))};
     } finally {
       Model.S.pcb = original;
     }
-    if (after.unrouted.some(n => !before.unrouted.includes(n))) issues.push('The preview disconnects a previously routed net.');
-    const sig = q => JSON.stringify([q.type,q.msg,q.x,q.y]);
-    const known = new Map();
-    for (const q of before.failures) known.set(sig(q),(known.get(sig(q)) || 0) + 1);
-    const newErrors = after.failures.filter(q => {
-      const k = sig(q), count = known.get(k) || 0;
-      if (count) known.set(k,count-1);
-      return !count;
-    });
-    issues.push(...newErrors.map(q => q.msg));
-    if (ctx.pair.length) {
-      if (ctx.pair.some(n => after.unrouted.includes(n))) issues.push('Both nets in the pair must be fully routed.');
-      else if (after.skew > ctx.body.skew + .000001) issues.push('The pair exceeds the requested trace length difference.');
-    }
-    return {pcb, ctx, beforePcb: original, before, after, issues};
-  }
-
-  function score(pair) {
-    const pcb = Model.S.pcb, s = Pcb.status(), d = Pcb.drc();
-    const length = net => pcb.traces.filter(t => t.net === net).reduce((sum,t) =>
-      sum + t.pts.slice(1).reduce((acc,p,i) => acc + Math.hypot(p[0]-t.pts[i][0],p[1]-t.pts[i][1]),0),0);
-    return {unrouted: s.unrouted, vias: s.vias, length: s.trace_length_mm, warnings: d.warnings,
-      failures: d.violations.filter(q => q.severity === 'error' && q.type !== 'unrouted'),
-      skew: pair.length ? Math.abs(length(pair[0])-length(pair[1])) : null};
-  }
-
-  function draw(after) {
-    const map = $('advancedRouteMap'), ctx = preview.ctx, pcb = after ? preview.pcb : preview.beforePcb;
-    const {w,h} = Model.S.board;
-    map.setAttribute('viewBox',[-1,-1,w+2,h+2].join(' '));
-    const items = [];
-    const shape = (tag, attrs) => {
-      const elem = document.createElementNS('http://www.w3.org/2000/svg',tag);
-      for (const [k,v] of Object.entries(attrs)) elem.setAttribute(k,v);
-      items.push(elem);
-    };
-    const points = path => path.map(p => p.join(',')).join(' ');
-    shape('polygon',{points:points(ctx.outline),fill:'none',stroke:'#91a7bb','stroke-width':'.15'});
-    for (const p of ctx.pads) shape('rect',{x:p.x-p.w/2,y:p.y-p.h/2,width:p.w,height:p.h,
-      fill:p.layer === 'B' ? '#3b68aa' : p.layer === 'F' ? '#a34750' : '#9ca9bb'});
-    for (const t of pcb.traces) shape('polyline',{points:points(t.pts),fill:'none',
-      stroke:t.layer === 'B' ? '#65a4ff' : '#ff6570','stroke-width':t.w,'stroke-linecap':'round','stroke-linejoin':'round'});
-    for (const v of pcb.vias) shape('circle',{cx:v.x,cy:v.y,r:v.d/2,fill:'#ffd465'});
-    map.replaceChildren(...items);
-    $('advancedRouteBefore').setAttribute('aria-pressed',String(!after));
-    $('advancedRouteAfter').setAttribute('aria-pressed',String(after));
-    map.setAttribute('aria-label',after ? 'Proposed PCB route' : 'Current PCB route');
-  }
-
-  function show() {
-    const {before,after,issues} = preview, table = $('advancedRouteScore');
-    table.replaceChildren();
-    const row = table.createTHead().insertRow();
-    for (const text of ['Routing check','Current','Preview']) {
-      const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = text; row.append(cell);
-    }
-    const items = [
-      ['Unrouted nets', before.unrouted.length, after.unrouted.length],
-      ['Other DRC errors', before.failures.length, after.failures.length],
-      ['DRC warnings', before.warnings, after.warnings],
-      ['Vias',before.vias,after.vias],
-      ['Trace length (mm)',before.length,after.length]
-    ];
-    if (after.skew !== null) items.push(['Pair length difference (mm)', before.skew.toFixed(3), after.skew.toFixed(3)]);
-    const body = table.createTBody();
-    for (const values of items) {
-      const r = body.insertRow();
-      for (const value of values) r.insertCell().textContent = value;
-    }
-    $('advancedRouteResult').hidden = false;
-    const list = $('advancedRouteIssueList'), flagged = issues.length > 0;
-    list.hidden = !flagged;
-    list.open = false;
-    const entries = document.createDocumentFragment();
-    for (const issue of issues) {
-      const item = document.createElement('li');
-      item.textContent = issue;
-      entries.append(item);
-    }
-    $('advancedRouteIssueItems').replaceChildren(entries);
-    $('advancedRouteRepairLabel').hidden = !flagged;
-    $('advancedRouteRepair').checked = false;
-    updateApply();
-    const connections = after.unrouted.length ? 'Remaining unrouted nets: ' + after.unrouted.join(', ') + '.' : 'All PCB nets are connected.';
-    label('advancedRouteIssues',flagged ? 'Review the flagged issues before applying this preview for manual repair. ' + connections : connections);
-    draw(true);
   }
 
   async function request(action, body) {
@@ -277,19 +245,6 @@
     const result = await response.json();
     if (!response.ok || result.error) throw new Error(result.error || 'Advanced Route is unavailable.');
     return result;
-  }
-
-  function invalidate() {
-    preview = undefined;
-    $('advancedRouteResult').hidden = true;
-    $('advancedRouteRepair').checked = false;
-    updateApply();
-  }
-
-  function updateApply() {
-    const flagged = !!preview?.issues.length, button = $('advancedRouteApply');
-    button.disabled = !preview || (flagged && !$('advancedRouteRepair').checked);
-    button.textContent = flagged ? 'Apply for repair' : 'Apply route';
   }
 
   function options() {
@@ -307,78 +262,60 @@
 
   function init() {
     if (!['127.0.0.1','localhost','[::1]'].includes(location.hostname)) return;
-    const dialog = $('advancedRouteDialog'), run = $('advancedRouteRun'), form = $('advancedRouteForm');
-    const fields = [...form.querySelectorAll('select,input')];
-    const status = s => label('advancedRouteStatus',s);
-    const setup = $('advancedRouteSetup');
-    const button = $('btnAdvancedRoute');
+    const dialog = $('advancedRouteDialog'), form = $('advancedRouteForm');
+    const button = $('btnAdvancedRoute'), pairButton = $('btnAdvancedPair');
+    const fields = [...form.querySelectorAll('select,input,button')];
     button.hidden = false;
-    button.onclick = async () => {
-      invalidate();
-      options();
-      run.disabled = true;
-      setup.hidden = true;
-      status(busy ? 'KiCadRoutingTools is routing this board…' : 'Checking the local router…');
-      dialog.showModal();
-      try {
-        const r = await request('status',{});
-        available = r.available;
-        setup.hidden = available;
-        label('advancedRouteFolder',r.folder);
-        run.disabled = busy || !available;
-        if (!busy) status('');
-      } catch (e) {
-        available = false;
-        status(e.message);
-      }
-    };
-    $('advancedRouteClose').onclick = () => dialog.close();
-    form.oninput = () => {
-      $('advancedRoutePair').hidden = $('advancedRouteMode').value !== 'pair';
-      invalidate();
-    };
-    form.onsubmit = async e => {
-      e.preventDefault();
-      if (busy || !available) return;
-      invalidate();
-      try {
-        const ctx = prepare(), snapshot = Model.snapshot(), started = performance.now();
-        busy = run.disabled = true;
-        fields.forEach(field => field.disabled = true);
-        status('KiCadRoutingTools is routing this board…');
-        const out = await request('run',ctx.body);
-        if (!dialog.open) return;
-        if (Model.snapshot() !== snapshot) throw new Error('The PCB changed while routing. Run another preview.');
-        preview = {...candidate(ctx,out.board), snapshot};
-        show();
-        status('Route preview is ready in ' + ((performance.now()-started)/1000).toFixed(1) + ' s.');
-      } catch (error) {
-        invalidate();
-        status(error.message);
-      } finally {
-        busy = false;
-        fields.forEach(field => field.disabled = false);
-        run.disabled = !available;
-      }
-    };
-    $('advancedRouteBefore').onclick = () => { if (preview) draw(false); };
-    $('advancedRouteAfter').onclick = () => { if (preview) draw(true); };
-    $('advancedRouteRepair').onchange = updateApply;
-    $('advancedRouteApply').onclick = () => {
-      if (!preview || (preview.issues.length && !$('advancedRouteRepair').checked)) return;
-      if (Model.snapshot() !== preview.snapshot) {
-        invalidate();
-        status('The PCB changed. Run another preview.');
+    pairButton.hidden = false;
+    const pairStatus = text => $('advancedRouteStatus').textContent = text;
+
+    async function route(mode) {
+      if (busy) return;
+      const pair = mode === 'pair', rules = Pcb.rules();
+      if (+rules.layers !== 2 || rules.trackStyle === '90') {
+        if (pair) {
+          pairStatus('Differential-pair routing requires a two-layer board with 45° tracks.');
+          return;
+        }
+        $('btnRoute').click();
         return;
       }
       try {
-        const flagged = preview.issues.length > 0;
-        Model.mutate(() => { Model.S.pcb = preview.pcb; });
-        invalidate();
-        dialog.close();
-        if (flagged) $('btnDrc').click();
-        App.toast(flagged ? 'Route applied for manual repair. Review the DRC list.' : 'Advanced route applied.');
-      } catch (error) { status(error.message); }
+        const design = Model.S, ctx = prepare(mode), snapshot = routingSnapshot(design);
+        busy = button.disabled = pairButton.disabled = true;
+        button.textContent = 'Routing…';
+        fields.forEach(field=>field.disabled = true);
+        if (pair) pairStatus('Routing pair…');
+        const out = await request('run',ctx.body);
+        if (pair && !dialog.open) return;
+        if (Model.S !== design || routingSnapshot(design) !== snapshot) {
+          throw new Error('The board or its rules changed while routing. Click Advanced Route again.');
+        }
+        const result = candidate(ctx,out.board);
+        Model.mutate(() => { Model.S.pcb = result.pcb; });
+        if (pair) dialog.close();
+        $('btnDrc').click();
+        const details = result.skipped ? ' ' + result.skipped + ' net proposal(s) skipped because they could not pass the selected rules.' : '';
+        App.toast('Advanced routing applied. ' + result.remaining + ' unrouted net(s).' + details,8000);
+      } catch (error) {
+        if (pair && dialog.open) pairStatus(error.message);
+        else App.toast(error.message,10000);
+      } finally {
+        busy = button.disabled = pairButton.disabled = false;
+        button.textContent = 'Advanced Route';
+        fields.forEach(field=>field.disabled = false);
+      }
+    }
+    button.onclick = () => route('general');
+    pairButton.onclick = () => {
+      options();
+      pairStatus('');
+      dialog.showModal();
+    };
+    $('advancedRouteClose').onclick = () => dialog.close();
+    form.onsubmit = e => {
+      e.preventDefault();
+      route('pair');
     };
   }
 

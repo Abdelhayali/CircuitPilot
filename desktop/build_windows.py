@@ -7,6 +7,7 @@ The folder holds:
     CircuitPilot.exe     the app: server + its own window (Microsoft Edge app mode)
     node/node.exe        Node.js (official build, LTS) — runs the Claude Desktop connection (MCP server)
     llama/               llama.cpp's server (official Vulkan build): runs pcbgo-v1 on this PC once the user downloads it
+    router/              KiCadRoutingTools and its private Python and Rust runtime for Advanced Route
     _internal/           Python runtime, the web app (index.html, js/, data/), the MCP server (mcp/)
 User data goes to %LOCALAPPDATA%\\CircuitPilot, so the folder can live anywhere (also read-only).
 """
@@ -18,8 +19,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 import zipfile
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD, DIST = os.path.join(ROOT, "build"), os.path.join(ROOT, "dist")
@@ -89,6 +92,76 @@ def llama_runtime():
     return out
 
 
+KRT_VERSION = "0.24.2"
+ROUTER_PYTHON = "3.14.10"
+ROUTER_ARCHIVES = (
+    ("krt.zip", f"https://github.com/drandyhaas/KiCadRoutingTools/releases/download/v{KRT_VERSION}/KiCadRoutingTools-{KRT_VERSION}.zip",
+     "24f7a0fc766e2b45f57e6172e9a9c6c620e6bb2d471ffeb7cc3c6e51b237da85"),
+    (f"python-{ROUTER_PYTHON}-embed-amd64.zip", f"https://www.python.org/ftp/python/{ROUTER_PYTHON}/python-{ROUTER_PYTHON}-embed-amd64.zip",
+     "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159"),
+)
+ROUTER_WHEELS = {
+    "numpy==2.5.5": "20145b11776d2f7570cd61351b156a51d3a341822282095baa819d87272bc710",
+    "scipy==1.18.1": "78a0d7c918e74a232394117160e7e3db503377572a45bcef8826e4ab8a35feba",
+    "shapely==2.2.0": "48dd1d961391f314ab7fa8812c86ca2a727bee2bdca1478730eacaea007da18e",
+}
+
+
+def verify_archive(path, digest):
+    if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+        raise SystemExit(f"Checksum mismatch for {path.name}")
+    return path
+
+
+def routing_runtime():
+    cache = Path(BUILD) / "routing-assets"
+    cache.mkdir(exist_ok=True)
+    out = cache / f"krt-{KRT_VERSION}-python-{ROUTER_PYTHON}-v2"
+    if (out / "python" / "python.exe").is_file():
+        return out
+    archives = []
+    for name, url, digest in ROUTER_ARCHIVES:
+        p = cache / name
+        if not p.is_file():
+            p.write_bytes(get(url))
+        archives.append(verify_archive(p, digest))
+    wheels = {cache / f"{p.replace('==', '-')}-cp314-cp314-win_amd64.whl": digest
+              for p, digest in ROUTER_WHEELS.items()}
+    if not all(p.is_file() for p in wheels):
+        subprocess.check_call([sys.executable, "-m", "pip", "download", "--only-binary=:all:", "--no-deps",
+                               "--platform", "win_amd64", "--python-version", "3.14", "--implementation", "cp",
+                               "--abi", "cp314", "--dest", str(cache), *ROUTER_WHEELS])
+    for p, digest in wheels.items():
+        verify_archive(p, digest)
+
+    with tempfile.TemporaryDirectory(dir=cache) as temporary:
+        staging = Path(temporary) / "router"
+        python = staging / "python"
+        tools = staging / "tools"
+        with zipfile.ZipFile(archives[1]) as archive:
+            archive.extractall(python)
+        (python / "python314._pth").write_text("python314.zip\n.\n../site-packages\n../tools\n../tools/py_router\n", encoding="utf-8")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-index", "--only-binary=:all:",
+                               "--no-deps", "--no-compile", "--platform", "win_amd64", "--python-version", "3.14",
+                               "--implementation", "cp", "--abi", "cp314", "--target", str(staging / "site-packages"),
+                               *(str(p) for p in wheels)])
+        with zipfile.ZipFile(archives[0]) as archive:
+            for entry in archive.infolist():
+                if entry.is_dir() or not entry.filename.startswith("plugins/"):
+                    continue
+                name = entry.filename.removeprefix("plugins/")
+                if name == "rust_router/grid_router-windows-x86_64.pyd":
+                    name = "py_router/grid_router.pyd"
+                elif not (name == "rust_router/Cargo.toml" or name.startswith(("py_router/", "py_tools/")) or ("/" not in name and
+                          (name.endswith(".py") or name in ("VERSION", "LICENSE")))):
+                    continue
+                dest = tools / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(archive.read(entry))
+        staging.rename(out)
+    return out
+
+
 def icon():
     """CircuitPilot icon (the waveform logo) as .ico"""
     from PIL import Image, ImageDraw
@@ -106,6 +179,7 @@ def icon():
 
 def main():
     os.makedirs(BUILD, exist_ok=True)
+    router = routing_runtime()
     node, ver = node_exe()
     ico = icon()
     sep = os.pathsep
@@ -125,6 +199,7 @@ def main():
     subprocess.check_call(args)
     llama = llama_runtime()
     shutil.copytree(llama, os.path.join(APP, "llama"), dirs_exist_ok=True)
+    shutil.copytree(router, os.path.join(APP, "router"))
     os.makedirs(os.path.join(APP, "node"), exist_ok=True)
     shutil.copy2(node, os.path.join(APP, "node", "node.exe"))
     lic = os.path.join(os.path.dirname(node), "LICENSE")
@@ -141,7 +216,8 @@ def main():
                 "pcbgo-v1 on this PC (offline AI): Connect AI -> Run pcbgo-v1 on this PC -> Download (2.8 GB, once) -> Start.\n"
                 "The model is kept in %LOCALAPPDATA%\\CircuitPilot\\models.\n\n"
                 f"Includes Node.js {ver} (MIT licence, node/LICENSE) to run the Claude Desktop connection,\n"
-                f"and llama.cpp {LLAMA_BUILD} (MIT licence, llama/LICENSE) to run pcbgo-v1.\n")
+                f"and llama.cpp {LLAMA_BUILD} (MIT licence, llama/LICENSE) to run pcbgo-v1.\n"
+                f"Advanced Route includes KiCadRoutingTools {KRT_VERSION} (MIT licence, router/tools/LICENSE).\n")
     zp = os.path.join(DIST, "CircuitPilot-Windows.zip")
     if os.path.exists(zp):
         os.remove(zp)

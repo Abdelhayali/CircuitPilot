@@ -48,22 +48,9 @@ Use the **Track** tool for interactive routing. Start from a pad, use right-clic
 
 ## Advanced Route on Windows
 
-In the Windows app, open **PCB → Advanced Route** after placing the parts on a two-layer board. Choose **Whole board** to try a different route for the placed board, or **Differential pair** to route two explicitly selected nets with two pads each. In pair mode, enter the required spacing and maximum difference in copper trace lengths. The trace length comparison measures planar copper length.
+In the Windows app, click **PCB → Advanced Route** after placing the parts. The Windows download includes the routing engine. CircuitPilot inserts the routes that pass the board's selected rules, then opens DRC. It uses the selected via diameter and drill, track widths, copper and hole clearances, and **No via in pad**. With **Neck down when the full width does not fit** enabled, traces may narrow to the selected minimum. Any connections the router cannot complete under those rules stay listed in DRC. Undo restores the previous routing.
 
-**Preview route** shows the current and proposed copper, unrouted nets, DRC results, via count, and trace length. Advanced Route passes board dimensions, routing sizes, clearances, and **No via in pad** to the local router. Open **Preview issues** for details. To keep a flagged preview and fix it manually, select the repair checkbox and click **Apply for repair**. CircuitPilot opens DRC after applying the route. The schematic, footprints, and hand-routed or locked copper are preserved. For **Differential pair**, all other nets retain their current routes.
-
-Set up the local [KiCadRoutingTools release](https://github.com/drandyhaas/KiCadRoutingTools/tree/v0.24.2) once. Use the installation folder displayed in the Advanced Route dialog. For a standard Windows app installation, the following PowerShell commands use that default folder and a dedicated Python environment:
-
-```powershell
-$krtFolder = Join-Path $env:LOCALAPPDATA 'CircuitPilot\KiCadRoutingTools'
-git clone --branch v0.24.2 --depth 1 https://github.com/drandyhaas/KiCadRoutingTools.git $krtFolder
-Set-Location $krtFolder
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install 'numpy>=1.22' 'scipy>=1.7' 'shapely>=2'
-.\.venv\Scripts\python.exe build_router.py --tag v0.24.2
-```
-
-Reopen **Advanced Route** after setup. For an existing installation elsewhere, set `CP_KRT_HOME` to its folder before launching CircuitPilot. If that installation uses another Python environment, set `CP_KRT_PYTHON` to the full path of its Python executable. Routing uses temporary files on the PC.
+The bundled engine handles two-layer boards with 45° tracks. The **Advanced Route** button uses CircuitPilot's built-in router for other layer counts or 90° tracks. To route a coupled differential pair, click **Route pair…**, select two nets with two pads each, and enter the pair spacing and allowed difference in planar trace length. Hand-routed and locked copper is preserved.
 
 ## Bench tools
 

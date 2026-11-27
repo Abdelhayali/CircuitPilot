@@ -9,6 +9,7 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.27', date: '2026-11-27', items: [
+      'The Windows app includes Advanced Route, runs it in one click, and checks track and via sizes against the selected board rules before adding copper',
       'Advanced Route passes the no-via-in-pad rule to the router and lets you apply a flagged preview for manual repair',
       'Advanced Route on Windows previews routes from a local KiCadRoutingTools installation, including a differential-pair mode',
       'Bring-up checklists highlight probe locations, log voltages by board revision, and compare results side by side. Bench Voice can read steps and log dictated readings.',

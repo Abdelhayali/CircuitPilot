@@ -4,7 +4,9 @@
 // footprint has one, otherwise a simple shape made from the footprint and part type.
 const Pcb3D = (() => {
   const $ = s => document.querySelector(s);
-  const ui = { on: false, parts: true, finish: 'enig', real: true };
+  const ui = { on: false, parts: true, inspectParts: false, finish: 'enig', real: true,
+    mode: 'assembled', spread: 2, axis: 'x', cut: 50, layers: {} };
+  const stackColors = { F: '#e8a463', In1: '#d3afec', In2: '#5fdbc4', B: '#72a9ff' };
   let renderer, scene, camera, root, wrap, cam = { th: -1.2, ph: 0.85, r: 120, tx: 0, ty: 0, tz: 0 }, dirty = true, timer = null, busy = false;
 
   function loadThree() {
@@ -20,13 +22,48 @@ const Pcb3D = (() => {
     wrap = $('#pcb3dView');
     wrap.innerHTML = `<div class="encmsg" id="p3msg"></div>
       <div class="p3bar"><button data-cam="top">Top</button><button data-cam="bottom">Bottom</button><button data-cam="iso">Iso</button><button id="p3parts" class="on">Parts</button><button id="p3real" class="on" title="Real 3D models from the JLCEDA/EasyEDA Official Library (simple shapes when off or when a part has none)">Real models</button>
-      <select id="p3finish" title="Pad finish"><option value="enig">ENIG (gold)</option><option value="hasl">HASL (silver)</option></select><select id="p3mask" title="Solder mask colour"><option value="#1d6b38">Green</option><option value="#1a1a1a">Black</option><option value="#1c3f8f">Blue</option><option value="#8f1c1c">Red</option><option value="#e8e8e8">White</option><option value="#5a2a8a">Purple</option></select></div>
+      <select id="p3finish" aria-label="Pad finish"><option value="enig">ENIG (gold)</option><option value="hasl">HASL (silver)</option></select><select id="p3mask" aria-label="Solder mask colour"><option value="#1d6b38">Green</option><option value="#1a1a1a">Black</option><option value="#1c3f8f">Blue</option><option value="#8f1c1c">Red</option><option value="#e8e8e8">White</option><option value="#5a2a8a">Purple</option></select>
+      <div class="p3modes" role="group" aria-label="PCB display mode">
+        <button data-p3-mode="assembled" aria-pressed="true">Assembled</button>
+        <button data-p3-mode="xray" aria-pressed="false">X-ray</button>
+        <button data-p3-mode="exploded" aria-pressed="false">Exploded</button>
+        <button data-p3-mode="section" aria-pressed="false">Cross-section</button>
+      </div></div>
+      <section id="p3inspection" hidden aria-label="Layer inspection">
+        <label id="p3SpreadField" hidden>Layer spacing <output id="p3SpreadValue"></output><input id="p3Spread" type="range" min="0" max="8" step=".25" value="2"></label>
+        <div id="p3SectionField" hidden>
+          <label>Cut axis <select id="p3Axis"><option value="x">X</option><option value="y">Y</option></select></label>
+          <label>Cut position <output id="p3CutValue"></output><input id="p3Cut" type="range" min="0" max="100" value="50"></label>
+        </div>
+        <details open><summary>Board layers</summary><div id="p3Layers"></div></details>
+        <p id="p3StackStatus" role="status" hidden></p>
+      </section>
       <div class="encinfo" id="p3info">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom</div>`;
+    if (matchMedia('(max-width: 560px)').matches) $('#p3inspection details').open = false;
     wrap.querySelectorAll('[data-cam]').forEach(b => b.onclick = () => preset(b.dataset.cam));
-    $('#p3parts').onclick = () => { ui.parts = !ui.parts; $('#p3parts').classList.toggle('on', ui.parts); if (root && root.userData.parts) root.userData.parts.visible = ui.parts; draw(); };
+    $('#p3parts').onclick = () => {
+      const key = ui.mode === 'assembled' ? 'parts' : 'inspectParts';
+      ui[key] = !ui[key];
+      present();
+    };
     $('#p3real').onclick = () => { ui.real = !ui.real; $('#p3real').classList.toggle('on', ui.real); dirty = true; rebuild(false); };
     $('#p3finish').onchange = e => { ui.finish = e.target.value; dirty = true; rebuild(false); };
     $('#p3mask').onchange = () => { dirty = true; rebuild(false); };
+    wrap.querySelectorAll('[data-p3-mode]').forEach(b => b.onclick = () => {
+      const wasExploded = ui.mode === 'exploded';
+      ui.mode = b.dataset.p3Mode;
+      if (ui.mode === 'section') viewCut();
+      else if (wasExploded || ui.mode === 'exploded') preset('iso');
+      updateInspection();
+    });
+    $('#p3Spread').oninput = e => {
+      const old = stackDistance(ui.spread);
+      ui.spread = +e.target.value;
+      if (old > 0) cam.r *= stackDistance(ui.spread)/old;
+      present();
+    };
+    $('#p3Axis').onchange = e => { ui.axis = e.target.value; viewCut(); present(); };
+    $('#p3Cut').oninput = e => { ui.cut = +e.target.value; present(); };
     Model.subscribe(kind => { if (kind === 'move') return; dirty = true; if (ui.on) { clearTimeout(timer); timer = setTimeout(() => rebuild(false), 400); } });
   }
   async function setOn(on) {
@@ -72,62 +109,307 @@ const Pcb3D = (() => {
   function preset(p) {
     const S = Model.S;
     if (p === 'top') { cam.th = -Math.PI / 2; cam.ph = 0.02; } else if (p === 'bottom') { cam.th = -Math.PI / 2; cam.ph = Math.PI - 0.02; } else { cam.th = -1.2; cam.ph = 0.85; }
-    cam.tx = S.board.w / 2; cam.ty = -S.board.h / 2; cam.tz = 0; cam.r = Math.max(S.board.w, S.board.h) * 2.1; draw();
+    cam.tx = S.board.w / 2; cam.ty = -S.board.h / 2; cam.tz = 0;
+    cam.r = ui.mode === 'exploded' && p === 'iso' ? stackDistance(ui.spread) : Math.max(S.board.w,S.board.h)*2.1;
+    draw();
+  }
+
+  function stackDistance(spread) {
+    const {w,h} = Model.S.board, R = Pcb.rules();
+    const intervals = R.layers === 4 ? 10 : R.layers > 1 ? 8 : 4;
+    const angle = Math.atan(Math.tan((camera?.fov || 32)*Math.PI/360)*Math.min(1,camera?.aspect || 1));
+    return .55*Math.hypot(w,h,intervals*spread)/Math.sin(angle);
+  }
+
+  function viewCut() {
+    preset('iso');
+    cam.th = ui.axis === 'x' ? -2.35 : .75;
+    cam.ph = 1.05;
   }
 
   // ---------- board textures (drawn as SVG in board coordinates, then rasterised) ----------
-  function sideSVG(side, px) {
+  function sideSVG(side, px, kind) {
     const S = Model.S, idx = Model.pinIndex(), R = Pcb.rules(), w = S.board.w, h = S.board.h, L = side;
-    const mask = $("#p3mask").value, cu = shade(mask, 0.32), pad = ui.finish === 'enig' ? '#d8b04a' : '#c9cdd2', silk = mask === '#e8e8e8' ? '#111' : '#f4f4f4';
+    const assembled = kind === 'assembled', mask = $("#p3mask").value, cu = assembled ? shade(mask, 0.32) : stackColors[L];
+    const pad = assembled ? (ui.finish === 'enig' ? '#d8b04a' : '#c9cdd2') : cu, silk = assembled && mask === '#e8e8e8' ? '#111' : '#f4f4f4';
     const poly = Pcb.boardPoly(), d = 'M' + poly.map(q => q.join(' ')).join('L') + 'Z', o = [];
-    o.push(`<path d="${d}" fill="${mask}"/>`);
+    if (assembled) o.push(`<path d="${d}" fill="${mask}"/>`);
     // copper under the mask: pours, tracks, (tented) vias
     // pours with the clearance gaps around other nets' copper (as in the 2D view): that is what makes tracks show
     const pads = Pcb.placed().flatMap(c => Pcb.padsOf(c, idx)), masks = [];
     const padAt = (p, f, e) => p.shape === 'round' ? `<circle cx="${p.x}" cy="${p.y}" r="${p.w / 2 + e}" fill="${f}"/>` : `<rect x="${p.x - p.w / 2 - e}" y="${p.y - p.h / 2 - e}" width="${p.w + 2 * e}" height="${p.h + 2 * e}" rx="${p.shape === 'oval' ? Math.min(p.w, p.h) / 2 + e : e}" fill="${f}"/>`;
-    (S.pcb.pours || []).forEach((pr, i) => {
-      if (pr.layer !== L) return;
-      const cl = Pcb.pourCl(R, pr), pp = Pcb.pourPoly(pr), m = [`<rect x="-50" y="-50" width="${w + 100}" height="${h + 100}" fill="white"/>`];
-      for (const t of S.pcb.traces) if (t.layer === L && t.net !== pr.net) m.push(`<polyline points="${t.pts.map(q => q.join(',')).join(' ')}" fill="none" stroke="black" stroke-width="${t.w + 2 * cl}" stroke-linecap="round" stroke-linejoin="round"/>`);
-      for (const p of pads) if (p.net !== pr.net && (p.drill || (p.layer || 'F') === L)) m.push(padAt(p, 'black', cl));
-      for (const v of S.pcb.vias) if (v.net !== pr.net) m.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2 + cl}" fill="black"/>`);
-      for (const hh of S.pcb.holes || []) m.push(`<circle cx="${hh.x}" cy="${hh.y}" r="${hh.d / 2 + cl}" fill="black"/>`);
-      m.push(`<path d="${d}" fill="none" stroke="black" stroke-width="${2 * R.edgeClearance}"/>`);
-      for (const k of Pcb.keepouts()) if (k.pours && (k.layer === 'both' || k.layer === 'all' || k.layer === L)) m.push(`<path d="M${k.pts.map(q => q.join(' ')).join('L')}Z" fill="black"/>`);
-      masks.push(`<mask id="pm${i}" maskUnits="userSpaceOnUse" x="-50" y="-50" width="${w + 100}" height="${h + 100}">${m.join('')}</mask>`);
-      let fd; try { fd = Pcb.pourFill(pr, 'view').rings.map(rg => 'M' + rg.pts.map(q => q.join(' ')).join('L') + 'Z').join(''); } catch (e) { fd = 'M' + pp.map(q => q.join(' ')).join('L') + 'Z'; }
-      if (fd) o.push(`<path d="${fd}" fill-rule="evenodd" fill="${cu}" mask="url(#pm${i})"/>`);   // live pieces only, as in the Gerber
-    });
-    for (const t of S.pcb.traces) if (t.layer === L) o.push(`<polyline points="${t.pts.map(q => q.join(',')).join(' ')}" fill="none" stroke="${cu}" stroke-width="${t.w}" stroke-linecap="round" stroke-linejoin="round"/>`);
-    for (const v of S.pcb.vias) o.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2}" fill="${cu}"/>`);
-    // exposed pads (mask openings)
-    for (const c of Pcb.placed()) for (const p of Pcb.padsOf(c, idx)) {
-      if (!p.drill && (p.layer || 'F') !== L) continue;
-      o.push(p.shape === 'round' ? `<circle cx="${p.x}" cy="${p.y}" r="${p.w / 2}" fill="${pad}"/>` : `<rect x="${p.x - p.w / 2}" y="${p.y - p.h / 2}" width="${p.w}" height="${p.h}" rx="${p.shape === 'oval' ? Math.min(p.w, p.h) / 2 : 0.05}" fill="${pad}"/>`);
-      if (p.drill) o.push(`<circle cx="${p.x}" cy="${p.y}" r="${p.drill / 2}" fill="#050505"/>`);
+    const onSide = p => p.drill || (p.layer || 'F') === L;
+    const circle = (p, r, color) => `<circle cx="${p.x}" cy="${p.y}" r="${r}" fill="${color}"/>`;
+    const path = pts => 'M' + pts.map(q=>q.join(' ')).join('L') + 'Z';
+    if (kind === 'mask') {
+      const exp = Math.max(0,+R.maskExpansion || 0);
+      const openings = pads.filter(onSide).map(p=>padAt(p,'black',exp)).join('');
+      const lines = (S.pcb.lines || []).filter(q=>q.layer === L+'M').map(q=>
+        `<polyline points="${q.pts.map(p=>p.join(',')).join(' ')}" fill="none" stroke="black" stroke-width="${q.w}" stroke-linecap="round"/>`).join('');
+      masks.push(`<mask id="openings"><path d="${d}" fill="white"/>${openings}${lines}</mask>`);
+      o.push(`<path d="${d}" fill="${mask}" mask="url(#openings)"/>`);
     }
-    for (const v of S.pcb.vias) o.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.drill / 2}" fill="#050505"/>`);
+    if (kind === 'paste') for (const p of pads) if (!p.drill && onSide(p)) o.push(padAt(p,'#b6bdc8',0));
+    if (assembled || kind === 'copper') {
+      const plane = Pcb.planeMap(R)[L];
+      if (plane) {
+        const cl = Math.max(R.clearance,+R.pourClearance || 0,.2);
+        const vIn = Math.max(+R.minHoleToTrack || 0,+R.minInnerViaToCopper || .2);
+        const pIn = Math.max(+R.minPthToTrack || 0,+R.minInnerPthToCopper || .3);
+        const gaps = [`<path d="${d}" fill="white" stroke="black" stroke-width="${2*Math.max(R.edgeClearance,.3)}"/>`];
+        for (const v of S.pcb.vias) if (v.net !== plane) gaps.push(circle(v,Math.max(v.d/2+cl,v.drill/2+vIn),'black'));
+        for (const p of pads) if (p.drill && p.net !== plane) gaps.push(circle(p,Math.max(Math.max(p.w,p.h)/2+cl,p.drill/2+pIn),'black'));
+        for (const h of S.pcb.holes || []) gaps.push(circle(h,h.d/2+Math.max(cl,.3),'black'));
+        for (const k of Pcb.keepouts()) if (k.pours && k.pts?.length > 2 && ['all','both','inner',L].includes(k.layer)) gaps.push(`<path d="${path(k.pts)}" fill="black"/>`);
+        masks.push(`<mask id="innerPlane">${gaps.join('')}</mask>`);
+        o.push(`<path d="${d}" fill="${cu}" mask="url(#innerPlane)"/>`);
+      }
+      if (!plane) (S.pcb.pours || []).forEach((pr, i) => {
+        if (pr.layer !== L) return;
+        const cl = Pcb.pourCl(R, pr), pp = Pcb.pourPoly(pr), m = [`<rect x="-50" y="-50" width="${w + 100}" height="${h + 100}" fill="white"/>`];
+        for (const t of S.pcb.traces) if (t.layer === L && t.net !== pr.net) m.push(`<polyline points="${t.pts.map(q => q.join(',')).join(' ')}" fill="none" stroke="black" stroke-width="${t.w + 2 * cl}" stroke-linecap="round" stroke-linejoin="round"/>`);
+        for (const p of pads) if (p.net !== pr.net && (p.drill || (p.layer || 'F') === L)) m.push(padAt(p, 'black', cl));
+        for (const v of S.pcb.vias) if (v.net !== pr.net) m.push(`<circle cx="${v.x}" cy="${v.y}" r="${v.d / 2 + cl}" fill="black"/>`);
+        for (const hh of S.pcb.holes || []) m.push(`<circle cx="${hh.x}" cy="${hh.y}" r="${hh.d / 2 + cl}" fill="black"/>`);
+        m.push(`<path d="${d}" fill="none" stroke="black" stroke-width="${2 * R.edgeClearance}"/>`);
+        for (const k of Pcb.keepouts()) if (k.pours && (k.layer === 'both' || k.layer === 'all' || k.layer === L)) m.push(`<path d="M${k.pts.map(q => q.join(' ')).join('L')}Z" fill="black"/>`);
+        masks.push(`<mask id="pm${i}" maskUnits="userSpaceOnUse" x="-50" y="-50" width="${w + 100}" height="${h + 100}">${m.join('')}</mask>`);
+        let fd; try { fd = Pcb.pourFill(pr, 'view').rings.map(rg => 'M' + rg.pts.map(q => q.join(' ')).join('L') + 'Z').join(''); } catch (e) { fd = 'M' + pp.map(q => q.join(' ')).join('L') + 'Z'; }
+        if (fd) o.push(`<path d="${fd}" fill-rule="evenodd" fill="${cu}" mask="url(#pm${i})"/>`);   // live pieces only, as in the Gerber
+      });
+      for (const t of S.pcb.traces) if (t.layer === L) o.push(`<polyline points="${t.pts.map(q => q.join(',')).join(' ')}" fill="none" stroke="${cu}" stroke-width="${t.w}" stroke-linecap="round" stroke-linejoin="round"/>`);
+      for (const v of S.pcb.vias) if (!plane || v.net === plane) o.push(circle(v,v.d/2,cu));
+      // exposed pads (mask openings)
+      for (const p of pads) {
+        if (!onSide(p) || (plane && p.net !== plane)) continue;
+        o.push(p.shape === 'round' ? `<circle cx="${p.x}" cy="${p.y}" r="${p.w / 2}" fill="${pad}"/>` : `<rect x="${p.x - p.w / 2}" y="${p.y - p.h / 2}" width="${p.w}" height="${p.h}" rx="${p.shape === 'oval' ? Math.min(p.w, p.h) / 2 : 0.05}" fill="${pad}"/>`);
+        if (assembled && p.drill) o.push(circle(p,p.drill/2,'#050505'));
+      }
+      if (assembled) for (const v of S.pcb.vias) o.push(circle(v,v.drill/2,'#050505'));
+    }
     // silkscreen
-    for (const c of Pcb.placed()) {
-      if ((Pcb.isBottom(c) ? 'B' : 'F') !== L) continue;
-      const b = Pcb.fpBox(c);
-      o.push(`<rect x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="${silk}" stroke-width="0.15"/>`);
-      const d = Pcb.pin1Dot(c); if (d) o.push(`<circle cx="${d.x}" cy="${d.y}" r="${d.d / 2}" fill="${silk}"/>`);
+    if (assembled || kind === 'silk') {
+      for (const c of Pcb.placed()) {
+        if ((Pcb.isBottom(c) ? 'B' : 'F') !== L) continue;
+        const b = Pcb.fpBox(c);
+        o.push(`<rect x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="none" stroke="${silk}" stroke-width="0.15"/>`);
+        const d = Pcb.pin1Dot(c); if (d) o.push(`<circle cx="${d.x}" cy="${d.y}" r="${d.d / 2}" fill="${silk}"/>`);
+      }
+      // part references and board name: the same strokes as the Gerber silkscreen
+      for (const l of Pcb.silkLabels(L)) o.push(`<path d="${l.lines.map(pl => 'M' + pl.map(q => q.join(' ')).join('L')).join('')}" fill="none" stroke="${silk}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round"/>`);
     }
-    // part references and board name: the same strokes as the Gerber silkscreen
-    for (const l of Pcb.silkLabels(L)) o.push(`<path d="${l.lines.map(pl => 'M' + pl.map(q => q.join(' ')).join('L')).join('')}" fill="none" stroke="${silk}" stroke-width="${l.w}" stroke-linecap="round" stroke-linejoin="round"/>`);
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(w * px)}" height="${Math.round(h * px)}" viewBox="0 0 ${w} ${h}"><defs><clipPath id="b"><path d="${d}"/></clipPath>${masks.join('')}</defs><g clip-path="url(#b)">${o.join('')}</g></svg>`;
   }
   function shade(hex, k) { const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255, f = v => Math.max(0, Math.min(255, Math.round(v + (255 - v) * k))); return `rgb(${f(r)},${f(g)},${f(b)})`; }
-  function texture(side) {
-    const T = window.THREE, S = Model.S, px = Math.min(24, 4096 / Math.max(S.board.w, S.board.h));
+  function texture(side, kind = 'assembled') {
+    const T = window.THREE, S = Model.S, limit = kind === 'assembled' ? 4096 : 1536;
+    const px = Math.min(24,limit / Math.max(S.board.w, S.board.h));
     return new Promise(res => {
       const img = new Image(), cv = document.createElement('canvas');
       cv.width = Math.round(S.board.w * px); cv.height = Math.round(S.board.h * px);
       img.onload = () => { const g = cv.getContext('2d'); g.drawImage(img, 0, 0, cv.width, cv.height); const t = new T.CanvasTexture(cv); t.anisotropy = 8; res(t); };
       img.onerror = () => res(null);
-      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sideSVG(side, px));
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sideSVG(side, px, kind));
     });
+  }
+
+  function fitTexture(texture, w, h) {
+    if (!texture) return;
+    texture.repeat.set(1/w,1/h);
+    texture.offset.set(0,1);
+  }
+
+  function buildShape(T, outline, holes) {
+    const shape = new T.Shape(outline.map(([x,y])=>new T.Vector2(x,-y)));
+    for (const h of holes) {
+      const p = new T.Path();
+      p.absarc(h.x,-h.y,h.r,0,Math.PI*2,true);
+      shape.holes.push(p);
+    }
+    return shape;
+  }
+
+  function drillHoles(S, outline) {
+    const mechanical = (S.pcb.holes || []).map(h=>({x:h.x,y:h.y,r:h.d/2,plated:false}));
+    const plated = [...S.pcb.vias,...Pcb.placed().flatMap(c=>Pcb.padsOf(c))]
+      .filter(p=>p.drill).map(p=>({x:p.x,y:p.y,r:p.drill/2,plated:true}));
+    const holes = [];
+    for (const h of [...mechanical,...plated].sort((a,b)=>b.r-a.r)) {
+      const p = [h.x,h.y];
+      if (!Pcb.inPoly(h.x,h.y,outline) || outline.some((a,i)=>Pcb.geom.ptSeg(p,a,outline[(i+1)%outline.length]) <= h.r)) continue;
+      if (!holes.some(q=>Math.hypot(h.x-q.x,h.y-q.y) <= h.r+q.r)) holes.push(h);
+    }
+    return holes;
+  }
+
+  async function buildStack(board) {
+    const T = window.THREE, S = Model.S, {th,outline} = board.userData, {w,h} = S.board;
+    const holes = drillHoles(S,outline), shape = buildShape(T,outline,holes), R = Pcb.rules();
+    const stack = new T.Group(), faceGeo = new T.ShapeGeometry(shape);
+    const interval = Math.min(.035,th/40);
+    const specs = [
+      ['F-silk','Top silkscreen','#f4f4f4','F','silk',th+interval*3],
+      ['F-paste','Top paste','#b6bdc8','F','paste',th+interval*2],
+      ['F-mask','Top solder mask',$('#p3mask').value,'F','mask',th+interval],
+      ['F-copper','Top copper',stackColors.F,'F','copper',th+.001],
+      ...(R.layers === 4 ? [['In1','Inner copper 1',stackColors.In1,'In1','copper',th*2/3]] : []),
+      ['core','Board substrate','#b59e74',null,null,th/2],
+      ...(R.layers === 4 ? [['In2','Inner copper 2',stackColors.In2,'In2','copper',th/3]] : []),
+      ...(R.layers > 1 ? [
+        ['B-copper','Bottom copper',stackColors.B,'B','copper',-.001],
+        ['B-mask','Bottom solder mask',$('#p3mask').value,'B','mask',-interval],
+        ['B-paste','Bottom paste','#b6bdc8','B','paste',-interval*2],
+        ['B-silk','Bottom silkscreen','#f4f4f4','B','silk',-interval*3]
+      ] : [])
+    ];
+    const maps = await Promise.all(specs.map(([, , ,side,kind])=>kind ? texture(side,kind) : null));
+    if (root !== board) { faceGeo.dispose(); maps.forEach(map=>map?.dispose()); return; }
+    const entries = specs.map(([key,label,color,side,kind,z],i)=>{
+      const map = maps[i];
+      fitTexture(map,w,h);
+      const center = key === 'core';
+      const material = center ? new T.MeshStandardMaterial({color,roughness:.8,side:T.DoubleSide}) :
+        new T.MeshBasicMaterial({map,transparent:true,depthWrite:false,side:T.DoubleSide,color:map ? '#fff' : color});
+      const geo = center ? new T.ExtrudeGeometry(shape,{depth:th,bevelEnabled:false,curveSegments:10}).translate(0,0,-th/2) : faceGeo;
+      const mesh = new T.Mesh(geo,material);
+      if (kind && !map) material.visible = false;
+      stack.add(mesh);
+      return {key,label,color,kind,z,mesh,order:(specs.length-1)/2-i};
+    });
+    const plated = holes.filter(h=>h.plated);
+    const barrels = new T.InstancedMesh(new T.CylinderGeometry(1,1,1,14,1,true),
+      new T.MeshStandardMaterial({color:'#b98c55',metalness:.5,roughness:.4,side:T.DoubleSide}),plated.length);
+    const barrel = new T.Object3D();
+    barrel.rotation.x = Math.PI/2;
+    plated.forEach((h,i)=>{
+      barrel.position.set(h.x,-h.y,th/2);
+      barrel.scale.set(h.r,th,h.r);
+      barrel.updateMatrix();
+      barrels.setMatrixAt(i,barrel.matrix);
+    });
+    barrels.frustumCulled = false;
+    stack.add(barrels);
+    const cap = new T.Mesh(new T.BufferGeometry(),new T.MeshBasicMaterial({color:'#b59e74',side:T.DoubleSide}));
+    stack.add(cap);
+    return {stack,entries,holes,barrels,cap,faceGeo};
+  }
+
+  function drawCut(view, outline, th, at, axis) {
+    const key = axis+':'+at;
+    if (view.cutKey === key) return;
+    view.cutKey = key;
+    const j = axis === 'x' ? 0 : 1, k = 1-j, cuts = [];
+    for (let i=0;i<outline.length;i++) {
+      const a=outline[i], b=outline[(i+1)%outline.length];
+      if ((a[j] > at) === (b[j] > at)) continue;
+      cuts.push(a[k]+(at-a[j])*(b[k]-a[k])/(b[j]-a[j]));
+    }
+    cuts.sort((a,b)=>a-b);
+    const holes = view.holes.map(h=>{
+      const d = at-(j ? h.y : h.x), center = j ? h.x : h.y;
+      const span = Math.sqrt(Math.max(0,h.r**2-d**2));
+      return [center-span,center+span];
+    }).filter(([a,b])=>b>a).sort((a,b)=>a[0]-b[0]);
+    const verts = [];
+    const point = (a,z) => j ? [a,-at-.001,z] : [at+.001,-a,z];
+    function strip(a,b) {
+      if (!(b>a)) return;
+      const p=point(a,0), q=point(b,0), r=point(b,th), s=point(a,th);
+      verts.push(...p,...q,...r,...p,...r,...s);
+    }
+    for (let i=0;i+1<cuts.length;i+=2) {
+      let a=cuts[i]; const b=cuts[i+1];
+      for (const [lo,hi] of holes) {
+        if (hi<=a || lo>=b) continue;
+        strip(a,lo); a=Math.min(b,hi);
+      }
+      strip(a,b);
+    }
+    const geo=new window.THREE.BufferGeometry();
+    geo.setAttribute('position',new window.THREE.Float32BufferAttribute(verts,3));
+    view.cap.geometry.dispose();
+    view.cap.geometry=geo;
+  }
+
+  function present() {
+    const inspection = ui.mode !== 'assembled';
+    wrap.querySelectorAll('[data-p3-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.p3Mode===ui.mode)));
+    $('#p3inspection').hidden = !inspection;
+    $('#p3SpreadField').hidden = ui.mode !== 'exploded';
+    $('#p3SectionField').hidden = ui.mode !== 'section';
+    $('#p3SpreadValue').textContent = ui.spread+' mm';
+    const partsOn = inspection ? ui.inspectParts : ui.parts;
+    $('#p3parts').classList.toggle('on',partsOn);
+    $('#p3parts').setAttribute('aria-pressed',String(partsOn));
+    if (!renderer || !root) return;
+    const {applied,assembled,parts,topParts,bottomParts,th,outline} = root.userData;
+    assembled.visible = !inspection || !applied;
+    parts.visible = partsOn;
+    renderer.clippingPlanes = [];
+    topParts.position.z = bottomParts.position.z = 0;
+    if (applied) applied.stack.visible = inspection;
+    if (inspection && applied) {
+      const exploded = ui.mode === 'exploded', section = ui.mode === 'section';
+      for (const {key,kind,z,order,mesh} of applied.entries) {
+        mesh.visible = ui.layers[key] !== false && (kind !== 'paste' || ui.layers[key] === true || exploded);
+        mesh.position.z = z + (exploded ? order*ui.spread : 0);
+        const fade = key === 'core' && ui.mode === 'xray';
+        mesh.material.opacity = fade ? .16 : kind === 'mask' ? (ui.mode === 'xray' ? .20 : .45) : 1;
+        mesh.material.transparent = key !== 'core' || fade;
+        mesh.material.depthWrite = key === 'core' && !fade;
+      }
+      applied.cap.visible = section && ui.layers.core !== false;
+      applied.barrels.visible = ui.layers.drills !== false;
+      const T = window.THREE, dimension = ui.axis === 'x' ? Model.S.board.w : Model.S.board.h;
+      const at = dimension*ui.cut/100;
+      $('#p3CutValue').textContent = at.toFixed(1)+' mm';
+      if (section) {
+        renderer.clippingPlanes = [new T.Plane(ui.axis === 'x' ? new T.Vector3(1,0,0) : new T.Vector3(0,-1,0),-at)];
+        drawCut(applied,outline,th,at,ui.axis);
+      }
+      if (exploded) {
+        topParts.position.z = (applied.entries[0].order+1)*ui.spread;
+        bottomParts.position.z = (applied.entries.at(-1).order-1)*ui.spread;
+      }
+    }
+    draw();
+  }
+
+  async function updateInspection() {
+    present();
+    const board = root, status = $('#p3StackStatus');
+    if (!board || ui.mode === 'assembled') return;
+    if (!board.userData.applied) {
+      status.hidden = false;
+      status.textContent = 'Rendering board layers…';
+      try {
+        board.userData.pending ||= buildStack(board);
+        const layers = await board.userData.pending;
+        if (root !== board || !layers) return;
+        board.add(layers.stack);
+        board.userData.applied = layers;
+        status.hidden = true;
+      } catch (error) {
+        status.textContent = 'Could not render the layers. Switch to Assembled to view the PCB.';
+        delete board.userData.pending;
+        return;
+      }
+    }
+    const list = $('#p3Layers'), {entries} = board.userData.applied;
+    const labels = [...entries,['drills','Plated drill barrels','#b98c55']].map(row=>{
+      const {key,label,color,kind} = Array.isArray(row) ? {key:row[0],label:row[1],color:row[2]} : row;
+      const item = document.createElement('label'), checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = ui.layers[key] ?? (kind !== 'paste' || ui.mode === 'exploded');
+      checkbox.onchange = () => { ui.layers[key] = checkbox.checked; present(); };
+      const dot = document.createElement('span');
+      dot.className = 'p3dot';
+      dot.style.background = color;
+      item.append(checkbox,dot,label);
+      return item;
+    });
+    list.replaceChildren(...labels);
+    present();
   }
 
   // ---------- 3D part models ----------
@@ -402,30 +684,48 @@ const Pcb3D = (() => {
     if (busy) { dirty = true; return; }
     const S = Model.S, T = window.THREE; if (!T || !renderer) return;
     dirty = false;
-    if (root) scene.remove(root);
+    if (root) {
+      scene.remove(root);
+      const {assembled,applied} = root.userData;
+      const geometry = new Set(), maps = new Set();
+      for (const group of [assembled,applied?.stack]) group?.traverse(o=>{
+        if (o.geometry) geometry.add(o.geometry);
+        for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+          if (m.map) maps.add(m.map);
+          m.dispose();
+        }
+      });
+      geometry.forEach(g=>g.dispose()); maps.forEach(m=>m.dispose());
+      root = null;
+    }
     if (!S.board.w || !Pcb.placed().length) { $('#p3msg').textContent = 'No PCB yet — click “Generate PCB”'; $('#p3msg').style.display = 'block'; draw(); return; }
     $('#p3msg').style.display = 'none';
     busy = true;
     const [top, bot] = await Promise.all([texture('F'), texture('B')]);
     busy = false;
+    if (S !== Model.S) { top?.dispose(); bot?.dispose(); return rebuild(fit); }
     root = new T.Group(); scene.add(root);
     const th = Pcb.boardThickness ? Pcb.boardThickness() : 1.6, poly = Pcb.boardPoly();   // flex boards are thin
-    const shape = new T.Shape(poly.map(q => new T.Vector2(q[0], -q[1])));
-    for (const hh of S.pcb.holes || []) { const p = new T.Path(); p.absarc(hh.x, -hh.y, hh.d / 2, 0, Math.PI * 2, true); shape.holes.push(p); }
-    const fit2 = t => { if (!t) return; t.repeat.set(1 / S.board.w, 1 / S.board.h); t.offset.set(0, 1); };
-    fit2(top); fit2(bot);
+    const shape = buildShape(T,poly,(S.pcb.holes || []).map(h=>({x:h.x,y:h.y,r:h.d/2})));
+    fitTexture(top,S.board.w,S.board.h); fitTexture(bot,S.board.w,S.board.h);
+    const assembled = new T.Group();
+    root.add(assembled);
     // board edge (FR4) + textured top and bottom faces
     const side = new T.Mesh(new T.ExtrudeGeometry(shape, { depth: th, bevelEnabled: false }), [new T.MeshBasicMaterial({ visible: false }), new T.MeshStandardMaterial({ color: 0xc9b98a, roughness: 0.8 })]);
-    root.add(side);
-    const faceT = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshStandardMaterial({ map: top, roughness: 0.55, metalness: 0.05 })); faceT.position.z = th + 0.001; root.add(faceT);
-    const faceB = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshStandardMaterial({ map: bot, roughness: 0.55, metalness: 0.05, side: T.BackSide })); faceB.position.z = -0.001; root.add(faceB);
-    const parts = new T.Group(); parts.visible = ui.parts; root.add(parts); root.userData.parts = parts;
+    assembled.add(side);
+    const faceT = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshStandardMaterial({ map: top, roughness: 0.55, metalness: 0.05 })); faceT.position.z = th + 0.001; assembled.add(faceT);
+    const faceB = new T.Mesh(new T.ShapeGeometry(shape), new T.MeshStandardMaterial({ map: bot, roughness: 0.55, metalness: 0.05, side: T.BackSide })); faceB.position.z = -0.001; assembled.add(faceB);
+    const parts = new T.Group(), topParts = new T.Group(), bottomParts = new T.Group();
+    root.add(parts); parts.add(topParts,bottomParts);
+    Object.assign(root.userData,{assembled,parts,topParts,bottomParts,th,outline:poly});
+    const partSide = c => Pcb.isBottom(c) ? bottomParts : topParts;
     const myRoot = root, cs = Pcb.placed(), simple = new Map();
     for (const c of cs) {
       let m; try { m = placeOnBoard(partModel(c, T), c, th); } catch (e) { console.warn('3D model', c.ref, e); continue; }
-      parts.add(m); simple.set(c.ref, m);
+      partSide(c).add(m); simple.set(c.ref, m);
     }
-    resize(); if (fit) preset('iso'); else draw();
+    resize(); if (fit) preset('iso');
+    updateInspection();
     const info = n => `<b>${S.board.w} × ${S.board.h} × ${th} mm</b> · ${cs.length} parts · ${S.pcb.traces.length} tracks · ${S.pcb.vias.length} vias` +
       (n ? `<br><span class="muted">${n} real 3D models: JLCEDA/EasyEDA Official Library (<a href="https://easyeda.com" target="_blank" rel="noopener">easyeda.com</a>, <a href="https://lceda.cn" target="_blank" rel="noopener">lceda.cn</a>)</span>` : '') +
       `<br><span class="muted">Drag to orbit · right-drag / Shift-drag to pan · wheel to zoom</span>`;
@@ -436,7 +736,9 @@ const Pcb3D = (() => {
       await Promise.all(cs.map(async c => {
         let g = null; try { g = await realModel(c, T); } catch (e) { g = null; }
         if (!g || root !== myRoot) return;
-        parts.remove(simple.get(c.ref)); parts.add(placeOnBoard(g, c, th)); n++;
+        const group = partSide(c), old = simple.get(c.ref);
+        if (old) group.remove(old);
+        group.add(placeOnBoard(g, c, th)); n++;
         draw();
       }));
       if (root === myRoot) { $('#p3info').innerHTML = info(n); draw(); }
@@ -449,8 +751,11 @@ const Pcb3D = (() => {
     if (dirty || !root) { dirty = true; await rebuild(false); }
     if (!root) return null;
     const old = Object.assign({}, cam), size = renderer.getSize(new T.Vector2()), pr = renderer.getPixelRatio(), oc = renderer.getClearColor(new T.Color()).getHex(), oa = renderer.getClearAlpha();
-    const partsVis = root.userData.parts ? root.userData.parts.visible : true;
-    if (root.userData.parts) root.userData.parts.visible = true;
+    const {assembled,applied,parts,topParts,bottomParts} = root.userData;
+    assembled.visible = parts.visible = true;
+    if (applied) applied.stack.visible = false;
+    topParts.position.z = bottomParts.position.z = 0;
+    renderer.clippingPlanes = [];
     renderer.setPixelRatio(1); renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setClearColor(bg, 1);
     const S = Model.S;
     if (view === 'top') { cam.th = -Math.PI / 2; cam.ph = 0.0001; } else if (view === 'bottom') { cam.th = -Math.PI / 2; cam.ph = Math.PI - 0.0001; } else { cam.th = -1.15; cam.ph = 0.95; }
@@ -459,8 +764,8 @@ const Pcb3D = (() => {
     cam.r = span / 2 / Math.tan(fov / 2) + 2;
     draw();
     const url = renderer.domElement.toDataURL('image/png');
-    Object.assign(cam, old); if (root.userData.parts) root.userData.parts.visible = partsVis;
-    renderer.setPixelRatio(pr); renderer.setSize(size.x, size.y); renderer.setClearColor(oc, oa); resize(); draw();
+    Object.assign(cam, old);
+    renderer.setPixelRatio(pr); renderer.setSize(size.x, size.y); renderer.setClearColor(oc, oa); resize(); present();
     return { url, w, h };
   }
   return { init, setOn, ui, rebuild: () => rebuild(true), snapshot };

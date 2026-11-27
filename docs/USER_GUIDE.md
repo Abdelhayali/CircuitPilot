@@ -66,6 +66,7 @@ Open **Bench tools** beside the editor tabs.
 | Task | Where to start |
 | --- | --- |
 | Inspect the assembled board | Use the PCB editor’s **3D** view for both sides, edge connections, and component models where available. |
+| Inspect the layer stack | In **PCB → 3D**, use **X-ray** to see through the substrate, **Exploded** to separate copper, solder mask, silkscreen and paste, or **Cross-section** to move an X or Y cut through the board. Use **Board layers** to isolate individual layers, including the two inner copper layers on four-layer boards. |
 | Design an enclosure | Open **Enclosure** for a board-fitted case with lid, posts, cutouts, and battery space. **Custom 3D** offers templates for wearables, patches, mounts, and other shapes, plus a script editor and manual geometry tools. |
 | Check mechanical fit | Use the enclosure’s measurement, section, and fit views. Check wall thickness, clearances, openings, and the selected process before exporting. Exports include STL and OpenSCAD, with STEP or DXF where supported by the export type. |
 | Fabricate and assemble | **Export** includes Gerber and drill files, a BOM, JLCPCB BOM and CPL, netlists, PCB drawings, and a complete project pack. The order controls prepare files and open the quote workflow where supported. |

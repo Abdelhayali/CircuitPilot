@@ -436,6 +436,12 @@ ul.cutl li { padding: 2px 0; }
 .design-sketch-bar { position: absolute; z-index: 9; left: 10px; top: 10px; max-width: calc(100% - 20px); border: 1px solid var(--float-line); border-radius: 8px; background: var(--float-bg); color: var(--text); padding: 8px 10px; }
 .design-sketch-bar button[aria-pressed=true], #pcbSketch[aria-pressed=true], #encSketch[aria-pressed=true] { color: var(--strong); background: var(--on-bg); border-color: var(--accent); }
 #blankMap { display:block; width:100%; height:240px; margin:10px 0; border-radius:8px; background:#122434; }
+#blankCustom { padding:12px; margin:12px 0; border:1px solid var(--float-line); border-radius:8px; }
+#blankCustom .blank-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:8px; margin-bottom:10px; }
+#blankCustom label { display:flex; flex-direction:column; gap:3px; }
+#blankCustom label:has(input[type=checkbox]) { flex-direction:row; align-items:center; }
+#blankCustom input:not([type=checkbox]), #blankSites { width:100%; box-sizing:border-box; }
+#blankSites { resize:vertical; font-family:monospace; }
 #designSketchStatus { margin: 5px 0 0; font-size: 12px; }
 @media (max-width: 560px) {
   #p3inspection { width: min(160px,45%); top: 105px; max-height: calc(100% - 160px); }

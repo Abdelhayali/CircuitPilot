@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611280300">
+<link rel="stylesheet" href="styles.css?v=202611280400">
 </head>
 <body>
 <header id="top">
@@ -650,9 +650,31 @@
 <dialog id="pcbBlanksDialog" class="bench-dialog pcb-blanks" aria-labelledby="blankTitle">
   <header class="bench-head"><h2 id="blankTitle">PCB Blanks</h2><button id="blankClose" aria-label="Close PCB Blanks">✕</button></header>
   <div class="bench-row">
-    <label>Board size <select id="blankSize"><option value="small">30 × 24 mm</option><option value="medium">50 × 35 mm</option><option value="large">70 × 45 mm</option></select></label>
-    <label><input id="blankUsb" type="checkbox"> USB-C breakout header</label>
+    <label>Template <select id="blankSize"><option value="small">30 × 24 mm</option><option value="compact">40 × 30 mm</option><option value="medium">50 × 35 mm</option><option value="large">70 × 45 mm</option><option value="ic">80 × 55 mm · IC workspace</option><option value="wide">95 × 45 mm · Wide workspace</option></select></label>
+    <label id="blankUsbRow"><input id="blankUsb" type="checkbox"> USB-C breakout header</label>
+    <button id="blankNew" type="button">Add custom template</button>
   </div>
+  <section id="blankCustom" hidden aria-label="Custom PCB blank">
+    <div class="blank-fields">
+      <label>Name <input id="blankName" maxlength="48" placeholder="My plated blank"></label>
+      <label>Width (mm) <input id="blankW" type="number" min="18" max="100" step="0.001" value="50"></label>
+      <label>Height (mm) <input id="blankH" type="number" min="18" max="80" step="0.001" value="35"></label>
+      <label>Thickness (mm) <input id="blankThick" type="number" min="0.6" max="3.2" step="0.001" value="1.6"></label>
+      <label>Registration Ø (mm) <input id="blankHole" type="number" step="0.001" value="3"></label>
+      <label>Inset from left/right (mm) <input id="blankInsetX" type="number" step="0.001" value="3"></label>
+      <label>Inset from bottom (mm) <input id="blankInsetY" type="number" step="0.001" value="3"></label>
+      <label><input id="blankCustomUsb" type="checkbox"> USB-C breakout header</label>
+    </div>
+    <label>Plated via sites (mm)<textarea id="blankSites" rows="4" spellcheck="false" placeholder="4, 4, 0.90, 0.40&#10;9, 4, 1.30, 0.65"></textarea></label>
+    <p class="bench-note">One hole per line: X, Y, pad diameter, drill diameter. The origin is the top-left corner, with Y increasing down. Match these values to your blank’s drill drawing.</p>
+    <div class="bench-row">
+      <button id="blankGrid" type="button">Fill 5 mm via grid</button>
+      <button id="blankSave" type="button" class="primary">Save template</button>
+      <button id="blankCancel" type="button">Cancel</button>
+    </div>
+    <p id="blankCustomStatus" role="status"></p>
+  </section>
+  <div id="blankDetails">
   <svg id="blankMap" role="img" aria-label="Fixed plated holes, header and registration holes"></svg>
   <p id="blankSummary"></p>
   <p class="bench-note">Order the bare, plated blank in bulk. For each design, map a copy to the matching template, route it, and export a two-sided CNC job.</p>
@@ -663,6 +685,7 @@
     <button id="blankMapApply" class="primary">Map PCB to blank</button>
   </div>
   <p class="bench-note">Mapping replaces the board outline, routing rules and existing copper. Undo restores the previous PCB.</p>
+  </div>
 </dialog>
 <dialog id="benchDialog" class="bench-dialog" aria-labelledby="benchTitle">
   <header class="bench-head"><h2 id="benchTitle">Bench tools</h2><button id="benchClose" aria-label="Close bench tools">✕</button></header>
@@ -780,7 +803,7 @@
 <script src="js/model.js?v=202611280300"></script>
 <script src="js/schematic.js?v=202611280300"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611280300"></script>
+<script src="js/pcb.js?v=202611280400"></script>
 <script src="js/cnc.js?v=202611280200"></script>
 <script src="js/pcbview.js?v=202611280300"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
@@ -807,9 +830,9 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611280300"></script>
-<script src="js/app.js?v=202611280300"></script>
-<script src="js/pcb-blanks.js?v=202611280200"></script>
+<script src="js/welcome.js?v=202611280400"></script>
+<script src="js/app.js?v=202611280400"></script>
+<script src="js/pcb-blanks.js?v=202611280400"></script>
 <script src="js/design-sketch.js?v=202611280100"></script>
 <script src="js/bench-tools.js?v=202611271500"></script>
 <script src="js/bench-reverse.js?v=202611270001"></script>

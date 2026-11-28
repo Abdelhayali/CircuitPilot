@@ -9,6 +9,7 @@ const Welcome = (() => {
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
     { v: '2026.11.28', date: '2026-11-28', items: [
+      'PCB Blanks adds IC workspace templates, saved custom patterns and automatic mapping for a compatible pin header',
       'Schematic sheet colors carry over to the PCB, where Quick place groups parts from the same sheet',
       'PCB Blanks exports factory-drilled templates and checks both sides before generating a matching CNC isolation job',
       'Draw for AI lets you mark PCB placement changes and enclosure surfaces, then attach your drawing to a copilot request',

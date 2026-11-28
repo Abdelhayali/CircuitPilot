@@ -89,14 +89,16 @@ For mechanical fabrication, the enclosure tools also support sheet-metal plates 
 
 ## PCB Blanks
 
-Use copies of the same factory-made two-layer blank to mill different circuits. Open **PCB → PCB Blanks** and choose a 30 × 24, 50 × 35, or 70 × 45 mm board. Each template has fixed 0.40 mm and 0.65 mm plated via holes and two 3 mm non-plated registration holes. The optional USB-C breakout position takes a 1 × 4, 2.54 mm header for a separate breakout. Check its pinout in the schematic.
+Use copies of the same factory-made two-layer blank to mill different circuits. Open **PCB → PCB Blanks**. The regular templates range from 30 × 24 to 70 × 45 mm. **IC workspace** is an 80 × 55 mm blank with a 40 × 26 mm via-free center. **Wide workspace** is a 95 × 45 mm blank with a 32 × 20 mm via-free center. The presets have fixed 0.40 mm and 0.65 mm plated via holes and two 3 mm non-plated registration holes.
 
 1. Choose **Download factory files**. The ZIP includes the copper and outline Gerbers, separate plated and non-plated drills, and instructions to order both copper faces exposed.
-2. Open a circuit and choose **Map PCB to blank**. Mapping replaces the PCB outline, rules and routing. Use SMD footprints and, if needed, assign a compatible header to the breakout position. Quick placement keeps the factory dimensions and places pads clear of the plated holes.
+2. Open a circuit and choose **Map PCB to blank**. Mapping replaces the PCB outline, rules and routing. Use SMD footprints or enable the optional **USB-C breakout header** and assign one 1- to 4-pin, single-row 2.54 mm header. The option is preselected for a new board with a compatible header. Confirm the schematic pinout before wiring a separate breakout. Quick placement keeps the factory dimensions and places pads clear of the plated holes.
 3. Choose **Route**. The router uses factory via sites to change layers. Resolve any unrouted nets and run DRC before milling.
 4. Choose **CNC** and inspect both toolpath previews. The ZIP contains top isolation, mirrored bottom isolation, and flip instructions. Use the registration holes to align the two faces. Dry-run the job and check continuity before assembly.
 
-![PCB Blanks demo showing one template, two designs, and top and bottom CNC isolation](media/pcb-blanks-demo.gif)
+Use **Add custom template** for your own rectangular blank. Enter the dimensions, the symmetric registration holes, and the via list. Each row is `X, Y, pad diameter, drill diameter` in millimeters, measured from the top-left corner with Y increasing down. Start with **Fill 5 mm via grid** if you are designing a new blank. Saved templates are available in that browser. A mapped project carries the blank geometry with it.
+
+![PCB Blanks tutorial showing template selection, placement, routing, and CNC preview](media/pcb-blanks-tutorial.gif)
 
 ## Projects, backups, and file formats
 

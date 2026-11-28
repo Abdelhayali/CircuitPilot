@@ -2075,7 +2075,8 @@ const Pcb = (() => {
     const sites = blank ? new Map(blank.sites.map(p=>[Math.round(p.y/g)*W+Math.round(p.x/g),p])) : null;
     const viaClearance = sites ? new Int32Array(N) : null;
     const widest = Math.max(R.traceWidth,R.powerTraceWidth,...Object.values(R.netWidths).map(Number).filter(v=>v>0));
-    if (sites) for (const [i,p] of sites) {
+    if (sites) for (const p of [...blank.sites,...blank.header]) {
+      const i=Math.round(p.y/g)*W+Math.round(p.x/g);
       const x=i%W,y=(i/W)|0,r=p.d/2+R.clearance+widest/2,n=Math.ceil(r/g);
       for(let dy=-n;dy<=n;dy++) for(let dx=-n;dx<=n;dx++) {
         if(x+dx<0 || x+dx>=W || y+dy<0 || y+dy>=H) continue;

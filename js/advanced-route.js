@@ -332,9 +332,9 @@
     async function route(mode) {
       if (busy) return;
       const pair = mode === 'pair', rules = Pcb.rules(), design = Model.S;
-      const nativeOnly = +rules.layers !== 2 || rules.trackStyle === '90';
+      const nativeOnly = !!design.board.stock || +rules.layers !== 2 || rules.trackStyle === '90';
       if (pair && nativeOnly) {
-        pairStatus('Differential-pair routing requires a two-layer board with 45° tracks.');
+        pairStatus('Differential-pair routing requires a standard two-layer board with 45° tracks.');
         return;
       }
       busy = button.disabled = pairButton.disabled = true;

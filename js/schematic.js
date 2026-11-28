@@ -41,7 +41,7 @@ const Sch = (() => {
     let bar = document.getElementById('sheetBar');
     if (!bar) { bar = document.createElement('div'); bar.id = 'sheetBar'; bar.className = 'sheetbar'; svg.parentNode.appendChild(bar); bar.onclick = sheetClick; bar.onchange = sheetPcbChange; }
     const sh = sheets(), n = Model.S.components.filter(c => Model.sheetOf(c) === ui.sheet).length;
-    bar.innerHTML = sh.map((s, i) => `<button data-sheet="${i}" class="${i === ui.sheet ? 'on' : ''}" title="Double-click to rename">${i + 1}: ${esc(s.name || 'Sheet ' + (i + 1))}</button>`).join('') +
+    bar.innerHTML = sh.map((s, i) => `<button data-sheet="${i}" class="${i === ui.sheet ? 'on' : ''}" title="Double-click to rename"><span class="sheet-color" style="--sheet-color:${Model.sheetColor(i)}" aria-hidden="true"></span>${i + 1}: ${esc(s.name || 'Sheet ' + (i + 1))}</button>`).join('') +
       `<button data-sheet="add" title="Add a sheet">＋</button>${sh.length > 1 && !n ? '<button data-sheet="del" title="Delete this empty sheet">✕</button>' : ''}<label class="sfr"><input type="checkbox" ${frameOn() ? 'checked' : ''} data-sheet="frame"> frame</label>` + pcbPick();
   }
   // two clicks on the same sheet tab within 450 ms rename it. Detected here, not with the native dblclick event,

@@ -113,6 +113,7 @@ const Model = (() => {
     return hit.map(p => c.ref + '.' + p.num);
   }
   const sheetOf = c => c.sheet || 0;
+  const sheetColor = index => `hsl(${((194 + index * 137.508) % 360).toFixed(3)} 78% 69%)`;
   function overlaps(c, others) {
     const b = bbox(c, 10);
     return others.some(o => { if (o === c || sheetOf(o) !== sheetOf(c)) return false; const a = bbox(o, 10); return !(b[2] < a[0] || b[0] > a[2] || b[3] < a[1] || b[1] > a[3]); });
@@ -617,6 +618,6 @@ const Model = (() => {
     setLock: (tool, cb) => { lockedBy = tool || null; if (cb) onLocked = cb; }, get lockedBy() { return lockedBy; },
     canUndo: () => undoStack.length > 0, canRedo: () => redoStack.length > 0,
     comp, pinsWorld, bbox, pinIndex, netOf, resolvePins, addComponent, removeComponent, updateComponent, connect, disconnect,
-    renameNet, removeNet, clear, setLibPart, fpNameFor, lcscOf, assignPart, copyParts, pasteParts, attachDb, erc, autoLayout, organize, spaceOut, labelBox, sheetOf, summary, isPower, isGround, invalidate, netsOfComp, nextRef, autoNetName
+    renameNet, removeNet, clear, setLibPart, fpNameFor, lcscOf, assignPart, copyParts, pasteParts, attachDb, erc, autoLayout, organize, spaceOut, labelBox, sheetOf, sheetColor, summary, isPower, isGround, invalidate, netsOfComp, nextRef, autoNetName
   };
 })();

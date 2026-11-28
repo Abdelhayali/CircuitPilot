@@ -435,6 +435,7 @@ ul.cutl li { padding: 2px 0; }
 #views > .design-sketch-ink { z-index: 8; cursor: crosshair; touch-action: none; }
 .design-sketch-bar { position: absolute; z-index: 9; left: 10px; top: 10px; max-width: calc(100% - 20px); border: 1px solid var(--float-line); border-radius: 8px; background: var(--float-bg); color: var(--text); padding: 8px 10px; }
 .design-sketch-bar button[aria-pressed=true], #pcbSketch[aria-pressed=true], #encSketch[aria-pressed=true] { color: var(--strong); background: var(--on-bg); border-color: var(--accent); }
+#blankMap { display:block; width:100%; height:240px; margin:10px 0; border-radius:8px; background:#122434; }
 #designSketchStatus { margin: 5px 0 0; font-size: 12px; }
 @media (max-width: 560px) {
   #p3inspection { width: min(160px,45%); top: 105px; max-height: calc(100% - 160px); }
@@ -509,6 +510,13 @@ ul.cutl li { padding: 2px 0; }
 .sheetbar { position: absolute; left: 8px; bottom: 30px; display: flex; gap: 4px; flex-wrap: wrap; z-index: 3; max-width: calc(100% - 16px); }
 .sheetbar button { padding: 3px 9px; font-size: 12px; border-radius: 6px 6px 0 0; background: var(--panel2); }
 .sheetbar button.on { border-color: var(--accent); color: var(--strong); background: var(--on-bg); }
+.sheet-color { display:inline-block; width:0.72em; height:0.72em; margin-right:0.45em; border-radius:50%; background:var(--sheet-color); box-shadow:0 0 0 1px #526578; vertical-align:0.02em; }
+#pcbSheetGroups { right:10px; bottom:31px; min-width:132px; max-width:min(225px,46%); padding:5px 9px; font-size:12px; }
+#pcbSheetGroups summary { cursor:pointer; font-weight:600; }
+#pcbSheetGroups label { display:flex; align-items:center; gap:5px; margin:4px 0; }
+#pcbSheetLegend { max-height:25vh; overflow:auto; }
+#pcbSheetLegend > div { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:5px; padding:2px 0; }
+#pcbSheetLegend small { color:var(--muted); }
 .sheetbar .sfr { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 3px; margin-left: 6px; }
 
 /* box selection + right-click menu */

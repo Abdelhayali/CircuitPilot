@@ -73,6 +73,11 @@ const PcbView = (() => {
         <div id="layerRows"></div>
         <label class="ldim"><input type="checkbox" id="ldim"> Dim inactive copper</label>
       </div>
+      <details id="pcbSheetGroups" class="fpanel" hidden>
+        <summary>Sheet groups</summary>
+        <label><input type="checkbox" id="pcbSheetColors" checked> Show colors</label>
+        <div id="pcbSheetLegend"></div>
+      </details>
       <div id="pcbCoord"></div>`;
     svg.parentElement.appendChild(overlay);
     overlay.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
@@ -93,6 +98,7 @@ const PcbView = (() => {
     };
     $('#layerRows').oninput = e => { const row = e.target.closest('[data-l]'); if (row && e.target.type === 'color') { ui.layers[row.dataset.l].color = e.target.value; persist(); renderLayers(); render(); } };
     $('#ldim').onchange = e => { ui.dim = e.target.checked; persist(); render(); };
+    $('#pcbSheetColors').onchange = () => render();
     overlay.querySelector('.ltitle').onclick = () => { const p = $('#layerPanel'); p.classList.toggle('collapsed'); overlay.querySelector('.ltitle').textContent = (p.classList.contains('collapsed') ? '▸' : '▾') + ' Layers'; };
     renderLayers(); setTool('select');
     if (svg.getBoundingClientRect().width < 900 || window.innerWidth < 1200) { $('#layerPanel').classList.add('collapsed'); overlay.querySelector('.ltitle').textContent = '▸ Layers'; }
@@ -785,13 +791,30 @@ const PcbView = (() => {
     // the layer list follows the copper layer count (a 4-layer board opened or imported shows Inner1 / Inner2)
     if (overlay && shownLayers !== Pcb.rules().layers) { shownLayers = Pcb.rules().layers; renderLayers(); }
     const S = Model.S, cs = Pcb.placed();
+    const sheetGroups = new Map();
+    for (const c of cs) { const i = Model.sheetOf(c); sheetGroups.set(i, (sheetGroups.get(i) || 0) + 1); }
+    const panel = $('#pcbSheetGroups'), grouped = (S.sheets?.length || 0) > 1 && sheetGroups.size > 0;
+    panel.hidden = !grouped;
+    const legend = [...sheetGroups].sort(([a],[b])=>a-b).map(([i,count])=>
+      `<div><span class="sheet-color" style="--sheet-color:${Model.sheetColor(i)}" aria-hidden="true"></span><span>${esc(S.sheets?.[i]?.name || 'Sheet ' + (i + 1))}</span><small>${count}</small></div>`).join('');
+    const rows = $('#pcbSheetLegend');
+    if (rows.innerHTML !== legend) rows.innerHTML = legend;
+    const showGroups = grouped && $('#pcbSheetColors').checked;
     if (cs.length && !(S.fab && S.fab.id) && !S.locked) setTimeout(() => { if (Pcb.placed().length && !(Model.S.fab && Model.S.fab.id)) Model.mutate(() => Pcb.ensureFabId()); }, 0);
     cache.pads = allPads();
     if (!S.board.w || !S.board.h) { world.innerHTML = '<text x="0" y="0" text-anchor="middle" fill="#888" style="font-size:2.4px">No PCB yet — click “Generate PCB”, or ask the Copilot to make the board</text>'; renderLiveLayer(); return; }
     const out = [], hl = ui.hlNet;
     svg.classList.toggle('hlmode', !!hl);   // highlighted net: everything else is dimmed
     // footprint hit areas (bottom), so copper on top stays clickable
-    for (const c of cs) { if (!partVisible(c)) continue; const b = Pcb.fpBox(c); out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" data-o="${esc(c.ref)}" x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"/>`); }
+    for (const c of cs) {
+      if (!partVisible(c)) continue;
+      const b = Pcb.fpBox(c), box = `x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}"`;
+      if (showGroups) {
+        const i = Model.sheetOf(c), color = Model.sheetColor(i);
+        out.push(`<rect data-o="${esc(c.ref)}" class="pcb-sheet-tint" data-sheet-group="${i}" ${box} rx="0.16" fill="${color}" fill-opacity="0.28" stroke="${color}" stroke-width="0.22" pointer-events="none"/>`);
+      }
+      out.push(`<rect class="fphit" data-ref="${esc(c.ref)}" data-o="${esc(c.ref)}" ${box}/>`);
+    }
     const R0 = Pcb.rules(), bpoly = Pcb.boardPoly(), bpath = 'M' + bpoly.map(q => q.join(' ')).join('L') + 'Z';
     out.push(`<defs><clipPath id="bclip"><path d="${bpath}"/></clipPath>${['KOT', 'KOB'].map(id => `<pattern id="hatch${id}" width="0.8" height="0.8" patternUnits="userSpaceOnUse" patternTransform="rotate(${id === 'KOT' ? 45 : -45})"><line x1="0" y1="0" x2="0" y2="0.8" stroke="${col(id)}" stroke-width="0.12"/></pattern>`).join('')}</defs>`);
     // 4 layers: inner layers without a plane net are signal layers (imported KiCad boards): drawn under the outer ones
@@ -826,6 +849,10 @@ const PcbView = (() => {
       out.push('</g>');
     }
     if (vis('MU')) {
+      const blank = S.board.stock;
+      if (blank) for (const p of [...(blank.sites || []),...(blank.header || [])]) {
+        out.push(`<g pointer-events="none" fill="none" stroke="${col('MU')}" stroke-width="0.08" opacity="0.6"><circle cx="${+p.x}" cy="${+p.y}" r="${p.d / 2}" stroke-dasharray="0.2 0.15"/><circle cx="${+p.x}" cy="${+p.y}" r="${p.drill / 2}"/></g>`);
+      }
       for (const p of cache.pads) if (p.drill) out.push(padEl(p, col('MU'), `class="pad${hl && p.net === hl ? ' hl' : ''}" data-pref="${esc(p.ref)}" data-net="${esc(p.net || '')}"`).replace('/>', `><title>${esc(p.key)}${p.net ? ' · ' + esc(p.net) : ''}</title></${p.shape === 'round' ? 'circle' : 'rect'}>`));
       S.pcb.vias.forEach((v, i) => out.push(`<circle data-k="v" data-i="${i}" class="via${hl && v.net === hl ? ' hl' : ''}" cx="${v.x}" cy="${v.y}" r="${v.d / 2}" fill="${col('MU')}"><title>via ${esc(v.net || '(no net)')} · ${v.d}/${v.drill} mm</title></circle>`));
     }

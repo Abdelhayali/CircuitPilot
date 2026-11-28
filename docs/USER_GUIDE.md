@@ -9,6 +9,7 @@
 - [Bench tools](#bench-tools)
 - [Advanced Route on Windows](#advanced-route-on-windows)
 - [3D, fabrication, and documentation](#3d-fabrication-and-documentation)
+- [PCB Blanks](#pcb-blanks)
 - [Projects, backups, and file formats](#projects-backups-and-file-formats)
 - [Local setup and automation](#local-setup-and-automation)
 - [Privacy and data flow](#privacy-and-data-flow)
@@ -44,6 +45,8 @@ In a local server session, **Knowledge** lets you attach a folder of requirement
 4. **Review before export.** Run **DRC**, inspect both sides and connector access, and resolve the remaining routing or design-rule problems. The EasyEDA Pro comparison uses the supported preset limits. If you export to EasyEDA Pro, import the board’s rule file there when it uses a different profile, then run EasyEDA’s DRC. Verify the final fabrication limits with the manufacturer.
 
 The PCB editor also supports copper pours and stitching vias, keep-outs, mounting holes, rotating silkscreen text, net highlighting, panel outlines with break-off tabs, and separate PCB layouts and rules within one project.
+
+Each schematic tab has a sheet color. On a multi-sheet PCB, the same colors mark footprints and the **Sheet groups** legend shows the name and part count on the current board. Turn off **Show colors** to hide the overlay. Quick place prefers keeping parts from the same sheet close together while leaving space to route.
 
 Use the **Track** tool for interactive routing. Start from a pad, use right-click or **V** to change layers with a via, and use **Space** to change the routing angle. In Select mode, **R** rotates the selected footprint or silkscreen label. The selected side and the available actions appear in the PCB tool panel.
 
@@ -83,6 +86,17 @@ Open **Bench tools** beside the editor tabs.
 | Produce product documentation | Use **Documentation** to draft and review a datasheet with schematic pages, board views, dimensions, connector pinouts, BOM, and revisions. Export a PDF. |
 
 For mechanical fabrication, the enclosure tools also support sheet-metal plates and electrodes, fabrication checks, and separate printed-part or sheet-part export packs. Firmware pin mapping and project exports help carry the design into handoff and review.
+
+## PCB Blanks
+
+Use copies of the same factory-made two-layer blank to mill different circuits. Open **PCB → PCB Blanks** and choose a 30 × 24, 50 × 35, or 70 × 45 mm board. Each template has fixed 0.40 mm and 0.65 mm plated via holes and two 3 mm non-plated registration holes. The optional USB-C breakout position takes a 1 × 4, 2.54 mm header for a separate breakout. Check its pinout in the schematic.
+
+1. Choose **Download factory files**. The ZIP includes the copper and outline Gerbers, separate plated and non-plated drills, and instructions to order both copper faces exposed.
+2. Open a circuit and choose **Map PCB to blank**. Mapping replaces the PCB outline, rules and routing. Use SMD footprints and, if needed, assign a compatible header to the breakout position. Quick placement keeps the factory dimensions and places pads clear of the plated holes.
+3. Choose **Route**. The router uses factory via sites to change layers. Resolve any unrouted nets and run DRC before milling.
+4. Choose **CNC** and inspect both toolpath previews. The ZIP contains top isolation, mirrored bottom isolation, and flip instructions. Use the registration holes to align the two faces. Dry-run the job and check continuity before assembly.
+
+![PCB Blanks demo showing one template, two designs, and top and bottom CNC isolation](media/pcb-blanks-demo.gif)
 
 ## Projects, backups, and file formats
 

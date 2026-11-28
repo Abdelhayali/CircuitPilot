@@ -255,6 +255,7 @@ const V = ${data};
   // pad_relief "on" / "off": SMD pads on the pour with / without a milled gap and 4 spokes, for this job only
   // (otherwise the design rule smdPadRelief decides)
   function job(opts = {}) {
+    if (Model.S.board.stock) return stockJob(opts);
     const pr = String(opts.pad_relief ?? 'auto').toLowerCase(), S = Model.S;
     if (pr !== 'on' && pr !== 'off' && pr !== 'true' && pr !== 'false') return jobI(opts);
     const had = S.rules && Object.prototype.hasOwnProperty.call(S.rules, 'smdPadRelief'), old = had ? S.rules.smdPadRelief : undefined;
@@ -269,6 +270,7 @@ const V = ${data};
     // the groove the V-bit cuts at that depth (iso_dia 0 = from the bit: tip + 2 · depth · tan(angle / 2))
     if (!(o.iso_dia > 0)) o.iso_dia = +(o.vbit_tip + 2 * o.iso_depth * Math.tan(o.vbit_angle / 2 * Math.PI / 180)).toFixed(3);
     if (!(o.iso_dia > 0 && o.iso_depth > 0 && o.cut_dia > 0 && o.cut_step > 0)) throw new Error('iso_dia (or vbit_tip / vbit_angle), iso_depth, cut_dia and cut_step must be > 0');
+    const reserved = opts.blankBarrels || null;
     const warnings = [], pads = cs.flatMap(c => Pcb.padsOf(c, idx)), traces = S.pcb.traces || [];
     // the copper side to mill: the one with the tracks (through-hole pads are on both)
     const tl = new Set(traces.map(t => t.layer));
@@ -276,9 +278,9 @@ const V = ${data};
     if (!layer) {
       if (tl.size > 1) throw new Error('Tracks on both copper layers: a milled board has one copper side. Re-route on one layer (set_design_rules {preset: "home"} → route_pcb), or replace the bottom tracks with wire jumpers; layer: "F" / "B" mills one side only');
       layer = tl.size ? [...tl][0] : pads.some(p => !p.drill && p.layer === 'B') ? 'B' : 'F';
-    } else if (tl.size > 1) warnings.push(`Tracks on both layers — only the ${layer === 'F' ? 'top' : 'bottom'} copper is milled; the other side's tracks need wire jumpers`);
+    } else if (tl.size > 1 && !reserved) warnings.push(`Tracks on both layers — only the ${layer === 'F' ? 'top' : 'bottom'} copper is milled; the other side's tracks need wire jumpers`);
     const smd = pads.filter(p => !p.drill && p.layer === layer), tht = pads.filter(p => p.drill);
-    if ((S.pcb.vias || []).length) warnings.push(`${S.pcb.vias.length} via${S.pcb.vias.length > 1 ? 's are' : ' is'} drilled; on a 1-sided board each needs a wire link on the other side (or remove them)`);
+    if (!reserved && (S.pcb.vias || []).length) warnings.push(`${S.pcb.vias.length} via${S.pcb.vias.length > 1 ? 's are' : ' is'} drilled; on a 1-sided board each needs a wire link on the other side (or remove them)`);
     // mirror: copper facing up on the machine, seen from below when the parts go on the other side
     // where the parts go decides the mirror: parts_side "bare" (through-hole parts in from the side without copper) =
     // mirrored, "copper" (parts on the copper) = not mirrored; mirror on / off says the same; auto picks from the parts
@@ -290,7 +292,7 @@ const V = ${data};
     const smdPins = new Map(); for (const p of smd) smdPins.set(p.ref, (smdPins.get(p.ref) || 0) + 1);
     const symmetric = [...smdPins.values()].every(n => n <= 2);
     if (mirror === null) mirror = layer === 'B' || !smd.length || (tht.length > 0 && symmetric);
-    if (layer === 'F' && smd.length && tht.length) warnings.push(mirror
+    if (!reserved && layer === 'F' && smd.length && tht.length) warnings.push(mirror
       ? 'Mirrored: through-hole parts go in from the bare side (soldered on the copper), the 2-pad SMD parts are soldered on the copper side'
       : `Not mirrored: ${[...smdPins].filter(([, n]) => n > 2).map(([r]) => r).slice(0, 4).join(', ')} would have reversed pins on the copper side, so the through-hole parts sit on the copper side too (leads not through the board)`);
     const thick = o.board_thick > 0 ? o.board_thick : Pcb.boardThickness();
@@ -307,7 +309,7 @@ const V = ${data};
       for (const t of traces) if (t.layer === layer && (skip === undefined || t.net !== skip)) for (let i = 1; i < t.pts.length; i++) pc.capsule(...t.pts[i - 1], ...t.pts[i], t.w / 2 + grow, v);
       for (const t of traces) if (t.layer === layer && t.pts.length === 1 && (skip === undefined || t.net !== skip)) pc.capsule(...t.pts[0], ...t.pts[0], t.w / 2 + grow, v);
       for (const p of pads) if (onL(p) && (skip === undefined || p.net !== skip)) pc.pad(p, grow, v);
-      for (const q of S.pcb.vias || []) if (skip === undefined || q.net !== skip) pc.capsule(q.x, q.y, q.x, q.y, q.d / 2 + grow, v);
+      for (const q of reserved || S.pcb.vias || []) if (skip === undefined || q.net !== skip) pc.capsule(q.x, q.y, q.x, q.y, q.d / 2 + grow, v);
       if (skip !== undefined) for (const h of S.pcb.holes || []) pc.capsule(h.x, h.y, h.x, h.y, h.d / 2 + grow, v);
     };
     for (const pr of (S.pcb.pours || []).filter(pr => pr.layer === layer && S.nets[pr.net])) {
@@ -318,7 +320,13 @@ const V = ${data};
       for (const k of Pcb.pourKeepouts(layer)) pc.poly(k.pts, 0);
     }
     copper(0, undefined, 1);
-    const Bd = new Uint8Array(G.N); painter(G, Bd).poly(outline, 1);
+    const Bd = new Uint8Array(G.N);
+    const stockCopper = painter(G,Bd);
+    if (reserved) {
+      const e=S.board.stock.copperInset;
+      stockCopper.poly([[e,e],[S.board.w-e,e],[S.board.w-e,S.board.h-e],[e,S.board.h-e]],1);
+      for (const h of S.board.stock.holes) stockCopper.capsule(h.x,h.y,h.x,h.y,h.d/2+e,0);
+    } else stockCopper.poly(outline,1);
 
     // ---- milling frame: lower-left of the board at 0,0, Y up, mirrored about the board centre, job origin ----
     const off = o.origin === 'board' ? 0 : o.cut_dia;
@@ -361,28 +369,46 @@ const V = ${data};
     const tag = (x, y, net) => { const k = node(x, y); if (k >= 0 && net && cuL.L[k]) { const gk = grownL.L[k]; if (!netOf.has(gk)) netOf.set(gk, new Set()); netOf.get(gk).add(net); } };
     for (const p of pads) if (onL(p)) tag(p.x, p.y, p.net);
     for (const t of traces) if (t.layer === layer) for (const q of t.pts) tag(q[0], q[1], t.net);
-    for (const s of netOf.values()) if (s.size > 1) warnings.push(`${[...s].slice(0, 4).join(' / ')}${s.size > 4 ? ' …' : ''}: copper closer than the ${o.iso_dia} mm V-bit — they stay shorted (wider clearance, a finer bit or a smaller iso_dia)`);
+    if (!reserved) for (const s of netOf.values()) if (s.size > 1) warnings.push(`${[...s].slice(0, 4).join(' / ')}${s.size > 4 ? ' …' : ''}: copper closer than the ${o.iso_dia} mm V-bit — they stay shorted (wider clearance, a finer bit or a smaller iso_dia)`);
     // check of the toolpaths themselves: the whole sheet is copper except where the grooves go. A narrower groove than
     // planned (a shallow spot) must still separate every net, a wider one (a worn bit, a low spot) must not cut a net in two
     const verify = width => {
       const M = Bd.slice(), pm = painter(G, M);
       for (const loops of rawPasses) for (const l of loops) for (let i = 0; i < l.length; i++) pm.capsule(...l[i], ...l[(i + 1) % l.length], width / 2, 0);
       for (const l of clearRaw) pm.capsule(...l[0], ...l[1], width / 2, 0);
-      const lab = label(G, k => M[k] === 1).L, byLab = new Map(), byNet = new Map();
-      const put = (x, y, net) => { const k = node(x, y); if (k < 0 || !net || !lab[k]) return; if (!byLab.has(lab[k])) byLab.set(lab[k], new Set()); byLab.get(lab[k]).add(net); if (!byNet.has(net)) byNet.set(net, new Set()); byNet.get(net).add(lab[k]); };
-      for (const p of pads) if (onL(p)) put(p.x, p.y, p.net);
-      for (const t of traces) if (t.layer === layer) for (const q of t.pts) put(q[0], q[1], t.net);
-      return { shorts: [...byLab.values()].filter(s => s.size > 1).map(s => [...s]), opens: [...byNet].filter(([, s]) => s.size > 1).map(([n]) => n) };
+      const lab = label(G, k => M[k] === 1).L, byLab = new Map(), byNet = new Map(), cut = [];
+      const put = (x,y,net,name=net) => {
+        const k = node(x,y), island = k >= 0 ? lab[k] : 0;
+        if (!net || !island) { if (reserved && net) cut.push(name); return island; }
+        if (!byLab.has(island)) byLab.set(island,new Set());
+        byLab.get(island).add(net);
+        if (!byNet.has(net)) byNet.set(net,new Set());
+        byNet.get(net).add(island);
+        return island;
+      };
+      for (const p of pads) if (onL(p) && (!reserved || !p.drill)) put(p.x,p.y,p.net || (reserved && Symbol(p.key)),p.key);
+      for (const t of traces) if (t.layer === layer) for (const q of t.pts) put(q[0],q[1],t.net);
+      const links = reserved?.map(v=>{
+        const island = put(v.x,v.y,v.label,v.name), ring = v.drill/2+.09;
+        for (let j=0;j<8;j++) {
+          const a=j*Math.PI/4, k=node(v.x+ring*Math.cos(a),v.y+ring*Math.sin(a));
+          if (k<0 || lab[k]!==island) { cut.push(v.name); break; }
+        }
+        return island;
+      });
+      return { shorts: [...byLab.values()].filter(s => s.size > 1).map(s => [...s]), opens: [...byNet].filter(([, s]) => s.size > 1).map(([n]) => n), byLab, links, cut };
     };
     const narrow = +(o.iso_dia * 0.6).toFixed(3), wideG = +(o.iso_dia * 1.5).toFixed(3), vN = verify(narrow), vW = verify(wideG);
-    for (const s of vN.shorts) warnings.push(`Toolpath check: with a ${narrow} mm groove (a shallow spot) ${s.slice(0, 4).join(' / ')} stay connected`);
-    if (vW.opens.length) warnings.push(`Toolpath check: with a ${wideG} mm groove (worn bit, low spot) ${vW.opens.slice(0, 6).join(', ')} would be cut in two — wider tracks`);
+    if (!reserved) {
+      for (const s of vN.shorts) warnings.push(`Toolpath check: with a ${narrow} mm groove (a shallow spot) ${s.slice(0, 4).join(' / ')} stay connected`);
+      if (vW.opens.length) warnings.push(`Toolpath check: with a ${wideG} mm groove (worn bit, low spot) ${vW.opens.slice(0, 6).join(', ')} would be cut in two — wider tracks`);
+    }
     const verified = { shorts_at_narrow_groove: vN.shorts.length, nets_cut_at_wide_groove: vW.opens.length, narrow_mm: narrow, wide_mm: wideG };
 
     // ---- holes: drilled per bit size; bigger than the end mill → milled in the cutout file ----
-    const holes = [...tht.map(p => ({ x: p.x, y: p.y, d: p.drill })), ...(S.pcb.vias || []).map(v => ({ x: v.x, y: v.y, d: v.drill })), ...(S.pcb.holes || []).map(h => ({ x: h.x, y: h.y, d: h.d }))]
+    const holes = [...(reserved || [...tht,...S.pcb.vias]).map(p => ({ x: p.x, y: p.y, d: p.drill })), ...(S.pcb.holes || []).map(h => ({ x: h.x, y: h.y, d: h.d }))]
       .map(h => ({ d: +h.d.toFixed(2), p: T([h.x, h.y]) }));
-    const millAt = o.cut_dia + 0.1, drilled = holes.filter(h => h.d < millAt), milled = holes.filter(h => h.d >= millAt);
+    const millAt = o.cut_dia + 0.1, drilled = reserved ? [] : holes.filter(h => h.d < millAt), milled = reserved ? [] : holes.filter(h => h.d >= millAt);
     // each hole gets the smallest bit that is not too small (0.05 mm tolerance); bigger than every bit → drilled with the
     // biggest, then widened with it in a small circle, in steps
     let bitSet = (Array.isArray(o.drill_bits) ? o.drill_bits : String(o.drill_bits).split(/[\s,;]+/)).map(Number).filter(b => b > 0).sort((a, b) => a - b);
@@ -496,8 +522,8 @@ const V = ${data};
       `<path d="${d(outline.map(T))}" fill="#b87333"/>`,
       ...passes.map((ls, k) => `<path d="${ls.map(d).join('')}" fill="none" stroke="${k ? '#7fb3ff' : '#2f7fff'}" stroke-width="${o.iso_dia}" stroke-linejoin="round" opacity="0.95"/>`),
       clearPaths.length ? `<path d="${clearPaths.map(l => 'M' + l.map(q => `${q[0].toFixed(3)} ${sy(q[1]).toFixed(3)}`).join('L')).join('')}" fill="none" stroke="#2f7fff" stroke-width="${o.iso_dia}" stroke-linecap="round" opacity="0.95"/>` : '',
-      `<path d="${d(cut)}" fill="none" stroke="#e5484d" stroke-width="${o.cut_dia}" opacity="0.35"/>`,
-      ...tabs.map(([a, b]) => { const m = (a + b) / 2; let i = s.findIndex(v => v >= m); i = Math.max(1, i); const t = (m - s[i - 1]) / ((s[i] - s[i - 1]) || 1), x = ring[i - 1][0] + t * (ring[i][0] - ring[i - 1][0]), y = ring[i - 1][1] + t * (ring[i][1] - ring[i - 1][1]); return `<circle cx="${x.toFixed(3)}" cy="${sy(y).toFixed(3)}" r="${(o.tab_width / 2).toFixed(2)}" fill="#ffd166"/>`; }),
+      reserved ? '' : `<path d="${d(cut)}" fill="none" stroke="#e5484d" stroke-width="${o.cut_dia}" opacity="0.35"/>`,
+      ...(reserved ? [] : tabs).map(([a, b]) => { const m = (a + b) / 2; let i = s.findIndex(v => v >= m); i = Math.max(1, i); const t = (m - s[i - 1]) / ((s[i] - s[i - 1]) || 1), x = ring[i - 1][0] + t * (ring[i][0] - ring[i - 1][0]), y = ring[i - 1][1] + t * (ring[i][1] - ring[i - 1][1]); return `<circle cx="${x.toFixed(3)}" cy="${sy(y).toFixed(3)}" r="${(o.tab_width / 2).toFixed(2)}" fill="#ffd166"/>`; }),
       ...holes.map(h => `<circle cx="${h.p[0].toFixed(3)}" cy="${sy(h.p[1]).toFixed(3)}" r="${(h.d / 2).toFixed(3)}" fill="#111"/>`),
       `<circle cx="0" cy="${top.toFixed(3)}" r="0.6" fill="#3ddc84"/><text x="0.9" y="${(top - 0.6).toFixed(3)}" font-size="1.6" fill="#3ddc84" font-family="sans-serif">X0 Y0</text>`,
       '</svg>'];
@@ -561,7 +587,82 @@ const V = ${data};
       'Open preview.svg to see the cuts: blue = isolation, red = cutout, yellow = tabs, green = X0 Y0.',
       'result-2d.svg = the finished board as milled (copper, grooves, holes); result-3d.html = the same in 3D (open it in a browser).',
       ...(warnings.length ? ['', 'WARNINGS:', ...warnings.map(w => '  - ' + w)] : []), ''].join('\n');
-    return { files, info };
+    return { files, info, ...(reserved ? {checks:[vN,vW]} : {}) };
+  }
+  function checkBlankSides(a,b) {
+    const parent = new Map(), labels = new Map(), islands = new Map();
+    const root = k => {
+      while (parent.has(k)) k=parent.get(k);
+      return k;
+    };
+    for (const [i,x] of a.links.entries()) {
+      if (!x || !b.links[i]) continue;
+      const p=root('F'+x), q=root('B'+b.links[i]);
+      if (p!==q) parent.set(p,q);
+    }
+    for (const [side,check] of [['F',a],['B',b]]) for (const [i,nets] of check.byLab) {
+      const k=root(side+i);
+      if (!labels.has(k)) labels.set(k,new Set());
+      for (const n of nets) {
+        labels.get(k).add(n);
+        if (!islands.has(n)) islands.set(n,new Set());
+        islands.get(n).add(k);
+      }
+    }
+    const name = n=>typeof n==='symbol' ? n.description : n;
+    const short = [...labels.values()].find(n=>n.size>1);
+    if (short) return 'Copper bridges '+[...short].map(name).join(' / ')+'.';
+    const open = [...islands].find(([,set])=>set.size>1);
+    if (open) return 'The milling paths would separate '+name(open[0])+'.';
+    const cut = a.cut[0] || b.cut[0];
+    return cut ? 'The cutter would remove copper needed at '+cut+'.' : '';
+  }
+
+  function stockJob(opts) {
+    const S=Model.S, blank=Pcb.stockCheck();
+    if ((S.pcb.lines || []).some(l=>l.layer==='F' || l.layer==='B') || S.pcb.traces.some(t=>!t.net)) {
+      throw new Error('Use named nets for copper on a PCB Blank. Free copper lines cannot be checked on both sides.');
+    }
+    const drc = Pcb.drc();
+    const failure = drc.violations.find(v=>v.severity==='error');
+    if (failure) throw new Error('Fix the PCB before milling. '+failure.msg);
+    const idx=Model.pinIndex(), pads=Pcb.placed().flatMap(c=>Pcb.padsOf(c,idx)).filter(p=>p.drill);
+    const same=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<.005;
+    const blankBarrels=[...blank.sites,...blank.header].map((point,i)=>{
+      const net=([...S.pcb.vias,...pads].find(p=>same(p,point)))?.net;
+      const name=point.pin ? 'breakout pin '+point.pin : 'factory via '+(i+1);
+      return {...point,net,label:net||Symbol(name),name};
+    });
+    const options={...opts,blankBarrels,origin:'board',parts_side:'',board_thick:blank.thickness};
+    const front=jobI({...options,layer:'F',mirror:false}), back=jobI({...options,layer:'B',mirror:true});
+    for (let i=0;i<front.checks.length;i++) {
+      const problem=checkBlankSides(front.checks[i],back.checks[i]);
+      if (problem) throw new Error('PCB Blank milling check failed. '+problem+' Check the clearance, bit width or placement.');
+    }
+    const files={
+      '1-top-isolation.nc':front.files['1_isolation.nc'],
+      '2-bottom-isolation-mirrored.nc':back.files['1_isolation.nc'],
+      'top-preview.svg':front.files['preview.svg'], 'bottom-preview.svg':back.files['preview.svg'],
+      'top-result.svg':front.files['result-2d.svg'], 'bottom-result.svg':back.files['result-2d.svg']
+    };
+    files['README-cnc.txt']=[
+      'PCB Blank '+blank.id+' · '+blank.w+' x '+blank.h+' mm',
+      'This job is for the matching plated blank with both faces exposed. It contains ONLY isolation milling.',
+      'Use the two factory registration holes in a fixture so the board can flip left to right around its Y axis.',
+      'Mill 1-top-isolation.nc with the top facing up. Flip left to right, keeping the registration edge in the same place.',
+      'Mill 2-bottom-isolation-mirrored.nc with the bottom facing up. On each face X0 Y0 is its lower-left corner, and Z0 is the copper surface.',
+      'Registration centers in machine mm for either face: '+blank.holes.map(p=>p.x+', '+(blank.h-p.y)+' (Ø '+p.d+')').join(' · '),
+      'Dry-run both files above the board. Check continuity and shorts before assembly.',
+      'Top and bottom previews show the cutter paths. The two-sided copper check passed at the simulated narrower and wider groove widths.'
+    ].join('\n');
+    return {files:{...files,'preview.svg':files['top-preview.svg'],'result-2d.svg':files['top-result.svg'],
+      'result-3d.html':front.files['result-3d.html']},
+      info:{...front.info,stock:true,layer:'both',drills:[],milled_holes:0,cutout:{passes:0,tabs:0},
+        files:Object.keys(files).filter(f=>f.endsWith('.nc')),
+        origin:'X0 Y0 = lower-left corner of each face, Z0 = copper surface',job_mm:front.info.board_mm,
+        toolpath_check:{...front.info.toolpath_check,two_sided:true,shorts_at_narrow_groove:0,nets_cut_at_wide_groove:0},
+        warnings:[...new Set([...front.info.warnings,...back.info.warnings])],
+        est_minutes:Math.ceil((front.info.isolation.length_mm+back.info.isolation.length_mm)/(+opts.iso_feed||DEF.iso_feed))}};
   }
   return { job, DEF };
 })();

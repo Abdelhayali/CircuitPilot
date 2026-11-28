@@ -457,7 +457,7 @@ const App = (() => {
     if (worker) worker.terminate();
     return new Promise((resolve, reject) => {
       routeReject = reject; routeResolve = resolve; routeBest = null;
-      worker = new Worker('js/route-worker.js?v=202611260004');
+      worker = new Worker('js/route-worker.js?v=202611280300');
       if (apply) { $('#routeBusy').classList.remove('hidden'); $('#routeMsg').textContent = place ? 'Placing…' : 'Routing…'; }
       worker.onmessage = e => {
         const m = e.data;
@@ -1906,6 +1906,7 @@ const App = (() => {
       $$('[data-cv]').forEach(b => b.classList.toggle('on', b.dataset.cv === cncView));
       const el = $('#cncPreview'); if (!cncLast) { el.innerHTML = ''; return; }
       const f = cncLast.files;
+      if (cncView === 'bottom' && f['bottom-preview.svg']) { el.innerHTML = f['bottom-preview.svg']; return; }
       if (cncView === 'r3d') { el.innerHTML = '<iframe class="cnc-3d" title="Milled board 3D"></iframe>'; el.firstChild.srcdoc = f['result-3d.html']; }
       else el.innerHTML = f[cncView === 'r2d' ? 'result-2d.svg' : 'preview.svg'];
     };
@@ -1916,7 +1917,14 @@ const App = (() => {
         try {
           const o = cncOpts(); try { localStorage.setItem('cp.cnc', JSON.stringify(o)); } catch (e) { }
           const r = Cnc.job(o), i = r.info; cncLast = r;
+          $('[data-cv=bottom]').hidden = !i.stock;
           cncShow();
+          if (i.stock) {
+            $('#cncInfo').innerHTML = '<b>PCB Blank · both sides</b> · ' + i.board_mm.join(' × ') +
+              ' mm · ' + i.isolation.v_bit_mm + ' mm groove · two-sided electrical check passed' +
+              '<div class="muted">The download contains top and mirrored bottom isolation jobs and a registration guide.</div>';
+            return;
+          }
           $('#cncInfo').innerHTML = `<b>parts on the ${i.mirrored ? 'bare side — milled mirrored' : 'copper side — not mirrored'}</b> · groove ${i.isolation.v_bit_mm} mm at ${i.isolation.depth_mm} mm · board ${i.board_mm.join(' × ')} mm · job ${i.job_mm.join(' × ')} mm · ${i.isolation.rings} isolation rings · ` +
             `${i.drills.map(d => `${d.holes}× ${d.bit_mm.toFixed(2)} mm`).join(', ') || 'no drilled holes'}${i.milled_holes ? ` · ${i.milled_holes} milled holes` : ''} · ${i.cutout.passes} cutout passes, ${i.cutout.tabs} tabs · ~${i.est_minutes} min` +
             (i.warnings.length ? '<ul class="warn" style="margin:4px 0 0 16px;padding:0">' + i.warnings.map(w => `<li>${esc(w)}</li>`).join('') + '</ul>' : '') +
@@ -1958,6 +1966,7 @@ const App = (() => {
     $('#cncDownload').onclick = () => {
       if (!cncLast) { cncRun(); return; }
       download(fname('-cnc.zip'), makeZip(cncLast.files));
+      if (cncLast.info.stock) { toast('Both isolation jobs saved. Open README-cnc.txt for the flip and registration instructions.'); return; }
       toast('G-code saved: run 1_isolation (V-bit), then each 2_drill file (change the bit, set only Z0 again), then 3_cutout — see README-cnc.txt', 12000);
     };
     $('#btnOrderPcb').onclick = orderPcb;

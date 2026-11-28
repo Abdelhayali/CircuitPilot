@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611280100">
+<link rel="stylesheet" href="styles.css?v=202611280300">
 </head>
 <body>
 <header id="top">
@@ -151,6 +151,7 @@
         <button id="btnFitP" title="F">Fit</button>
         <button id="btnGerber">Gerbers ⤓</button>
         <button id="btnCnc" title="G-code to mill this board on a desktop CNC (GRBL: CNC 3018 Pro …): V-bit isolation, drilling per bit size, cutout with tabs">CNC ⤓</button>
+        <button id="btnPcbBlanks" title="Order reusable plated blanks and map this PCB to one">PCB Blanks</button>
         <button id="btnUploadJlc" title="DRC check, then the Gerbers are uploaded to JLCPCB and the JLCPCB quote page opens with your board loaded — choose the options and order on the website (as in EasyEDA). Needs JLCPCB API keys (desktop); otherwise the files are saved and you add them on the quote page">Upload to JLCPCB ↗</button>
         <button id="btnOrderPcb" class="primary" title="DRC check, then the board is uploaded to JLCPCB and priced live (quantity, colour, finish, build time, shipping) — place the order from here and pay at JLCPCB. Without API keys: download the files and open the JLCPCB quote page">Order at JLCPCB ↗</button>
       </div>
@@ -597,7 +598,7 @@
       </fieldset>
     </div>
     <div id="cncInfo" style="font-size:12px;margin:6px 0"></div>
-    <div class="cnc-tabs"><button data-cv="paths" class="on">Toolpaths</button><button data-cv="r2d" title="The finished board as it comes off the machine: copper, the grooves, holes">Result 2D</button><button data-cv="r3d" title="The finished board in 3D (drag to turn)">Result 3D</button></div>
+    <div class="cnc-tabs"><button data-cv="paths" class="on">Toolpaths</button><button data-cv="bottom" hidden>Bottom toolpaths</button><button data-cv="r2d" title="The finished board as it comes off the machine: copper, the grooves, holes">Result 2D</button><button data-cv="r3d" title="The finished board in 3D (drag to turn)">Result 3D</button></div>
     <div id="cncPreview" class="cnc-preview"></div>
     <div class="row end">
       <button id="cncUpdate">Preview</button>
@@ -645,6 +646,23 @@
     <button id="advancedRouteDrc" hidden>Show DRC</button>
     <button id="advancedRouteDone" class="primary" hidden>Done</button>
   </div>
+</dialog>
+<dialog id="pcbBlanksDialog" class="bench-dialog pcb-blanks" aria-labelledby="blankTitle">
+  <header class="bench-head"><h2 id="blankTitle">PCB Blanks</h2><button id="blankClose" aria-label="Close PCB Blanks">✕</button></header>
+  <div class="bench-row">
+    <label>Board size <select id="blankSize"><option value="small">30 × 24 mm</option><option value="medium">50 × 35 mm</option><option value="large">70 × 45 mm</option></select></label>
+    <label><input id="blankUsb" type="checkbox"> USB-C breakout header</label>
+  </div>
+  <svg id="blankMap" role="img" aria-label="Fixed plated holes, header and registration holes"></svg>
+  <p id="blankSummary"></p>
+  <p class="bench-note">Order the bare, plated blank in bulk. For each design, map a copy to the matching template, route it, and export a two-sided CNC job.</p>
+  <label id="blankHeaderRow" hidden>Map header <select id="blankHeader"></select></label>
+  <p id="blankStatus" role="status"></p>
+  <div class="bench-row">
+    <button id="blankFab">Download factory files</button>
+    <button id="blankMapApply" class="primary">Map PCB to blank</button>
+  </div>
+  <p class="bench-note">Mapping replaces the board outline, routing rules and existing copper. Undo restores the previous PCB.</p>
 </dialog>
 <dialog id="benchDialog" class="bench-dialog" aria-labelledby="benchTitle">
   <header class="bench-head"><h2 id="benchTitle">Bench tools</h2><button id="benchClose" aria-label="Close bench tools">✕</button></header>
@@ -759,12 +777,12 @@
   </section>
 </dialog>
 
-<script src="js/model.js?v=202611252350"></script>
-<script src="js/schematic.js?v=202611170600"></script>
+<script src="js/model.js?v=202611280300"></script>
+<script src="js/schematic.js?v=202611280300"></script>
 <script src="js/strokefont.js?v=202610301800"></script>
-<script src="js/pcb.js?v=202611260004"></script>
-<script src="js/cnc.js?v=202611071200"></script>
-<script src="js/pcbview.js?v=202611252352"></script>
+<script src="js/pcb.js?v=202611280300"></script>
+<script src="js/cnc.js?v=202611280200"></script>
+<script src="js/pcbview.js?v=202611280300"></script>
 <script src="js/enclosure.js?v=202610301800"></script>
 <script src="js/shape3d.js?v=202611170400"></script>
 <script src="js/easyeda.js?v=202611252350"></script>
@@ -789,14 +807,15 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611280100"></script>
-<script src="js/app.js?v=202611280101"></script>
+<script src="js/welcome.js?v=202611280300"></script>
+<script src="js/app.js?v=202611280300"></script>
+<script src="js/pcb-blanks.js?v=202611280200"></script>
 <script src="js/design-sketch.js?v=202611280100"></script>
 <script src="js/bench-tools.js?v=202611271500"></script>
 <script src="js/bench-reverse.js?v=202611270001"></script>
 <script src="js/bench-bringup.js?v=202611271500"></script>
 <script src="js/bench-voice.js?v=202611271500"></script>
-<script src="js/advanced-route.js?v=202611272200"></script>
+<script src="js/advanced-route.js?v=202611280200"></script>
 <script src="js/update.js?v=202611251930"></script>
 <!-- Cloudflare Web Analytics: anonymous visit counts (no cookies, no personal data), only on the public website -->
 <script>

@@ -5,6 +5,7 @@
 - [Connect AI](#connect-ai)
 - [Schematic and component library](#schematic-and-component-library)
 - [PCB placement, routing, and checks](#pcb-placement-routing-and-checks)
+- [Draw for AI](#draw-for-ai)
 - [Bench tools](#bench-tools)
 - [Advanced Route on Windows](#advanced-route-on-windows)
 - [3D, fabrication, and documentation](#3d-fabrication-and-documentation)
@@ -45,6 +46,14 @@ In a local server session, **Knowledge** lets you attach a folder of requirement
 The PCB editor also supports copper pours and stitching vias, keep-outs, mounting holes, rotating silkscreen text, net highlighting, panel outlines with break-off tabs, and separate PCB layouts and rules within one project.
 
 Use the **Track** tool for interactive routing. Start from a pad, use right-click or **V** to change layers with a via, and use **Space** to change the routing angle. In Select mode, **R** rotates the selected footprint or silkscreen label. The selected side and the available actions appear in the PCB tool panel.
+
+## Draw for AI
+
+In the **PCB** or **Enclosure** tab, select **Draw for AI**. Draw with the mouse, a pen, or your finger. Use **Circle**, **Arrow**, **Box**, or **Pen**, then click **Attach marks** to add the drawing to your chat. Type what to change and send it in **Agent** mode.
+
+- In **PCB**, circle the part and draw an arrow from it to the destination. For overlapping parts, select the relevant copper side before drawing. You can also mark where a new part should go.
+- In **Enclosure**, orient the model until the surface or feature is visible, then circle it. Give the hole size and, for a Custom 3D hole, the cut depth. You can also circle an editable shape and ask to remove it.
+- The attachment includes the marked coordinates, part references, and surface details. Text-only models can use it. The drawing itself is a draft until you send an instruction. The normal Agent checkpoint can restore the project if you need to undo the edits.
 
 ## Advanced Route on Windows
 

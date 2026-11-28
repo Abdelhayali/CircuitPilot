@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CircuitPilot</title>
 <script>/* apply the saved theme before first paint */(function(){var m='light';try{m=localStorage.getItem('cp.theme')||'light'}catch(e){}var d=m==='system'?(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.setAttribute('data-theme',d);document.documentElement.setAttribute('data-theme-mode',m);})();</script>
-<link rel="stylesheet" href="styles.css?v=202611272300">
+<link rel="stylesheet" href="styles.css?v=202611280100">
 </head>
 <body>
 <header id="top">
@@ -105,6 +105,7 @@
         <button id="encOverhang" title="Overhangs as each part sits on the printer: red = steeper than 45° (needs supports on FDM / SLA), orange = 30–45°">Overhangs</button>
         <button id="encSection" title="Cut the model in half to see the inside: wall thickness, lid lip, how the board and battery fit">Section</button>
         <button id="encDesign" title="Design by hand, Tinkercad style: add boxes, cylinders, text, connector holes, screw bosses …, move / turn / resize them, make shapes holes, group them to merge (solids join, holes cut)">✎ Design</button>
+        <button id="encSketch" aria-pressed="false" title="Mark places and surfaces for the copilot">Draw for AI</button>
         <button id="encCheck" class="primary" title="Check the design for printing: walls, knife edges, slits, lid fit, openings and part size against the process (Properties → Print process); click a finding to go there">✓ Check</button>
         <button id="encRender" title="Picture of the finished design: 4 views, angled, exploded, cut in half — save it as PNG">📷 Render</button>
         <span class="tsep"></span>
@@ -123,6 +124,7 @@
       </div>
       <div id="pcbTools" class="tools hidden">
         <button id="btn3d" title="Switch between the 2D editor and a 3D view of the board">◈ 3D</button>
+        <button id="pcbSketch" aria-pressed="false" title="Circle parts and draw movement arrows for the copilot">Draw for AI</button>
         <button id="btnGen" class="primary">Generate PCB</button>
         <button id="btnSync" title="Auto-place new parts inside the existing PCB outline and remove outdated copper. Use Route to connect the updated layout.">⟳ Update from schematic</button>
         <div class="dd"><button id="btnPlace" title="Place the parts on the board">Auto-place ▾</button>
@@ -159,6 +161,19 @@
       <div id="encView" class="hidden"></div>
       <div id="docView" class="hidden"></div>
       <div id="pcb3dView" class="hidden"></div>
+      <svg id="designSketchInk" class="design-sketch-ink hidden" aria-hidden="true"></svg>
+      <section id="designSketchBar" class="design-sketch-bar hidden" aria-label="Draw for AI">
+        <div class="bench-row" role="group" aria-label="Drawing tool">
+          <button data-sketch="circle" aria-pressed="true">Circle</button>
+          <button data-sketch="arrow" aria-pressed="false">Arrow</button>
+          <button data-sketch="box" aria-pressed="false">Box</button>
+          <button data-sketch="pen" aria-pressed="false">Pen</button>
+          <button id="sketchUndo" disabled>Undo mark</button>
+          <button id="sketchAttach" class="primary" disabled>Attach marks</button>
+          <button id="sketchClose" aria-label="Close drawing mode">✕</button>
+        </div>
+        <p id="designSketchStatus" role="status"></p>
+      </section>
       <div id="routeBusy" class="hidden"><span class="spin"></span> <span id="routeMsg">Routing…</span> <button id="routeCancel" title="Stop now and keep the best result found so far">Stop</button></div>
     </div>
     <div id="status"></div>
@@ -758,14 +773,14 @@
 <script src="js/kicad.js?v=202610301800"></script>
 <script src="js/easyedapro.js?v=202610301800"></script>
 <script src="js/kicadimport.js?v=202611191520"></script>
-<script src="js/encview.js?v=202611231500"></script>
+<script src="js/encview.js?v=202611280100"></script>
 <script src="js/encdesign.js?v=202610301800"></script>
 <script src="js/docview.js?v=202610301800"></script>
 <script src="js/pcb3d.js?v=202611272300"></script>
 <script src="js/blocks.js?v=202610301800"></script>
 <script src="js/firmware.js?v=202611161300"></script>
-<script src="js/engine.js?v=202611252353"></script>
-<script src="js/ai.js?v=202611270001"></script>
+<script src="js/engine.js?v=202611280100"></script>
+<script src="js/ai.js?v=202611280100"></script>
 <script src="js/exports.js?v=202611111200"></script>
 <script src="js/pcbpdf.js?v=202611111200"></script>
 <script src="js/folder.js?v=202611231900"></script>
@@ -774,8 +789,9 @@
 <script src="js/editor.js?v=202610301800"></script>
 <script src="js/jlcorder.js?v=202611231400"></script>
 <script src="js/github.js?v=202611232100"></script>
-<script src="js/welcome.js?v=202611272300"></script>
-<script src="js/app.js?v=202611272200"></script>
+<script src="js/welcome.js?v=202611280100"></script>
+<script src="js/app.js?v=202611280100"></script>
+<script src="js/design-sketch.js?v=202611280100"></script>
 <script src="js/bench-tools.js?v=202611271500"></script>
 <script src="js/bench-reverse.js?v=202611270001"></script>
 <script src="js/bench-bringup.js?v=202611271500"></script>

@@ -292,7 +292,7 @@ const EncView = (() => {
   let spinLast = 0;
   function spinLoop(now) {
     if (!ui.spin) return;
-    if (now && spinLast && active && !ui.dragging && !document.hidden) { cam.th += Math.min(0.05, (now - spinLast) / 1000) * 0.35; draw(); }
+    if (now && spinLast && active && !ui.dragging && !ui.sketching && !document.hidden) { cam.th += Math.min(0.05, (now - spinLast) / 1000) * 0.35; draw(); }
     spinLast = now || 0; requestAnimationFrame(spinLoop);
   }
   // how far the board lifts out: just clear of the base walls (box) / half the covers' lift (custom)
@@ -891,6 +891,59 @@ const EncView = (() => {
     return Shape3D.exportPack(r, { base, service: 'all', process: Enclosure.params().process, script: Enclosure.script(), shapes: Enclosure.params().shapes, pcb: scriptCtx().pcb }).files;
   }
   // the scene for the Design editor (encdesign.js)
+  function sketchFrame() {
+    return ui.built && root && renderer && JSON.stringify([root.uuid,cam,explodeT(),ui.lid,ui.xray,ui.section,ui.sectionAt]);
+  }
+
+  function sketchSurface(x, y, extent) {
+    const T = window.THREE;
+    if (!sketchFrame()) return null;
+    const r = renderer.domElement.getBoundingClientRect();
+    if (!r.width || !r.height || x<r.left || x>r.right || y<r.top || y>r.bottom) return null;
+    const ray = (x,y) => {
+      const caster = new T.Raycaster();
+      caster.setFromCamera(new T.Vector2((x-r.left)/r.width*2-1,1-(y-r.top)/r.height*2),camera);
+      return caster;
+    };
+    const solids = (ui.built.custom ? meshes.parts : [meshes.base, meshes.lid])
+      .filter(m=>m?.visible && (!ui.built.custom || m.userData.kind === 'print'));
+    const hit = ray(x,y).intersectObjects(solids,false).find(h=>!ui.section || clipPlane().distanceToPoint(h.point) >= -1e-6);
+    if (!hit?.face) return null;
+    const m = hit.object, normal = hit.face.normal.clone().normalize();
+    const p = m.worldToLocal(hit.point.clone()), n = normal.clone().applyMatrix3(new T.Matrix3().getNormalMatrix(m.matrixWorld)).normalize();
+    const plane = new T.Plane().setFromNormalAndCoplanarPoint(n,hit.point);
+    const edge = (x,y) => ray(x,y).ray.intersectPlane(plane,new T.Vector3());
+    const [x0,y0,x1,y1] = extent;
+    const a = edge(x0,y), b = edge(x1,y), c = edge(x,y0), d = edge(x,y1);
+    const dim = (a,b) => a && b ? a.distanceTo(b) : null;
+    const round = n=>+n.toFixed(2);
+    const w = dim(a,b), h = dim(c,d);
+    const faceSize = [w,h].every(n=>Number.isFinite(n) && n <= 300) ? [round(w),round(h)] : undefined;
+    const detail = {part:ui.built.custom ? m.userData.name : m === meshes.lid ? 'lid' : 'base',
+      point:p.toArray().map(round), normal:normal.toArray().map(round), span_mm:faceSize};
+    if (ui.built.custom) {
+      if (m.userData.design) {
+        const shapes = Enclosure.params().shapes;
+        const candidates = shapes.map((s,index)=>({s,index})).filter(({s})=>!s.hole && !s.hidden &&
+          String(s.name || s.type).replace(/[^\w.-]+/g,'_') === m.userData.name);
+        if (candidates.length === 1) {
+          detail.shape_index = candidates[0].index;
+          detail.shape_name = candidates[0].s.name || candidates[0].s.type;
+        }
+      }
+      return detail;
+    }
+    const L = ui.built.L, [bx0,by0,bx1,by1] = L.bbox;
+    if (Math.abs(normal.z) > .9) {
+      const side = m === meshes.lid ? 'lid' : p.z <= L.P.floor + .05 ? 'floor' : null;
+      if (side) detail.cutout = {side,x:round(p.x),y:round(p.y)};
+    } else if (m === meshes.base) {
+      if (Math.abs(normal.x) > .9) detail.cutout = {side:p.x < (bx0+bx1)/2 ? 'left' : 'right',u:round(p.y-(by0+by1)/2),z:round(p.z)};
+      if (Math.abs(normal.y) > .9) detail.cutout = {side:p.y < (by0+by1)/2 ? 'front' : 'back',u:round(p.x-(bx0+bx1)/2),z:round(p.z)};
+    }
+    return detail;
+  }
+
   const _v = () => ({ scene, root, camera, renderer, cam, wrap, ui, meshes, draw, active: () => active });
-  return { _v, init, show, hide, props, ui, rebuild: () => rebuild(true), invalidate: () => { dirty = true; }, runScript, snapshot, renderDialog, exportFiles };
+  return { _v, init, show, hide, props, ui, sketchFrame, sketchSurface, freezeSketch: on=>{ ui.sketching=on; if (on) stopTween(); }, rebuild: () => rebuild(true), invalidate: () => { dirty = true; }, runScript, snapshot, renderDialog, exportFiles };
 })();

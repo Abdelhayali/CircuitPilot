@@ -8,6 +8,9 @@ const Welcome = (() => {
 
   // ---------- what changed, newest first ----------
   const CHANGELOG = [
+    { v: '2026.11.28', date: '2026-11-28', items: [
+      'Draw for AI lets you mark PCB placement changes and enclosure surfaces, then attach your drawing to a copilot request',
+    ] },
     { v: '2026.11.27', date: '2026-11-27', items: [
       'PCB 3D view adds X-ray, exploded layers, and an adjustable cross-section with individual layer visibility',
       'Advanced Route shows progress and completed connections, and tries the built-in router on nets it could not finish',

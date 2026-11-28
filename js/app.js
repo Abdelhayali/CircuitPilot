@@ -20,6 +20,7 @@ const App = (() => {
 
   // ---------- views ----------
   function showView(v) {
+    DesignSketch.viewChanged(v);
     view = v;
     $$('.tab').forEach(b => b.classList.toggle('active', b.dataset.view === v));
     $('#schSvg').classList.toggle('hidden', v !== 'sch'); $('#pcbSvg').classList.toggle('hidden', v !== 'pcb'); $('#encView').classList.toggle('hidden', v !== 'enc'); $('#docView').classList.toggle('hidden', v !== 'doc');
@@ -949,11 +950,19 @@ const App = (() => {
     const typed = text === undefined;
     text = (text ?? $('#prompt').value).trim();
     if (running) {   // the AI is working: the message waits and goes in before its next step
+      if (typed && pendingFiles.some(f=>f.sketchView)) { toast('Send the drawing after the current task finishes.'); return; }
       if (typed && text) { AI.queueMessage(text); $('#prompt').value = ''; setRunning(true); renderChat(); }
       return;
     }
     if (typed && pendingFiles.some(f => f.busy)) { toast('Still reading the attached files…'); return; }
-    const files = typed ? pendingFiles.filter(f => !f.error).map(({ busy, size, warn, error, ...f }) => f) : [];
+    if (typed && pendingFiles.some(f=>f.sketchGuard && !f.sketchGuard())) {
+      pendingFiles = pendingFiles.filter(f=>!f.sketchGuard || f.sketchGuard());
+      renderAttach();
+      toast('The marked design changed. Draw the marks again before sending.');
+      return;
+    }
+    if (typed && !text && pendingFiles.some(f=>f.sketchView)) { toast('Type what you want the copilot to change.'); return; }
+    const files = typed ? pendingFiles.filter(f => !f.error).map(({ busy, size, warn, error, sketchGuard, ...f }) => f) : [];
     if (!text && !files.length) return;
     if (!AI.modelReady()) { openSetup(); return; }   // keeps the typed text in the box
     if (!text) text = 'Please look at the attached file' + (files.length > 1 ? 's.' : '.');
@@ -1759,7 +1768,7 @@ const App = (() => {
     Engine.env.saveFiles = (files, name) => download(name, makeZip(files));
     Engine.env.ui = what => { if (what === 'fit-sch') Sch.fit(); if (what === 'show-pcb') { showView('pcb'); Pcb.fit(); } if (what === 'show-enc') { showView('enc'); EncView.rebuild(); } if (what === 'show-doc') showView('doc'); };
     EncView.init(); Pcb3D.init(); DocView.init();
-    $('#btn3d').onclick = () => { const on = !Pcb3D.ui.on; PcbView.setVisible(!on); Pcb3D.setOn(on); };
+    $('#btn3d').onclick = () => { DesignSketch.close(); const on = !Pcb3D.ui.on; PcbView.setVisible(!on); Pcb3D.setOn(on); };
     initKnowledge();
     Projects.init().then(() => { renderParts(); if (typeof Cloud !== 'undefined') Cloud.init(); });
     Folder.init();
@@ -2403,6 +2412,12 @@ const App = (() => {
       e.preventDefault();
     });
   }
-  return { orderWebsite, init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download, openProjectData, routeCandidate: (state,opt,progress) => runRouter({state,opt,progress,apply:false}), exportProject: () => exportAs('json') };
+  function attachSketch(file) {
+    pendingFiles = [...pendingFiles.filter(f=>f.sketchView !== file.sketchView),file];
+    renderAttach();
+    $('#prompt').focus();
+  }
+
+  return { orderWebsite, init, toast, showView, renderAll, placeLibPart, placeDbPart, placeBuiltin, refreshParts: () => renderParts(), download, openProjectData, attachSketch, routeCandidate: (state,opt,progress) => runRouter({state,opt,progress,apply:false}), exportProject: () => exportAs('json') };
 })();
 window.addEventListener('DOMContentLoaded', App.init);

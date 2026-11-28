@@ -598,7 +598,9 @@ Use refs and pin names exactly as they will be used with the tools. End by telli
   const isLite = model => settings.compactTools === true || (settings.compactTools !== false && /circuitpilot-|pcbgo|cp-?\d+b/i.test(String((model && (model.model || model.id)) || '')));
   async function run(text, mode, hooks) {
     const model = currentModel(), lite = isLite(model);
-    const tools = (lite ? Engine.LITE.tools() : TOOLS).filter(t => (mode === 'agent' || t.ro) && (settings.webAccess || !t.web));
+    const enclosureSketch = hooks.files?.some(f=>f.sketchView === 'enc');
+    const tools = (lite ? [...Engine.LITE.tools(), ...(enclosureSketch ? Engine.LITE.enclosureSketchTools() : [])] : TOOLS)
+      .filter(t => (mode === 'agent' || t.ro) && (settings.webAccess || !t.web));
     history.push(Object.assign({ role: 'user', text, mode, checkpoint: hooks.checkpoint }, hooks.files && hooks.files.length ? { files: hooks.files } : {}));
     if (settings.includeContext) history[history.length - 1].ctx = designContext();   // the design as it is now, kept with this message (prompt cache, below)
     persist();

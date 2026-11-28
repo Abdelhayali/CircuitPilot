@@ -3,6 +3,12 @@
 const App = (() => {
   const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
   let view = 'sch', mode = 'agent', running = false, lastError = null;
+  const mobile = () => matchMedia('(max-width: 800px)').matches;
+  function setPanel(panel) {
+    document.body.dataset.mpanel = panel;
+    $$('#mobNav [data-mp]').forEach(b => b.classList.toggle('on', b.dataset.mp === panel));
+    window.dispatchEvent(new Event('resize'));
+  }
 
   function toast(msg, ms = 3200) {
     // ✕ (or a click on the message) closes it; the pointer over it keeps it open
@@ -1793,8 +1799,6 @@ const App = (() => {
     };
     $$('.tab').forEach(b => b.onclick = () => showView(b.dataset.view));
     // phones: one panel at a time (Parts / Design / AI Copilot), switched from the bar at the bottom
-    const mobile = () => matchMedia('(max-width: 800px)').matches;
-    const setPanel = p => { document.body.dataset.mpanel = p; $$('#mobNav [data-mp]').forEach(b => b.classList.toggle('on', b.dataset.mp === p)); window.dispatchEvent(new Event('resize')); };
     document.body.dataset.mpanel = 'editor';
     $$('#mobNav [data-mp]').forEach(b => b.onclick = () => setPanel(b.dataset.mp));
     // picking a part on a phone goes straight to the drawing to place it
@@ -2415,6 +2419,7 @@ const App = (() => {
   function attachSketch(file) {
     pendingFiles = [...pendingFiles.filter(f=>f.sketchView !== file.sketchView),file];
     renderAttach();
+    if (mobile()) setPanel('ai');
     $('#prompt').focus();
   }
 
